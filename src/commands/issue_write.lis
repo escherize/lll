@@ -353,8 +353,13 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   if p.given("--json") { return print_issue_after(ctx, key) }
   fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
+  // Already claimed (by the caller, or the write would have been refused):
+  // the hint would be wrong.
   if self_assigned {
-    fmt.Println(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
+    let held = fetch_claim(ctx, issue.id)?
+    if held.is_none() {
+      fmt.Println(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
+    }
   }
   Ok(())
 }

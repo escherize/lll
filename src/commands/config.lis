@@ -103,7 +103,7 @@ fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     return Ok(())
   }
-  Err(pb.failed(f"cannot set '{key}'; supported keys: url, web_url"))
+  Err(flags.usage_error(f"cannot set '{key}'; supported keys: url, web_url"))
 }
 
 /// Set a repo-level key in the repo's .lll.toml — the one already in play,

@@ -47,7 +47,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   create -k` or `--confidence`, `project --status`, a `team set-accent`
   colour, a `webhook add` URL, `login --url`, `--web-url` and `config set`
   URLs, `issue comment` numbers, `up --bind 0.0.0.0`, `member create
-  --password ""`, and `member access --read-only --read-write`.
+  --password ""`, and `member access --read-only --read-write`; `config set`
+  of an unknown key; two `member access` team selectors at once; `login
+  --token` with `--email`, or with an empty token; a malformed team key on
+  `team create` or `team rename`; a malformed doc slug; a label or project
+  name with a comma; `lll api METHOD` without a PATH (it printed help and
+  exited 0).
 - `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
 
 ## [1.0.0] - 2026-10-08

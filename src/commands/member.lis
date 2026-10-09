@@ -594,7 +594,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let given = [p.given("--team"), p.given("--all-teams"), p.given("--no-teams"), edit_teams].filter(|g| g)
   if given.length() > 1 {
-    return Err(pb.failed("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team"))
+    return Err(flags.usage_error("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team"))
   }
   if p.given("--read-only") && p.given("--read-write") {
     return Err(flags.usage_error("give --read-only or --read-write, not both"))

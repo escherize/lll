@@ -123,7 +123,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   let mut input = bufio.NewReader(os.Stdin)
   if p.given("--token") {
     if p.given("--email") || p.given("--password") || p.given("--create") {
-      return Err(pb.failed("--token logs in with a member token: drop --email, --password and --create"))
+      return Err(flags.usage_error("--token logs in with a member token: drop --email, --password and --create"))
     }
     let raw = p.one("--token")
     let given = if raw == "-" { read_password(input, "Token: ")? } else { raw }
@@ -253,7 +253,7 @@ would put a second account on that address. --create makes YOUR login: pass
 /// superuser token, a revoked one or a typo stops here instead of being saved.
 fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), pb.CliError> {
   if tok == "" {
-    return Err(pb.failed("--token needs a member token: paste it after --token, or pass --token - and pipe it in"))
+    return Err(flags.usage_error("--token needs a member token: paste it after --token, or pass --token - and pipe it in"))
   }
   let body = match ctx.get_as("/api/lll/access", tok) {
     Ok(b) => b,

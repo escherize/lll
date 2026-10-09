@@ -128,15 +128,16 @@ fn check_confidence_defaults_to_confirmed_and_refuses_refuted() {
   assert msg.message.contains("unknown confidence")
 }
 
+/// LLL-641: both verbs that file a finding take --confidence, and finding
+/// create's -k help does not claim wiki is its default.
 #[test]
-fn only_finding_new_offers_the_confidence_flag() {
-  // doc new keeps today's semantics: everything it writes is asserted. The
-  // flag is a finding-creation concern, so it lives on the finding spec.
+fn both_finding_creators_offer_the_confidence_flag() {
   let finding_spec = finding_new_spec()
   let assert Some(confidence) = finding_spec.find(|f| f.name == "--confidence")
   assert confidence.hint.contains("suspected")
-  let doc_spec = doc_new_spec()
-  assert doc_spec.find(|f| f.name == "--confidence").is_none()
+  assert doc_new_spec().find(|f| f.name == "--confidence").is_some()
+  let assert Some(kind) = finding_spec.find(|f| f.name == "-k")
+  assert !kind.help.contains("wiki (default)")
 }
 
 /// The 1.0 fleet: list and near tag every finding, confirmed included; an

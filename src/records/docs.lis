@@ -32,9 +32,9 @@ pub fn fetch_team_docs(
 /// as bare words in grep.
 pub fn check_slug(val: string) -> Result<string, pb.CliError> {
   let slug = strings.TrimSpace(val)
-  if slug == "" { return Err(pb.failed("slug cannot be empty (e.g. port-notes)")) }
+  if slug == "" { return Err(pb.fail(pb.ErrorKind.Usage, "slug cannot be empty (e.g. port-notes)")) }
   if slug.length() > 80 {
-    return Err(pb.failed(f"slug must be at most 80 characters, got {slug.length()}"))
+    return Err(pb.fail(pb.ErrorKind.Usage, f"slug must be at most 80 characters, got {slug.length()}"))
   }
   let shaped = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
   let matched = match regexp.MatchString(shaped, slug) {
@@ -43,7 +43,7 @@ pub fn check_slug(val: string) -> Result<string, pb.CliError> {
   }
   if !matched {
     return Err(
-      pb.failed(f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)"),
+      pb.fail(pb.ErrorKind.Usage, f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)"),
     )
   }
   Ok(slug)
