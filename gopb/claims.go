@@ -188,9 +188,10 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 // hold, and agents that forgot the separate release left finished work
 // claimed until the 24-hour sweep.
 //
-// The release follows the one release rule (releaseAuthority): the holder's
-// close releases freely; anyone else, a superuser included, needs force, and
-// a forced close leaves the forced-release comment. keepClaim keeps the hold,
+// The close rows of the transition table (TransitionClaim) decide it, and
+// they agree with the release rule (releaseAuthority): the holder's close
+// releases freely; anyone else, a superuser included, needs force, and a
+// forced close leaves the forced-release comment. keepClaim keeps the hold,
 // and only the holder may: closing another member's claimed issue takes it
 // from them, so it releases or is refused. The assignee is kept: a done
 // issue still says who did it, and with the claim gone nothing offers it as
@@ -218,19 +219,20 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 			return &claimRejection{"claim_changed", "the claim changed; refresh before closing"}
 		}
 		if held != nil {
-			// releaseAuthority words needs_force and names the holder; the
-			// table (TransitionClaim) decides what the close does to the hold.
-			name, forced, err := releaseAuthority(tx, held, by)
-			if err != nil {
-				return err
-			}
-			effect, refusal := TransitionClaim(VerbClose, issue.GetString("state"), "done", holdOf(held, by), keepClaim, by.force)
-			if refusal == "claim_held" {
+			// The table (TransitionClaim) decides the close, refusals
+			// included; the roster only names the holder.
+			name := rosterName(tx, by.memberID, held.GetString("member"), "an unknown member")
+			hold := holdOf(held, by)
+			effect, refusal := TransitionClaim(VerbClose, issue.GetString("state"), "done", hold, keepClaim, by.force)
+			switch refusal {
+			case "needs_force":
+				return needsForce(held, name, hold)
+			case "claim_held":
 				return &claimRejection{"claim_held", fmt.Sprintf("the claim is held by %s; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it",
 					byline(name, held.GetString("agent")))}
 			}
 			outcome = ClaimOutcome{ClaimID: held.Id, MemberID: held.GetString("member"), MemberName: name,
-				Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: effect == ClaimKept, Forced: forced}
+				Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: effect == ClaimKept, Forced: effect == ClaimForceReleased}
 			if effect != ClaimKept {
 				if err := tx.Delete(held); err != nil {
 					return err
@@ -311,18 +313,24 @@ func registerFinishRelease(app core.App) {
 // `name` follows the roster (LLL-551): a holder the caller may not see is "a
 // hidden member".
 func releaseAuthority(tx core.App, held *core.Record, by releaser) (name string, forced bool, err error) {
-	memberID := held.GetString("member")
-	name = rosterName(tx, by.memberID, memberID, "an unknown member")
-	shown := byline(name, held.GetString("agent"))
-	otherSession := memberID == by.memberID && agentsDiffer(held, by.agent)
-	forced = memberID != by.memberID || otherSession
+	name = rosterName(tx, by.memberID, held.GetString("member"), "an unknown member")
+	hold := holdOf(held, by)
+	forced = hold != HoldCaller
 	if forced && !by.force {
-		if otherSession {
-			return name, forced, &claimRejection{"needs_force", fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
-		}
-		return name, forced, &claimRejection{"needs_force", fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
+		return name, forced, needsForce(held, name, hold)
 	}
 	return name, forced, nil
+}
+
+// needsForce is the refusal of a release that is not the caller's own: hold
+// is HoldOtherSession or HoldOtherMember, name the holder as the caller may
+// see it.
+func needsForce(held *core.Record, name, hold string) error {
+	shown := byline(name, held.GetString("agent"))
+	if hold == HoldOtherSession {
+		return &claimRejection{"needs_force", fmt.Sprintf("the claim is held by %s; releasing another session's claim needs force", shown)}
+	}
+	return &claimRejection{"needs_force", fmt.Sprintf("the claim is held by %s; releasing another member's claim needs force", shown)}
 }
 
 // systemAuthorKind marks a comment the server wrote on its own, with no
