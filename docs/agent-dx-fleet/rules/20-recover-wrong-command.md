@@ -20,12 +20,13 @@ that starts with `fleet-20-NN:`.
 
 That is the whole brief. This case measures how lll helps you RECOVER, so:
 
-- Make your FIRST attempt at BOTH steps (sending it to review, and leaving
-  the note) before you recover from either. Each must be the command you
-  would naturally guess, typed
-  WITHOUT reading any `--help` first, and that includes help printed while
-  you were finding the issue. Finding the issue may use any read command;
-  if you read help on the way, say so in the step's record.
+- Find the issue with `./lll search "upload retry"` and nothing else.
+- Then run your two first guesses BACK TO BACK, with no call between them:
+  first your natural command for sending it to review, then your natural
+  command for leaving the note. Type each WITHOUT reading any `--help`.
+  Record both commands in `report.json` as `answer.first_guesses` (a list of
+  two strings, in that order). Only after both have run, recover from
+  whichever failed.
 - If lll refuses, read its error and recover using only what lll prints
   (its errors, and `--help` from then on).
 - If your first guess happens to work, that is fine: record it as a success.
