@@ -530,10 +530,23 @@ fn issue_synonym(verb: string) -> Option<string> {
       f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'",
     )
   }
+  // 'lll issue FLEET-4 review': the key where the verb goes (case 20).
+  if records.split_issue_key(verb).is_ok() {
+    return Some(
+      f"unknown issue command: '{verb}' is an issue ID; put the verb first: 'lll issue view {verb}' or 'lll issue update {verb} --state in-review'",
+    )
+  }
+  let Some(hint) = issue_verb_hint(verb) else { return None }
+  Some(f"unknown issue command: '{verb}'; {hint} (see 'lll issue -h')")
+}
+
+/// The right spelling for a word that is no issue verb; main's top-level
+/// unknown command asks the same table ('lll send KEY', case 20).
+pub fn issue_verb_hint(verb: string) -> Option<string> {
   let hint = match verb {
     "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
     "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",
-    "move" | "transition" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state s'",
+    "move" | "transition" | "send" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)",
     "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
     "get" => "'lll issue view KEY-123'",
     "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
@@ -546,7 +559,7 @@ fn issue_synonym(verb: string) -> Option<string> {
     _ => "",
   }
   if hint == "" { return None }
-  Some(f"unknown issue command: '{verb}'; {hint} (see 'lll issue -h')")
+  Some(hint)
 }
 
 /// Every issue verb, as a value. `page` is the hand-written help `issue

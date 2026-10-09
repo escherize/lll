@@ -687,3 +687,10 @@ fn note_and_review_point_at_comment_and_in_review() {
   let assert Some(review) = issue_synonym("review")
   assert review.contains("--state in-review")
 }
+
+/// 1.0 fleet case 20, run 3: a key in the verb slot names the verb-first form.
+#[test]
+fn a_key_where_the_verb_goes_names_the_verb_first_form() {
+  let assert Some(hint) = issue_synonym("FLEET-4")
+  assert hint.contains("put the verb first: 'lll issue view FLEET-4'")
+}

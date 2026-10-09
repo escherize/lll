@@ -33,3 +33,11 @@ fn an_issue_alias_or_key_as_the_command_names_the_issue_verb() {
   assert unknown_command("FLEET-4", "").contains("is an issue ID; to see it use 'lll issue view FLEET-4'")
   assert unknown_command("frobnicate", "") == "unknown command: 'frobnicate' (see 'lll --help')"
 }
+
+/// 1.0 fleet case 20, run 3: 'lll send KEY' and 'lll note KEY' ask the issue
+/// verb hint table too.
+#[test]
+fn an_issue_synonym_as_the_command_names_the_issue_form() {
+  assert unknown_command("send", "FLEET-4").contains("--state in-review")
+  assert unknown_command("note", "FLEET-4").contains("lll issue comment KEY-123")
+}

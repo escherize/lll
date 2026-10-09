@@ -283,5 +283,8 @@ fn unknown_command(noun: string, verb: string) -> string {
       return f"unknown command: '{noun}'; it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
     }
   }
+  if let Some(hint) = commands.issue_verb_hint(noun) {
+    return f"unknown command: '{noun}'; {hint} (see 'lll issue -h')"
+  }
   f"unknown command: '{noun}' (see 'lll --help')"
 }
