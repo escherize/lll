@@ -11,6 +11,7 @@ import "config"
 import "flags"
 import "models"
 import "pb"
+import "secret"
 
 // `lll login` / `lll logout` (TASK-183) — the human entry point for auth.
 // A human authenticates with email + password through PocketBase's own
@@ -125,9 +126,9 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     if p.given("--email") || p.given("--password") || p.given("--create") {
       return Err(flags.usage_error("--token logs in with a member token: drop --email, --password and --create"))
     }
-    let raw = p.one("--token")
-    let given = if raw == "-" { read_password(input, "Token: ")? } else { raw }
-    let tok = strings.TrimSpace(given)
+    let given = secret.Secret.read(p, "--token", "Token: ", input)?
+    // Revealed once: the token is sent to the server and saved to the config.
+    let tok = strings.TrimSpace(given.reveal())
     // The rest of a --url login talks to that server: --url is a flag
     // override of the configured one for this command.
     let ctx = if target != "" { ctx.with_url(target) } else { ctx }
@@ -161,12 +162,8 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   } else {
     f"Password for {email}: "
   }
-  let password = if p.given("--password") {
-    password_value(p.one("--password"), "--password", prompt, input)?
-  } else {
-    read_password(input, prompt)?
-  }
-  if password == "" {
+  let password = secret.Secret.read(p, "--password", prompt, input)?
+  if password.is_empty() {
     let whose = if p.given("--create") {
       f"no password: --create needs one to give {email}"
     } else {
@@ -214,7 +211,7 @@ would put a second account on that address. --create makes YOUR login: pass
   }
 
   let payload = match json.Marshal(
-    models.AuthRequest { identity: email, password },
+    models.AuthRequest { identity: email, password: password.reveal() },
   ) {
     Ok(b) => b,
     Err(e) => return Err(pb.failed(f"encoding credentials: {e}")),
@@ -447,7 +444,7 @@ fn create_for_login(
   ctx: pb.Client,
   name: string,
   email: string,
-  password: string,
+  password: secret.Secret,
   base: string,
   admin: AdminLogin,
 ) -> Result<(), pb.CliError> {
@@ -460,7 +457,7 @@ fn create_as_superuser(
   ctx: pb.Client,
   name: string,
   email: string,
-  password: string,
+  password: secret.Secret,
   admin: AdminLogin,
 ) -> Result<(), pb.CliError> {
   let su = superuser_auth(ctx, admin)?
@@ -469,7 +466,7 @@ fn create_as_superuser(
       pb.failed(f"member '{name}' already exists ({existing.email}); drop --create and log in, or reset it with 'lll member set-password {name}'"),
     )
   }
-  let _ = create_member_as(ctx, su, name, email, password, [], None)?
+  let _ = create_member_as(ctx, su, name, email, password.reveal(), [], None)?
   Ok(())
 }
 
@@ -601,44 +598,6 @@ pub fn logout(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     fmt.Println(f"no token in {path}; nothing to clear")
   }
   Ok(())
-}
-
-/// A password, prompted with `prompt`. With echo off when stdin is a terminal
-/// — term.ReadPassword, so it never lands in scrollback; as a plain line
-/// otherwise, because piped input (scripts, agents, e2e) has nothing to hide
-/// it from. The newline is not part of the password on either path. Shared
-/// with `lll member set-password`, which prompts twice.
-fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string, pb.CliError> {
-  fmt.Print(prompt)
-  let fd = os.Stdin.Fd() as int
-  if term.IsTerminal(fd) {
-    let bytes = match term.ReadPassword(fd) {
-      Ok(b) => b,
-      Err(e) => return Err(pb.failed(f"reading the password: {e}")),
-    }
-    fmt.Println("")
-    return Ok(bytes as string)
-  }
-  let line = read_line(input)?
-  fmt.Println("")
-  Ok(line)
-}
-
-/// A password flag's value; '-' reads one line from stdin, the Unix
-/// convention (two 1.0 agents logged in with the literal password "-").
-/// On a terminal '-' prompts with `prompt` and echo off, as read_password
-/// does: a plain line read there echoed the secret. Piped stdin that is
-/// empty is a usage error naming `flag`, whichever command reads it.
-fn password_value(raw: string, flag: string, prompt: string, input: mut Ref<bufio.Reader>) -> Result<string, pb.CliError> {
-  if raw != "-" { return Ok(raw) }
-  if term.IsTerminal(os.Stdin.Fd() as int) { return read_password(input, prompt) }
-  let line = match input.ReadString(10 as byte) {
-    Partial.Ok(l) => strip_eol(l),
-    Partial.Both(l, _) => strip_eol(l),
-    Partial.Err(_) => "",
-  }
-  if line == "" { return Err(flags.usage_error(f"{flag} -: stdin was empty")) }
-  Ok(line)
 }
 
 /// One line from stdin, EOL stripped. Partial.Both (data, then EOF with no
