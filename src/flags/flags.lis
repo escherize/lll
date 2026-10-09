@@ -219,9 +219,6 @@ fn team_scope_error(arg: string, key: string, usage: string) -> string {
   // METHOD placeholder must not be named as one.
   let second = words.get(2).unwrap_or("")
   let verb = if regexp.MustCompile(r"^[a-z][a-z-]*$").MatchString(second) { second } else { "" }
-  if noun == "member" && verb == "list" {
-    return head + "\nmember list is server-wide; the last column shows each member's teams"
-  }
   if ["member", "team", "token", "api", "skill", "upgrade", "logout"].contains(noun) {
     let cmd = if verb == "" || verb.starts_with("[") || verb.starts_with("-") { f"lll {noun}" } else { f"lll {noun} {verb}" }
     return head + f"\n'{cmd}' is server-wide: no team applies to it"
