@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 02: export a precise subset (tier 1)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,20 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+This is a read-only case: change nothing on the board.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+1. In team FLEET, find every OPEN issue that carries the label `bug` AND
+   belongs to the project `Checkout`. Open means state backlog, todo,
+   in-progress or in-review; done and cancelled are not open. There are decoys:
+   closed bugs, a non-bug in Checkout and a bug outside Checkout.
+2. Export exactly that subset as JSON with the CLI's machine-readable output
+   and save the CLI's stdout, unedited, to `fleet-02-NN.json` in your
+   directory.
+3. Read the file back and count the issues in it.
+
+The artifact is `fleet-02-NN.json` holding exactly the matching issues, and
+your report's `answer` naming their keys and count. Any write to the board
+fails the case.
 
 ## Environment
 
@@ -70,9 +72,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"keys": ["FLEET-1"], "count": 1}
 }
 ```
+
+`answer.keys` lists the matching issue keys (any order); `answer.count` is how many.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

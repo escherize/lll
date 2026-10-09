@@ -1,5 +1,8 @@
 # LLL-402: lll agent DX fleet plan
 
+> Numbering note: the 1.0 fleet plan renumbered the cases 01-20; this plan's
+> case 05 is case 06 there. The current cases are the files in `rules/`.
+
 Status: approved initial cases 01 and 05; execution is in progress. The user
 said go after reviewing this plan and the first briefs on 2026-09-18.
 Other cases remain a roadmap requiring separate review.

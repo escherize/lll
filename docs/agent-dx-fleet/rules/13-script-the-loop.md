@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 13: script the loop (tier 3)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,23 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+Team FLEET has issues labelled `sweep`. Some are ready to work; one is blocked
+and must stay open.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+1. Write a shell script `fleet-13-NN.sh` in your directory. It must loop: ask
+   lll for the next ready issue labelled `sweep` and take it in the same call,
+   close it, and repeat. It must branch on lll's EXIT CODES, not on message
+   text: on "nothing to do" it stops and exits 0; on any other failure it
+   exits with that code.
+2. The script calls the wrapper (`./lll`, or its absolute path). It must not
+   contain a token or read conn.txt; the wrapper supplies the connection.
+3. Read the script back, then run it once.
+4. Confirm with lll: every ready `sweep` issue is done and unclaimed, the
+   blocked one is untouched, and the script's last lll call reported nothing
+   to do.
+
+The artifacts are the script file and the board: ready sweep issues done, no
+claims, nothing else changed.
 
 ## Environment
 

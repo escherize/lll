@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 20: recover from a wrong command (tier 4)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,19 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+The upload retry flake is supposedly fixed, but someone wants a second pair of
+eyes on it. Get that issue in front of reviewers, and leave a short note on it
+that starts with `fleet-20-NN:`.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+That is the whole brief. Work it out from lll itself. You will probably type a
+command lll does not accept at some point; that is expected and useful. When
+it happens, read the error and recover using only what lll tells you.
+
+When you are done, rate the least helpful error message you met: the exact
+command, the error, a score from 1 (useless) to 5 (told me the fix), and why.
+
+The artifact is that issue in the state that means "under review" and your
+one note on it. Touch nothing else.
 
 ## Environment
 
@@ -70,9 +71,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "error_rating": {"command": "", "error": "", "rating": 0, "why": ""}
 }
 ```
+
+`error_rating` is required in this case: the least helpful error you met. If every call worked first time, rate the least helpful message you read and say so.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

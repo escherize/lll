@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 19: invite a scoped colleague (tier 4)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,28 +14,38 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+This board has team FLEET and another team your colleague must never see.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+1. Invite a colleague named `colleague-NN` with email
+   `colleague-NN@example.com`, limited to team FLEET only, using lll's
+   member invite. Save its output to `invite-NN.txt` in your directory; it
+   holds a temporary password, so never print it.
+2. Log in as the colleague with that password, keeping the colleague's login
+   in its own config home inside your directory (for example
+   `LLL_CONFIG_HOME=$PWD/colleague`), so your own identity is untouched.
+3. As the colleague, list the teams. Confirm only FLEET appears.
+4. As yourself, confirm the colleague exists and is limited to FLEET.
+
+The artifact is one new member limited to FLEET whose own team list shows
+only FLEET. Create nothing else.
 
 ## Environment
 
 Your instance is already running. `conn.txt` in your worker directory contains
-exactly three lines: API URL, bot token, team key. Never type, paste, print or
-quote the token. The controller-provided wrapper reads it without shell eval,
-clears inherited LLL/XDG settings, sets HOME/config to your own directory and
-runs the pinned binary there. All CLI calls must use that wrapper: run it as
-`./lll` from your worker directory. Your bot `bot-fleet-worker-NN` is already
-provisioned; no login or token creation is needed.
+exactly three lines: API URL, your token, team key. Never type, paste, print or
+quote a token, this one or any other. The controller-provided wrapper reads
+conn.txt without shell eval, clears inherited LLL/XDG settings, sets
+HOME/config to your own directory and runs the pinned binary there. All CLI
+calls must use that wrapper: run it as `./lll` from your worker directory.
+
+In this case you also act as a second identity. The wrapper honours two
+settings you give it for one command, and always uses conn.txt's server:
+`LLL_TOKEN` (a token, read from a file you saved, never typed) and
+`LLL_CONFIG_HOME` (a directory inside your worker directory, holding that
+identity's own saved login). Your sandbox may refuse `export VAR=$(...)` or
+`VAR=$(...) cmd` at the prompt; a tiny script that sets the variable and runs
+`./lll` is the way around that. Files that hold tokens or passwords stay in
+your directory; never print them.
 
 This harness allows environment variables scoped to child processes; older
 fleet lessons about refusing HOME/source are historical, not lll failures.
@@ -70,9 +80,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"colleague_teams": []}
 }
 ```
+
+`answer.colleague_teams` lists the team keys the colleague saw in step 3.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

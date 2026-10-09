@@ -1,9 +1,14 @@
-# lll case 01: read and restate (tier 1)
+# lll case 18: consume a partner's live changes (tier 4)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
-call, guess, failure and surprise. Truthful friction is more useful than a
-claimed success. Your controller supplies your two-digit worker number NN,
-absolute worker directory and the `lll` wrapper path when launching you.
+You are one of ten fresh agents trying lll, a CLI issue tracker, working in
+pairs. Record every call, guess, failure and surprise. Truthful friction is
+more useful than a claimed success. Your controller supplies your two-digit
+worker number NN, your partner's number PP, your absolute worker directory and
+the `lll` wrapper path when launching you. You and your partner share one
+board; each of you has your own bot and your own wrapper.
+
+Your role comes from your worker number. An odd NN is role A. An even NN is
+role B. Do not change your mind about your role.
 
 ## Task
 
@@ -14,18 +19,36 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+Role A watches the board live; role B makes changes A must see. Shared
+issue: `Watch handshake (workers AA and BB)`.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+Role A (odd NN):
+1. Start lll's live event stream for team FLEET in machine-readable form in
+   the background, stdout to `fleet-18-NN-watch.jsonl` and stderr to
+   `fleet-18-NN-watch.err` in your directory.
+2. Wait until the stream says it is ready (on stderr), then add exactly one
+   comment to the shared issue: `fleet-18-NN: watching`.
+3. Wait (bounded: at most 10 minutes) until B's comment starting
+   `fleet-18-PP: done` appears on the shared issue, then a few seconds more.
+4. Stop the stream and confirm the process is gone.
+5. From your log, list the keys of issues B created or changed.
+
+Role B (even NN):
+1. Wait (bounded: at most 10 minutes, every 5 seconds) until A's comment
+   `fleet-18-PP: watching` appears on the shared issue.
+2. Create one issue titled `fleet-18-NN live event` with priority medium,
+   then change its priority to high.
+3. Add exactly one comment to the shared issue: `fleet-18-NN: done KEY`,
+   where KEY is the issue you created.
+
+Your role is decided by your number: odd is A, even is B. Do not change your
+mind.
+
+The artifacts are B's one issue (priority high), the two comments and A's
+log holding the create and update events for B's issue.
+
+Your role is decided by your worker number: odd is role A, even is role B.
+Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
 
@@ -70,9 +93,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"partner_keys": []}
 }
 ```
+
+Role A: `answer.partner_keys` lists the keys you saw in your log. Role B may omit `answer`.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

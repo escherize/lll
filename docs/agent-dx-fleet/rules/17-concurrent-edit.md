@@ -1,9 +1,14 @@
-# lll case 01: read and restate (tier 1)
+# lll case 17: concurrent description edits (tier 4)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
-call, guess, failure and surprise. Truthful friction is more useful than a
-claimed success. Your controller supplies your two-digit worker number NN,
-absolute worker directory and the `lll` wrapper path when launching you.
+You are one of ten fresh agents trying lll, a CLI issue tracker, working in
+pairs. Record every call, guess, failure and surprise. Truthful friction is
+more useful than a claimed success. Your controller supplies your two-digit
+worker number NN, your partner's number PP, your absolute worker directory and
+the `lll` wrapper path when launching you. You and your partner share one
+board; each of you has your own bot and your own wrapper.
+
+Your role comes from your worker number. An odd NN is role A. An even NN is
+role B. Do not change your mind about your role.
 
 ## Task
 
@@ -14,18 +19,29 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+You and your partner each add one line to the same issue's description at the
+same time. Shared issue: `Shared release notes (workers AA and BB)`.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+Both roles:
+1. Read the issue's description.
+2. Without waiting for your partner, append exactly one line to the end of
+   the description: role A appends
+   `fleet-17-NN: role A checked the upload path.` and role B appends
+   `fleet-17-NN: role B checked the upload path.`
+3. Do not replace the description: your partner may be writing at the same
+   moment, and a replace can erase their line. If lll refuses because the
+   issue changed, read it again and retry.
+4. Read back until both lines are present (bounded: at most 10 minutes,
+   every 5 seconds). Report whether your partner's line arrived.
+
+Your role is decided by your number: odd is A, even is B. Do not change your
+mind.
+
+The artifact is a description with the original first line and both
+appended lines, each exactly once. Touch nothing else.
+
+Your role is decided by your worker number: odd is role A, even is role B.
+Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
 

@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 14: recover a broken config (tier 3)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,28 +14,37 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+Your saved lll configuration is broken in two ways. Plain `./lll whoami` fails.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+1. Run `./lll whoami` and read the failure. Use lll's exit codes and messages
+   (and `lll config` commands) to work out what is wrong. Record each exit
+   code you see.
+2. Repair the saved configuration so that plain `./lll whoami` works as your
+   existing bot `bot-fleet-worker-NN`. conn.txt holds the right server and a
+   valid token for that bot.
+3. Do not create members, bots or tokens, and do not use admin credentials:
+   the fix must reuse your existing identity.
+4. Finish with a successful `./lll whoami`.
+
+The artifact is your saved configuration pointing at the right server with a
+working token for `bot-fleet-worker-NN`, a final successful whoami and no new
+members.
 
 ## Environment
 
 Your instance is already running. `conn.txt` in your worker directory contains
-exactly three lines: API URL, bot token, team key. Never type, paste, print or
-quote the token. The controller-provided wrapper reads it without shell eval,
-clears inherited LLL/XDG settings, sets HOME/config to your own directory and
-runs the pinned binary there. All CLI calls must use that wrapper: run it as
-`./lll` from your worker directory. Your bot `bot-fleet-worker-NN` is already
-provisioned; no login or token creation is needed.
+exactly three lines, and they are correct: API URL, a valid token for your
+existing bot `bot-fleet-worker-NN`, team key. Never type, paste, print or quote
+the token. In this case the wrapper does NOT pass conn.txt to lll. It clears
+inherited LLL/XDG settings and runs the pinned binary with your own saved
+configuration, under `home/config` in your worker directory, and that
+configuration is broken. Repair it with lll's own commands; do not edit the
+config file by hand. When a command needs the token, feed it from the file
+without displaying it, for example `sed -n 2p conn.txt | ./lll ...` where the
+command reads it from stdin. All CLI calls must use the wrapper: run it as
+`./lll` from your worker directory. Your sandbox may refuse `export VAR=$(...)`
+or `VAR=$(...) cmd` at the prompt; a tiny script that does the same is the way
+around that.
 
 This harness allows environment variables scoped to child processes; older
 fleet lessons about refusing HOME/source are historical, not lll failures.
@@ -70,9 +79,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"exit_codes_seen": []}
 }
 ```
+
+`answer.exit_codes_seen` lists the failing exit codes you met, in order.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact
