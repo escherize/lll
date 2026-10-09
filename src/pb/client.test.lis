@@ -441,8 +441,12 @@ fn the_login_hint_names_a_url_somebody_else_chose() {
 fn a_withheld_login_names_the_layer_that_chose_the_url() {
   let held = |source| config.Withheld { home_url: "http://a", url: "http://b", url_source: source }
   let repo = withheld_login(held(Some(config.Source.RepoFile("/r/.lll.toml"))))
-  assert repo.message == "/r/.lll.toml points this command at http://b, but your saved login is for http://a: run 'lll login --url http://b' to log in there, or remove its url line"
+  // The safe fix first; logging in to the url a repo chose comes last,
+  // naming what it sends and what it replaces (LLL-688 re-review).
+  assert repo.message == "/r/.lll.toml points this command at http://b, but your saved login is for http://a, so it was not sent
+to use your saved login: remove the url line from /r/.lll.toml
+only if you trust http://b: lll login --url http://b (this sends your credentials to http://b and replaces the saved login for http://a)"
   assert exit_code(repo.kind) == 6
-  assert withheld_login(held(Some(config.Source.Env("LLL_URL")))).message.ends_with("or unset LLL_URL")
+  assert withheld_login(held(Some(config.Source.Env("LLL_URL")))).message.contains("\nto use your saved login: unset LLL_URL\n")
   assert withheld_login(held(Some(config.Source.Flag("--url")))).message.starts_with("--url points this command at http://b")
 }

@@ -160,7 +160,12 @@ fn a_login_without_url_refuses_a_url_a_repo_or_the_environment_chose() {
   let b = "http://127.0.0.1:9999"
   let Some(why) = login_needs_url("", b, repo, "") else { panic("expected a refusal") };
   assert why.contains("/r/.lll.toml sets url = http://127.0.0.1:9999")
-  assert why.contains("lll login --url http://127.0.0.1:9999")
+  assert why.contains("if you did not choose that server: remove the url line from /r/.lll.toml")
+  assert why.contains("only if you trust http://127.0.0.1:9999: lll login --url http://127.0.0.1:9999 ... (this sends your credentials to http://127.0.0.1:9999)")
+  let replacing = login_needs_url("", b, repo, "http://127.0.0.1:8100").unwrap_or("")
+  assert replacing.contains("and replaces the saved login for http://127.0.0.1:8100")
+  // A trailing slash is the same url, as login saves it.
+  assert login_needs_url("", b + "/", repo, b).is_none()
   assert login_needs_url("", b, Some(config.Source.Env("LLL_URL")), "").is_some()
   // --url names it; the home config chose the same url; the home url or default.
   assert login_needs_url(b, b, repo, "").is_none()

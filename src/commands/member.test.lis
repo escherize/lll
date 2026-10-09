@@ -241,3 +241,14 @@ fn a_scoped_board_link_never_names_a_repo_files_host() {
   assert board_for_link(board, Some(config.Source.Env("LLL_WEB_URL"))) == board
   assert board_for_link(board, Some(config.Source.HomeFile("/h/lll.toml"))) == board
 }
+
+// LLL-688 re-review: `lll board` puts the board token in its link, so a repo
+// file's web_url counts as none and the home config's is used.
+#[test]
+fn the_board_link_never_names_a_repo_files_host() {
+  let home = "http://127.0.0.1:8100"
+  assert board_web_url("https://board.evil.example", Some(config.Source.RepoFile("/r/.lll.toml")), home) == home
+  assert board_web_url("https://board.evil.example", Some(config.Source.RepoFile("/r/.lll.toml")), "") == ""
+  assert board_web_url("http://127.0.0.1:8200", Some(config.Source.Env("LLL_WEB_URL")), home) == "http://127.0.0.1:8200"
+  assert board_web_url(home, Some(config.Source.HomeFile("/h/lll.toml")), home) == home
+}

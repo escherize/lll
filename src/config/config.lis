@@ -321,8 +321,16 @@ pub struct Withheld {
   pub url_source: Option<Source>,
 }
 
+/// Pure. The same url once a trailing slash is dropped, as 'lll login'
+/// drops it before saving. Nothing else is normalised: localhost and
+/// 127.0.0.1 stay different servers, so a near miss withholds a token
+/// rather than sending it somewhere new.
+pub fn same_url(a: string, b: string) -> bool {
+  strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
 /// Pure. A token is bound to the url it was saved with. The home config's
-/// token goes only to the url that file names, byte for byte, or to the
+/// token goes only to the url that file names (a trailing slash aside), or to the
 /// default when it names none. The layers combine key by key, so a repo
 /// file naming only `url` would otherwise send the machine's login to
 /// whatever server it chose. A token from LLL_TOKEN or a repo file stays
@@ -335,7 +343,7 @@ pub fn withheld_token(cfg: Config, src: Sources, home_url: string) -> Option<Wit
   }
   let bound = match src.url {
     Some(Source.HomeFile(_)) | Some(Source.Default) => true,
-    Some(Source.Env(_)) | Some(Source.RepoFile(_)) | Some(Source.Flag(_)) | None => cfg.url == home_url,
+    Some(Source.Env(_)) | Some(Source.RepoFile(_)) | Some(Source.Flag(_)) | None => same_url(cfg.url, home_url),
   }
   if bound { return None }
   Some(Withheld { home_url, url: cfg.url, url_source: src.url })
@@ -382,6 +390,10 @@ fn layered(env: Env) -> Result<(Config, Sources), string> {
     cfg.url = "http://127.0.0.1:8090"
     src.url = Some(Source.Default)
   }
+  // Every request is base + "/api/...", and a server answers "//api" with a
+  // redirect lll does not follow (LLL-688): a url written with a trailing
+  // slash is the same url, as 'lll login' saves it.
+  cfg.url = strings.TrimRight(cfg.url, "/")
   Ok((cfg, src))
 }
 
@@ -409,7 +421,7 @@ fn apply_overrides(
     src.team = Some(Source.Flag("--team"))
   }
   if let Some(url) = overrides.url {
-    cfg.url = url
+    cfg.url = strings.TrimRight(url, "/")
     src.url = Some(Source.Flag("--url"))
   }
   if let Some(web_url) = overrides.web_url {

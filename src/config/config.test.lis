@@ -599,3 +599,25 @@ fn settings_hide_a_withheld_token_from_every_reader() {
   assert src.token.is_none()
   assert s.withheld().is_some()
 }
+
+// LLL-688 re-review: login saves a url without its trailing slash, so a repo
+// file writing the same url with one must not lock the saved login out. The
+// host is not normalised: localhost is not 127.0.0.1.
+#[test]
+fn a_trailing_slash_does_not_unbind_the_home_token() {
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let repo = Some(Source.RepoFile("/r/.lll.toml"))
+  let a = "http://127.0.0.1:28611"
+  let cfg = |url| Config { url, token: "tok", .. }
+  assert withheld_token(cfg(a + "/"), Sources { url: repo, token: home, .. }, a).is_none()
+  assert withheld_token(cfg(a), Sources { url: repo, token: home, .. }, a + "/").is_none()
+  assert withheld_token(cfg("http://localhost:28611/"), Sources { url: repo, token: home, .. }, a).is_some()
+  assert withheld_token(cfg(a + "/x"), Sources { url: repo, token: home, .. }, a).is_some()
+}
+
+#[test]
+fn a_url_flag_drops_its_trailing_slash() {
+  let s = given(Config { url: "http://127.0.0.1:8090", .. }, Sources { .. }, Env { .. }).with_url("http://127.0.0.1:28611/")
+  let Ok(cfg) = s.config() else { panic("expected settings") };
+  assert cfg.url == "http://127.0.0.1:28611"
+}

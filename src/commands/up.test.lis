@@ -138,3 +138,17 @@ fn web_url_is_saved_only_beside_this_boards_url() {
   assert home_names_board("http://[::1]:8100/", db, board)
   assert !home_names_board("http://localhost.example.com:8090", db, board)
 }
+
+// LLL-688 re-review: a running server is adopted only at a url the user
+// chose. A repo file's url may be any listener, and adopting sends it the
+// administrator pair.
+#[test]
+fn up_adopts_a_running_server_only_at_a_url_the_user_chose() {
+  let url = "http://127.0.0.1:29733"
+  let Some(why) = adopt_refusal(url, Some(config.Source.RepoFile(".lll.toml"))) else { panic("expected a refusal") };
+  assert why == ".lll.toml points lll up at http://127.0.0.1:29733, where a server is already running; to use it, run LLL_URL=http://127.0.0.1:29733 lll up; or stop that server"
+  assert adopt_refusal(url, Some(config.Source.HomeFile("/h/lll.toml"))).is_none()
+  assert adopt_refusal(url, Some(config.Source.Env("LLL_URL"))).is_none()
+  assert adopt_refusal(url, Some(config.Source.Flag("--url"))).is_none()
+  assert adopt_refusal(url, Some(config.Source.Default)).is_none()
+}

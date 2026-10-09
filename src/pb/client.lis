@@ -831,15 +831,20 @@ pub fn login_command(base: string, url_origin: Option<config.Source>) -> string 
 /// The refusal for a command whose url is not the one the home config's
 /// token was saved for (LLL-688): the token is not sent, and this names the
 /// layer that chose the url.
+///
+/// The safe fix comes first. The url may be a cloned repo's choice, so
+/// logging in there is offered last, saying what it gives away.
 pub fn withheld_login(held: config.Withheld) -> CliError {
-  let (who, other) = match held.url_source {
-    Some(config.Source.RepoFile(path)) => (path, "remove its url line"),
+  let (who, safe) = match held.url_source {
+    Some(config.Source.RepoFile(path)) => (path, f"remove the url line from {path}"),
     Some(config.Source.Env(name)) => (name, f"unset {name}"),
     Some(config.Source.Flag(spelling)) => (spelling, f"drop {spelling}"),
     Some(config.Source.HomeFile(_)) | Some(config.Source.Default) | None => ("the configured url", "fix the url"),
   }
   let saved = if held.home_url == "" { "the default url" } else { held.home_url }
-  fail(ErrorKind.Auth, f"{who} points this command at {held.url}, but your saved login is for {saved}: run 'lll login --url {held.url}' to log in there, or {other}")
+  fail(ErrorKind.Auth, f"{who} points this command at {held.url}, but your saved login is for {saved}, so it was not sent
+to use your saved login: {safe}
+only if you trust {held.url}: lll login --url {held.url} (this sends your credentials to {held.url} and replaces the saved login for {saved})")
 }
 
 fn stale_token(base: string, origin: Option<config.Source>, login: string) -> CliError {

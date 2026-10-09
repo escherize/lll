@@ -149,10 +149,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   run there, and the team check after `lll login --url A`, sent A's token
   to B. A cloned repo could collect tokens that way. Now:
   - the home config's token is sent only when the effective url is the
-    home config's url, byte for byte (or the default, when it names none).
-    Otherwise a command that needs it exits 6 and names the file, variable
-    or flag that chose the url. A token from `LLL_TOKEN` or a repo file
-    still goes to the url configured with it;
+    home config's url (a trailing slash aside; `localhost` and `127.0.0.1`
+    differ), or the default when it names none. Otherwise a command that
+    needs it exits 6, names the file, variable or flag that chose the url,
+    and leads with removing it; logging in there is offered last, with what
+    it sends and replaces. A token from `LLL_TOKEN` or a repo file still
+    goes to the url configured with it;
   - `lll login` sends every request after it holds a token to the server it
     logged in to, and says when a repo file or `LLL_URL` will send later
     commands elsewhere. `lll up` says the same after it saves its CLI login;
@@ -160,6 +162,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
     the url, instead of sending the password or token there;
   - `lll member invite` sends the superuser token to, and prints, only a
     `web_url` saved in the home config for this server, or given by flag;
+  - `lll board` (and `--team`, `-w`) no longer puts the board token in a
+    link to a repo file's `web_url`: that `web_url` counts as none;
+  - `lll up` no longer adopts a server already running at a url a repo file
+    chose, which received the administrator pair (including the generated
+    one in `./pb/pb_data`). It exits 4 and names `LLL_URL=<url> lll up` to
+    use that server deliberately. With nothing running there it starts its
+    own server, as before;
   - requests no longer follow redirects. Go's default client kept the
     `Authorization` header for the same host on another port and re-sent a
     login POST body on 307. A redirect is now an error naming its target.

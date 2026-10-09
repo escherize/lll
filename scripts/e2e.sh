@@ -3553,6 +3553,22 @@ for cmd in "issue list --team ENG" "whoami"; do
     "lll $cmd names the url the saved login is not for"
   b_saw_nothing "lll $cmd"
 done
+
+# lll up adopts an already-running server only at a url the user chose: a
+# repo file's url may be any listener, and adopting sends it the
+# administrator pair (exported for this suite). B answers /api/health, so
+# it looks like a running server; the boot refuses (exit 4) after asking.
+set +e
+out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$DATA_DIR/two_server_home_password" \
+  "$LLL_ABS" up --no-open --port "$(free_port 40000 59999)" </dev/null 2>&1)
+rc=$?
+set -e
+[ "$rc" = 4 ] || fail "lll up at a repo file's running url: expected exit 4, got $rc: $out"
+assert_contains "$out" "points lll up at http://127.0.0.1:$B_PORT, where a server is already running" \
+  "lll up names the repo file's url it will not adopt"
+grep -v -e '^CONN accepted$' -e '^REQ GET /api/health HTTP/1.1$' "$B_REC" \
+  && fail "lll up sent more than a health check to the repo file's url: $(cat "$B_REC")"
+: > "$B_REC"
 kill "$B_PID" 2>/dev/null || true
 
 # --url takes a base url, not a hostname; the refusal shows the shape.

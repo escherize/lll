@@ -196,6 +196,12 @@ check what is configured with 'lll config list'"),
     ctx
   }
 
+  if !starting {
+    if let Some(why) = adopt_refusal(db_url, src.url) {
+      return Err(pb.fail(pb.ErrorKind.Refused, why))
+    }
+  }
+
   let mut api_line = f"api    {db_url} (already running)"
 
   let (email, pass) = ctx.settings.admin().map_or(("", ""), |admin| (admin.email, admin.password))
@@ -526,6 +532,21 @@ fn server_key(url: string) -> string {
     }
   }
   u
+}
+
+/// Pure. Why `lll up` must not adopt the server already answering at
+/// `db_url`, or None (LLL-688). Adopting sends it the administrator pair
+/// and the boot's tokens. A url a repo file chose may be anything listening
+/// on this machine, and a data-dir marker cannot vouch for it: a repo can
+/// ship its own ./pb/pb_data with a marker and a pair.
+fn adopt_refusal(db_url: string, source: Option<config.Source>) -> Option<string> {
+  match source {
+    Some(config.Source.RepoFile(path)) => Some(
+      f"{path} points lll up at {db_url}, where a server is already running; to use it, run LLL_URL={db_url} lll up; or stop that server",
+    ),
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => None,
+  }
 }
 
 fn loopback_bind(settings: config.Settings) -> bool {

@@ -449,7 +449,7 @@ fn same_server_board(web_url: string, tok: string) -> string {
 /// name any host, and the probe below carries the superuser token.
 fn board_for_server(web_url: string, web_source: Option<config.Source>, api_url: string, home_url: string) -> string {
   match web_source {
-    Some(config.Source.HomeFile(_)) => if api_url == home_url { web_url } else { "" },
+    Some(config.Source.HomeFile(_)) => if config.same_url(api_url, home_url) { web_url } else { "" },
     Some(config.Source.Flag(_)) => web_url,
     Some(config.Source.RepoFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => "",
   }
