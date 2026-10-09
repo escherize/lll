@@ -32,12 +32,15 @@ WRITES = re.compile(
     r'\bfmt\.(?:Print|Println|Printf|Fprint|Fprintln|Fprintf)\s*\('
     r'|\blog\.(?:Print|Fatal|Panic)\w*\s*\('
     r'|\bos\.NewFile\s*\('
+    r'|\bos\.(?:OpenFile|Create)\s*\('
     r'|\bsyscall\.(?:Write|Syscall\w*|RawSyscall\w*)\s*\('
     r'|\bos\.(?:Stdout|Stderr)\b'
 )
 
 SERVER = {'src/serve': 'the board server: its lines are the server log of a running lll up'}
-FN = re.compile(r'^(?:pub )?fn (\w+)', re.M)
+# Indented too: a method in an impl is its own function, not part of the
+# top-level fn above it.
+FN = re.compile(r'^[ \t]*(?:pub )?fn (\w+)', re.M)
 
 ALLOW: dict[tuple[str, str], str] = {
     ('src/main.lis', 'render'): 'the renderer: the one place a command outcome is written',
@@ -62,6 +65,7 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/secret/secret.lis', 'hidden_line'): 'interactive password prompt without echo',
     ('src/realtime/realtime.lis', 'reconnect'): 'reconnect notices on stderr while a watch stream or the board runs',
     ('src/commands/upgrade.lis', 'run_upgrade'): 'lll upgrade: notes before Homebrew runs, then its output passes through',
+    ('src/commands/member_invite.lis', 'member_passes'): 'lll member passes: opens the private 0600 handoff file at --out, a file and not a stream',
 }
 
 
@@ -96,6 +100,7 @@ CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ('src/secret/secret.lis', 'hidden_line'): {('src/secret/secret.lis', 'prompted')},
     ('src/realtime/realtime.lis', 'reconnect'): {('src/realtime/realtime.lis', 'start')},
     ('src/commands/upgrade.lis', 'run_upgrade'): {('src/commands/upgrade.lis', 'upgrade')},
+    ('src/commands/member_invite.lis', 'member_passes'): {('src/commands/member.lis', 'member_commands')},
 }
 
 
@@ -133,27 +138,71 @@ def foreign_calls(files):
 
 
 def code_only(source):
-    """Source with `//` comments and string literal contents blanked, line
-    numbers kept. Strings may span lines; r"..." takes no escapes."""
-    out, i, n = [], 0, len(source)
-    while i < n:
-        c = source[i]
-        if source.startswith('//', i):
-            j = source.find('\n', i)
-            j = n if j < 0 else j
-            out.append(' ' * (j - i))
-            i = j
-        elif c == '"':
-            raw = i > 0 and source[i - 1] == 'r' and (i < 2 or not (source[i - 2].isalnum() or source[i - 2] == '_'))
-            j = i + 1
-            while j < n and source[j] != '"':
-                j += 2 if source[j] == '\\' and not raw else 1
-            out.append('"' + ''.join('\n' if ch == '\n' else ' ' for ch in source[i + 1:j]) + '"')
-            i = j + 1
-        else:
-            out.append(c)
-            i += 1
+    """Source with `//` comments and the literal text of strings blanked,
+    offsets and line numbers kept. Strings may span lines; r"..." takes no
+    escapes; the `{...}` of an f"..." string is code and stays, so a call
+    hidden in an interpolation is still seen ({{ is a literal brace)."""
+    out = list(source)
+    n = len(source)
+
+    def blank(k):
+        if out[k] != '\n':
+            out[k] = ' '
+
+    def word_before(k):
+        return k > 0 and (source[k - 1].isalnum() or source[k - 1] == '_')
+
+    def code(i, closing):
+        """Scan code from i; stop after the `}` that closes an interpolation
+        when `closing`, else at the end. Returns the index after the stop."""
+        depth = 0
+        while i < n:
+            c = source[i]
+            if source.startswith('//', i):
+                while i < n and source[i] != '\n':
+                    blank(i)
+                    i += 1
+            elif c == '"':
+                prefix = source[i - 1] if i > 0 and not word_before(i - 1) else ''
+                i = string(i, raw=prefix == 'r', fmt=prefix == 'f')
+            elif c == '{':
+                depth += 1
+                i += 1
+            elif c == '}':
+                if closing and depth == 0:
+                    return i + 1
+                depth -= 1
+                i += 1
+            else:
+                i += 1
+        return i
+
+    def string(i, raw, fmt):
+        i += 1
+        while i < n and source[i] != '"':
+            if source[i] == '\\' and not raw:
+                blank(i)
+                if i + 1 < n:
+                    blank(i + 1)
+                i += 2
+            elif fmt and source.startswith('{{', i):
+                blank(i)
+                blank(i + 1)
+                i += 2
+            elif fmt and source[i] == '{':
+                i = code(i + 1, closing=True)
+            else:
+                blank(i)
+                i += 1
+        return i + 1
+
+    code(0, closing=False)
     return ''.join(out)
+
+
+# A path that names a standard stream, as a string literal: opening it
+# writes past the renderer as surely as os.Stdout does.
+STREAM_PATH = re.compile(r'"/dev/(?:stdout|stderr|fd/)')
 
 
 def writes(rel, source):
@@ -162,13 +211,15 @@ def writes(rel, source):
     code = code_only(source)
     starts = [(m.start(), m.group(1)) for m in FN.finditer(code)]
     found = []
-    for m in WRITES.finditer(code):
+    hits = [(m.start(), m.group(0).rstrip('( ')) for m in WRITES.finditer(code)]
+    hits += [(m.start(), m.group(0)[1:]) for m in STREAM_PATH.finditer(source) if code[m.start()] == '"']
+    for at_hit, call in sorted(hits):
         fn = ''
         for at, name in starts:
-            if at > m.start():
+            if at > at_hit:
                 break
             fn = name
-        found.append((rel, code.count('\n', 0, m.start()) + 1, fn, m.group(0).rstrip('( ')))
+        found.append((rel, code.count('\n', 0, at_hit) + 1, fn, call))
     return found
 
 
@@ -249,6 +300,14 @@ pub fn b() -> int {
         self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  os.NewFile(1, "out").WriteString("x")\n}\n')], ['os.NewFile'])
         self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  syscall.Write(1, b)\n}\n')], ['syscall.Write'])
         self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  "fmt.Println(" + "x"\n}\n')], [])
+        # Bypasses from the last review (LLL-683): a call inside an f-string
+        # interpolation, a method after an allowed fn, a stream opened by path.
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  let _ = f"{fmt.Println(msg)}"\n}\n')], ['fmt.Println'])
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  let _ = f"{x.get("k")} {fmt.Print(y)} {{fmt.Println(z)}}"\n}\n')], ['fmt.Print'])
+        shout = 'fn progress(line: string) {\n  fmt.Println(line)\n}\nimpl Shout {\n  pub fn say(self) {\n    fmt.Println("x")\n  }\n}\n'
+        self.assertEqual([(fn, c) for _, _, fn, c in writes('src/commands/import.lis', shout)], [('progress', 'fmt.Println'), ('say', 'fmt.Println')])
+        opened = 'fn a() {\n  let f = os.OpenFile("/dev/stdout", 1, 0)\n}\nfn b() {\n  let p = "/dev/fd/1"\n}\n'
+        self.assertEqual([(fn, c) for _, _, fn, c in writes('src/commands/x.lis', opened)], [('a', 'os.OpenFile'), ('a', '/dev/stdout'), ('b', '/dev/fd/')])
         self.assertIn(ROOT / 'src' / 'display' / 'display.lis', list(sources()))
         self.assertNotIn(ROOT / 'src' / 'serve' / 'serve.lis', list(sources()))
 
