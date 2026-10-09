@@ -153,8 +153,10 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // than as a follow-up patch, so a failure leaves no member behind holding a
   // password nobody knows — the exact dead record set-password exists to fix.
   let password = rand.Text()
-  let cfg = ctx.settings.config().map_err(pb.failed)?
-  let base = invite_base(p.one("--url"), cfg.url, same_server_board(cfg.web_url, su))
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
+  let home = ctx.settings.load_home().map_err(pb.failed)?
+  let own_board = board_for_server(cfg.web_url, src.web_url, cfg.url, home.url)
+  let base = invite_base(p.one("--url"), cfg.url, same_server_board(own_board, su))
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   let mode = if p.given("--read-only") { models.Mode.ReadOnly } else { models.Mode.ReadWrite }
   if keys.is_empty() && !mode.writes() {
@@ -188,7 +190,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   fmt.Println("")
   for key in keys {
-    match scoped_board_link(ctx, cfg.web_url, key) {
+    match scoped_board_link(ctx, own_board, key) {
       Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
       None => status(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
     }
@@ -439,6 +441,18 @@ fn same_server_board(web_url: string, tok: string) -> string {
   let board = strings.TrimRight(strings.TrimSpace(web_url), "/")
   if board == "" || !pb.token_usable(board, tok) { return "" }
   board
+}
+
+/// Pure. The web_url this invite may send a token to or print, or "" (LLL-688).
+/// Only one saved for this server: the home config's, while the url is the
+/// home config's own, or one a flag named. A repo file or LLL_WEB_URL may
+/// name any host, and the probe below carries the superuser token.
+fn board_for_server(web_url: string, web_source: Option<config.Source>, api_url: string, home_url: string) -> string {
+  match web_source {
+    Some(config.Source.HomeFile(_)) => if api_url == home_url { web_url } else { "" },
+    Some(config.Source.Flag(_)) => web_url,
+    Some(config.Source.RepoFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => "",
+  }
 }
 
 /// The url the colleague's 'lll login --url' names. The board's address

@@ -1,3 +1,4 @@
+import "config"
 import "pb"
 
 import "go:strings"
@@ -215,4 +216,20 @@ fn member_list_team_filter_keeps_who_can_reach_it() {
   assert reaches_team(Some(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadOnly }), fleet)
   assert reaches_team(Some(models.Access { reach: models.Reach.Teams([fleet]), mode: models.Mode.ReadWrite }), fleet)
   assert !reaches_team(Some(models.Access { reach: models.Reach.Teams([ops]), mode: models.Mode.ReadWrite }), fleet)
+}
+
+// LLL-688: the invite probes web_url with the superuser token, so only a
+// board saved for this server is ever probed or printed.
+#[test]
+fn an_invite_trusts_only_a_board_saved_for_its_server() {
+  let a = "http://127.0.0.1:8090"
+  let board = "http://127.0.0.1:8100"
+  let home = Some(config.Source.HomeFile("/h/lll.toml"))
+  assert board_for_server(board, home, a, a) == board
+  assert board_for_server(board, Some(config.Source.Flag("--web-url")), a, "") == board
+  // The home board while the url is another server's.
+  assert board_for_server(board, home, "http://127.0.0.1:9999", a) == ""
+  assert board_for_server(board, Some(config.Source.RepoFile("/r/.lll.toml")), a, a) == ""
+  assert board_for_server(board, Some(config.Source.Env("LLL_WEB_URL")), a, a) == ""
+  assert invite_base("", a, board_for_server(board, Some(config.Source.RepoFile("/r/.lll.toml")), a, a)) == a
 }
