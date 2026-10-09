@@ -120,6 +120,8 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if raw_mode {
     fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
     let source = provenance.fields(full)
+    // Read while the other reads are in flight, before any of them is awaited.
+    let labels = view_labels(ctx, full)?
     // LLL-638: an agent reading --raw must see who holds the issue. Absolute
     // times, like the comments below: --raw output is stored and re-read.
     let claim_line = match await_issue_view(reads.claim, "claim")? {
@@ -131,7 +133,6 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
       // Said, not omitted: two 1.0 fleet agents read a missing row as held.
       None => Some("- **Claimed:** none"),
     }
-    let labels = view_labels(ctx, full)?
     let labels_line = if labels == "" { None } else { Some(f"- **Labels:** {labels}") }
     if !source.is_empty() || claim_line.is_some() || labels_line.is_some() {
       fmt.Println("")

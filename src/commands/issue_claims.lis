@@ -224,7 +224,7 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let assignment = if !result.cleared_assignee {
     "assignment unchanged"
   } else if finished {
-    f"cleared assignee; re-assign with 'lll issue update {key} --assignee NAME' (on a finished issue, finishing with {finish} releases the claim and keeps the assignee)"
+    f"cleared assignee; re-assign with 'lll issue update {key} --assignee NAME' (next time, finish with {finish}: that releases the claim and keeps the assignee)"
   } else {
     "cleared assignee"
   }

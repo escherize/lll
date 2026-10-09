@@ -345,7 +345,7 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // afterwards, it says what the server did with it.
   let me = pb.token_subject(ctx.token())
   // Only a move into done or cancelled can release; re-saving the same state does not.
-  let moves = state.map_or(false, |s| s.wire() != issue.state_wire)
+  let moves = state.is_some() && state != issue.state()
   let held_before = if finishing && moves { fetch_claim(ctx, issue.id)? } else { None }
   let mine_before = held_before.map_or(false, |h| me == Some(h.member.string()))
   let assigning = assignee_name != ""
