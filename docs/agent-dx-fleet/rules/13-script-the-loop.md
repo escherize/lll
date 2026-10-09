@@ -28,9 +28,10 @@ and must stay open.
 3. Read the script back, then rehearse: `./fleet-13-NN.sh practice` (three
    disposable issues). Fix the script and rehearse again until that run exits
    0 with every practice issue done. Read back with `./lll issue list --label
-   practice`: every practice issue done and unclaimed. A rehearsal that strands
-   a claim is cleaned with `./lll issue release KEY` (practice only). Only then
-   run `./fleet-13-NN.sh sweep`,
+   practice`: every practice issue done and unclaimed. If a rehearsal strands a
+   claim, release it with `./lll issue release KEY` (practice only), then
+   rehearse again: a release is not a clean run. Only after a rehearsal exits
+   0 and the read-back shows every practice issue done, run `./fleet-13-NN.sh sweep`,
    exactly once. Never claim, close, release, reopen or update a `sweep`
    issue by hand. If the sweep run goes wrong, stop and report; do not repair
    the board by hand.
