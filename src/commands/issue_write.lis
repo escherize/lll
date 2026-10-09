@@ -261,7 +261,9 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // the issue back after 'Updated KEY' because it said nothing else.
   let mut changed: Slice<string> = []
   if let Some(s) = state { changed = changed.append(f"state={s.wire()}") }
-  if let Some(n) = priority { changed = changed.append(f"priority={n.wire()}") }
+  // The name, not the wire number: four final-replay agents (case 18) set
+  // high and read back priority=2.
+  if let Some(n) = priority { changed = changed.append(f"priority={n.name()}") }
   let mut assignee = writes.Relation.Keep
   // The 1.0 fleet: a worker "claimed" with '--assignee <itself>'. Assigning
   // is not claiming, so text output says how to hold the issue.

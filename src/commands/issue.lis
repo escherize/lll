@@ -562,7 +562,6 @@ pub fn issue_verb_hint(verb: string) -> Option<string> {
     "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
     "ls" => "'lll issue list'",
     "rm" | "remove" => "'lll issue delete KEY-123'",
-    "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
     "note" | "reply" => "'lll issue comment KEY-123 \"body\"' adds one",
     "review" => "'lll issue update KEY-123 --state in-review' sends it to review",
     "depends" | "dep" | "blocked-by" | "blockedby" => "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start",
@@ -690,6 +689,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "comment",
+      // `issue comments KEY` reads them (final replay, case 18: a poll loop
+      // never saw the hint and missed its window).
+      hidden_alias: "comments",
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",

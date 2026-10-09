@@ -2660,7 +2660,7 @@ assert_contains "$out" "Claimed $CKEY for bryan" "and it can be claimed afresh"
 stamp=$(env $E "$LIN" issue view "$CKEY" --json | jq -r '.updated')
 [ -n "$stamp" ] || fail "issue view --json carries no updated stamp"
 out=$(env $E "$LIN" issue update "$CKEY" --priority 3 --if-unchanged-since "$stamp")
-assert_contains "$out" "priority=3" "an edit with the current stamp lands"
+assert_contains "$out" "priority=medium" "an edit with the current stamp lands"
 set +e
 out=$(env $E "$LIN" issue update "$CKEY" --priority 4 --if-unchanged-since "$stamp" 2>&1)
 rc=$?
