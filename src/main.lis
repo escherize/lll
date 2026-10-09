@@ -17,7 +17,7 @@ fn main() {
   // carry state, so a child process sees only what lll's parent gave it.
   let env = config.read_env()
   let Some(noun) = os.Args.get(1) else {
-    render(Ok(usage(pb.Client.new(config.resolve(env, config.no_overrides())))), None)
+    render(output.none(), Ok(usage(pb.Client.new(config.resolve(env, config.no_overrides())))), None)
     return
   }
 
@@ -29,12 +29,14 @@ fn main() {
     Ok((_, team)) => team,
     Err(_) => None,
   }
-  let mut settings = config.resolve(env, config.Overrides { team: team_flag, .. })
+  let resolved = config.resolve(env, config.Overrides { team: team_flag, .. })
   // LLL-441: before anything reads the token, renew a login token near
   // expiry - only for nouns that talk to the server anyway, so --help,
   // version and completions never wait on the network.
-  if commands.talks_to_server(noun) {
-    settings = commands.renew_login_token(settings)
+  let (settings, renewal) = if commands.talks_to_server(noun) {
+    commands.renew_login_token(resolved)
+  } else {
+    (resolved, output.none())
   }
   let ctx = pb.Client.new(settings)
   let skew = commands.version_skew_check(ctx, noun)
@@ -42,14 +44,15 @@ fn main() {
     Ok((args, _)) => dispatch(ctx, noun, args),
     Err(msg) => Err(msg),
   }
-  render(result, skew.receive().unwrap_or(None))
+  render(renewal, result, skew.receive().unwrap_or(None))
 }
 
-/// The one place lll writes a command's outcome (LLL-683): the data to
-/// stdout and the notices to stderr (none under --json or --env), in the
-/// order the command gave them, then the version-skew line, then any error
-/// with its exit code.
-fn render(result: Result<output.Output, pb.CliError>, skew: Option<string>) {
+/// The one place lll writes a command's outcome (LLL-683): what came before
+/// the command (a login renewal's note), then the command's data to stdout
+/// and its notices to stderr (none under --json or --env) in the order it
+/// gave them, then the version-skew line, then any error with its exit code.
+fn render(before: output.Output, result: Result<output.Output, pb.CliError>, skew: Option<string>) {
+  write(before)
   if let Ok(out) = result { write(out) }
   if let Some(line) = skew {
     fmt.Fprintln(os.Stderr, line)
@@ -89,27 +92,27 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<output.
     "member" => commands.member(ctx, args),
     "invite" => commands.invite(ctx, args),
     "project" => commands.project(ctx, args),
-    "api" => commands.api(ctx, args).map(|_| output.none()),
+    "api" => commands.api(ctx, args),
     "label" => commands.label(ctx, args),
     "doc" => commands.doc(ctx, args),
     "finding" => commands.finding(ctx, args),
     "import" => commands.import_cmd(ctx, args),
-    "export" => commands.export_cmd(ctx, args).map(|_| output.none()),
+    "export" => commands.export_cmd(ctx, args),
     "config" => commands.config_cmd(ctx, args),
-    "login" => commands.login(ctx, args).map(|_| output.none()),
-    "logout" => commands.logout(ctx, args).map(|_| output.none()),
-    "whoami" => commands.whoami(ctx, args).map(|_| output.none()),
+    "login" => commands.login(ctx, args),
+    "logout" => commands.logout(ctx, args),
+    "whoami" => commands.whoami(ctx, args),
     "token" => commands.token(ctx, args),
     "bot" => commands.bot(ctx, args),
-    "attach" => commands.attach(ctx, args).map(|_| output.none()),
-    "watch" => commands.watch(ctx, args).map(|_| output.none()),
+    "attach" => commands.attach(ctx, args),
+    "watch" => commands.watch(ctx, args),
     "webhook" => commands.webhook(ctx, args),
-    "search" => commands.search_cmd(ctx, args).map(|_| output.none()),
-    "up" => commands.up(ctx, args).map(|_| output.none()),
-    "board" => commands.board(ctx, args).map(|_| output.none()),
-    "skill" => commands.skill(args).map(|_| output.none()),
-    "completions" => commands.completions(args).map(|_| output.none()),
-    "upgrade" => commands.upgrade(args).map(|_| output.none()),
+    "search" => commands.search_cmd(ctx, args),
+    "up" => commands.up(ctx, args),
+    "board" => commands.board(ctx, args),
+    "skill" => commands.skill(args),
+    "completions" => commands.completions(args),
+    "upgrade" => commands.upgrade(args),
     "--help" | "-h" => Ok(usage(ctx)),
     "help" => help(ctx, args),
     "--version" | "-v" | "version" => version(noun, args),

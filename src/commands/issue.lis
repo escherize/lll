@@ -701,7 +701,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "stream live events for the issue and its comments until interrupted",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
-      run: |i| printed(issue_watch(i)),
+      run: |i| streamed(issue_watch(i)),
       ..,
     },
     flags.Command {

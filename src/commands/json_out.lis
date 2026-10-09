@@ -1,6 +1,4 @@
 import "go:encoding/json"
-import "go:fmt"
-import "go:os"
 import "go:strings"
 
 import "display"
@@ -9,28 +7,9 @@ import "models"
 import "output"
 import "pb"
 
-/// Print a value as JSON, the end of every `--json` command that prints one
-/// record. Timestamps come out in RFC3339 (contract_json).
-///
-/// `what` names the value in the encoding error, the only thing that varied
-/// between the commands that used to repeat these lines.
-fn print_json(value: Unknown, what: string) -> Result<(), pb.CliError> {
-  let raw = encode_json(value, what)?
-  fmt.Println(contract_json(raw, 0) as string)
-  Ok(())
-}
-
 /// The --json flag of a write verb that prints `what` afterwards.
 fn json_after_flag(what: string) -> flags.Flag {
   flags.Flag { name: "--json", help: f"print {what} afterwards as JSON", .. }
-}
-
-/// The empty-state line every list prints when it has nothing to show
-/// (LLL-645): "no labels" on stderr, so stdout stays empty for pipes and
-/// `| wc -l`, and a person can tell an empty list from a broken read.
-fn say_empty(what: string) -> Result<(), pb.CliError> {
-  let _ = fmt.Fprintln(os.Stderr, f"no {what}")
-  Ok(())
 }
 
 /// Where a list's items sit in the whole result, for the list envelope.
@@ -64,23 +43,6 @@ struct ListEnvelope {
   total_items: int,
   #[json("totalPages")]
   total_pages: int,
-}
-
-/// Print a list in the one envelope every `list --json` uses (LLL-645, D2):
-/// {items, page, perPage, totalItems, totalPages}, whatever the flags.
-/// `items` is always an array, never null.
-fn print_list_json(items: Unknown, at: ListPage, what: string) -> Result<(), pb.CliError> {
-  let mut encoded = encode_json(items, what)?
-  if encoded as string == "null" { encoded = "[]".bytes() as json.RawMessage }
-  let envelope = ListEnvelope {
-    items: contract_json(encoded, 0),
-    page: at.page,
-    per_page: at.per_page,
-    total_items: at.total_items,
-    total_pages: at.total_pages,
-  }
-  fmt.Println(encode_json(envelope, what)? as string)
-  Ok(())
 }
 
 fn encode_json(value: Unknown, what: string) -> Result<json.RawMessage, pb.CliError> {
@@ -265,8 +227,9 @@ fn issue_document(record: string, claim: Option<models.Claim>) -> Result<output.
   Ok(output.json(encode_json(fields, "issue")? as string))
 }
 
-/// A verb that still prints for itself, adapted to return an Output while
-/// the verbs move over to returning theirs (LLL-683).
-fn printed(r: Result<(), pb.CliError>) -> Result<output.Output, pb.CliError> {
+/// A streaming command's result: it wrote each line as it happened, which a
+/// stream must (scripts/test_command_output.py allowlists the writers), so
+/// nothing is left for the renderer but an error.
+fn streamed(r: Result<(), pb.CliError>) -> Result<output.Output, pb.CliError> {
   r.map(|_| output.none())
 }

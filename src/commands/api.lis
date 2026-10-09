@@ -7,6 +7,7 @@ import "go:strings"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 
 // `lll api METHOD PATH` — raw passthrough to the board's server API, the
@@ -28,26 +29,23 @@ pub fn api_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = api_spec()
   // Two bare words: METHOD and PATH, like `veans api` and curl.
   let p = flags.parse_n(spec, args, 2, 2, "lll api METHOD PATH [--body TEXT] [--fail]")?
   if p.given("--help") {
-    print_api_usage()
-    return Ok(())
+    return Ok(output.line(api_usage_page()))
   }
   if p.given("--schema") {
     if p.positional_count() != 0 {
       return Err(flags.usage_error("--schema prints the reference; it takes no METHOD PATH"))
     }
-    fmt.Print(schema_reference())
-    return Ok(())
+    return Ok(output.text(schema_reference()))
   }
   let method = strings.ToUpper(p.nth(0))
   let path = p.nth(1)
   if method == "" && path == "" {
-    print_api_usage()
-    return Ok(())
+    return Ok(output.line(api_usage_page()))
   }
   if path == "" {
     return Err(flags.usage_error("lll api needs METHOD and PATH (see 'lll api --help')"))
@@ -55,7 +53,7 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   if !strings.HasPrefix(path, "/") {
     return Err(flags.usage_error(f"path must start with '/': got '{path}'. The path is joined to the configured board url ('lll config list' shows it)"))
   }
-  send(ctx, method, path, p.one("--body"), p.given("--fail"))
+  streamed(send(ctx, method, path, p.one("--body"), p.given("--fail")))
 }
 
 /// One raw request, deliberately NOT through pb.send: the client classifies
@@ -63,6 +61,10 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
 /// right for the verbs and wrong for a passthrough whose whole job is to show
 /// the API as it answered. Transport failures still get the client's
 /// "cannot reach PocketBase" message, because that failure is the same one.
+///
+/// It writes the answer itself, as a passthrough: with --fail an error
+/// answer prints its body AND exits non-zero, and an Output is only ever
+/// rendered on success.
 fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<(), pb.CliError> {
   let (cfg, _src) = ctx.settings.traced().map_err(pb.failed)?
   let base = strings.TrimRight(cfg.url, "/")
@@ -99,10 +101,6 @@ fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: boo
     return Err(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string))
   }
   Ok(())
-}
-
-fn print_api_usage() {
-  fmt.Println(api_usage_page())
 }
 
 /// The hand-written page for `lll api`, pure so its text can be asserted:

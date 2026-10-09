@@ -1,4 +1,3 @@
-import "go:fmt"
 import "go:net/url"
 import "go:os"
 import "go:io/fs"
@@ -10,6 +9,7 @@ import "display"
 import "flags"
 import "mirror"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "records"
@@ -26,7 +26,7 @@ import "records"
 /// flock. Under Git none of it is needed — `git status` reports an edit,
 /// `git checkout` undoes one, and the commit is the atomic unit. What is
 /// kept is the part Git cannot do: refusing to publish an incomplete read.
-pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = export_spec()
   let usage = flags.usage("lll export", spec, "[DIR]")
   let p = flags.parse_n(spec, args, 2, 1, usage)?
@@ -90,10 +90,7 @@ pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError
   }
   write_file(filepath.Join(dir, "README.md"), readme(team.key))?
 
-  fmt.Println(
-    f"{issues.length()} issues, {docs.length()} docs, {blobs} attachments -> {dir}",
-  )
-  Ok(())
+  Ok(output.line(f"{issues.length()} issues, {docs.length()} docs, {blobs} attachments -> {dir}"))
 }
 
 pub fn export_spec() -> Slice<flags.Flag> {
