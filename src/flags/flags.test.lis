@@ -388,6 +388,18 @@ fn unsupported_team_flag_supplies_the_requested_environment_override() {
   assert quoted.message.contains("LLL_TEAM='owner'\\''s team'")
 }
 
+/// The 1.0 fleet: on a server-wide command LLL_TEAM filters nothing, so the
+/// override is not offered.
+#[test]
+fn a_server_wide_command_does_not_offer_the_team_override() {
+  let assert Err(members) = parse([], argv(["--team", "FLEET"]), 3, false, "lll member list [--json]")
+  assert members.message.contains("member list is server-wide; the last column shows each member's teams")
+  assert !members.message.contains("LLL_TEAM")
+  let assert Err(teams) = parse([], argv(["--team", "FLEET"]), 3, false, "lll team view KEY [--json]")
+  assert teams.message.contains("'lll team view' is server-wide")
+  assert !teams.message.contains("LLL_TEAM")
+}
+
 // LLL-501, fleet case B05: `lll api GET /api/health --url <lan>` was refused
 // as a bare unknown flag, and an operator on a fresh machine had no way to
 // learn how the endpoint IS chosen. A command that takes --url declares it,

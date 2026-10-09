@@ -17,6 +17,10 @@ import "tokens"
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
 pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+  // 1.0 fleet: one member's details live under access.
+  if args.get(2) == Some("view") || args.get(2) == Some("show") {
+    return Err(flags.usage_error(f"unknown member command: '{args.get(2).unwrap_or("")}'; did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)"))
+  }
   flags.dispatch(ctx,
     "member",
     "work with members",

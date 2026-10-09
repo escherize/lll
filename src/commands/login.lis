@@ -39,7 +39,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
       name: "--password",
       value: true,
       hint: "pw",
-      help: "password; omit to be prompted (a terminal reads it with echo off)",
+      help: "password; '-' reads it from stdin; omit to be prompted (a terminal\nreads it with echo off)",
       ..,
     },
     flags.Flag {
@@ -162,7 +162,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     f"Password for {email}: "
   }
   let password = if p.given("--password") {
-    p.one("--password")
+    password_value(p.one("--password"), input)?
   } else {
     read_password(input, prompt)?
   }
@@ -622,6 +622,13 @@ fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string,
   let line = read_line(input)?
   fmt.Println("")
   Ok(line)
+}
+
+/// A password flag's value; '-' reads one line from stdin, the Unix
+/// convention (two 1.0 agents logged in with the literal password "-").
+fn password_value(raw: string, input: mut Ref<bufio.Reader>) -> Result<string, pb.CliError> {
+  if raw == "-" { return read_line(input) }
+  Ok(raw)
 }
 
 /// One line from stdin, EOL stripped. Partial.Both (data, then EOF with no
