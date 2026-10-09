@@ -423,7 +423,11 @@ pub fn setup_hint(ctx: pb.Client) -> string {
   // into a runnable line is the same mistake three usability rounds caught in
   // the not-logged-in refusal: it reads as discovered fact and pastes into a
   // failure against a server nobody named.
-  let url = if src.url == "default" { "<your server url>" } else { cfg.url }
+  let url = match src.url {
+    Some(config.Source.Default) => "<your server url>",
+    Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) |
+      Some(config.Source.HomeFile(_)) | None => cfg.url,
+  }
   f"
 Not set up on a server yet: nothing here holds a login token.
   lll login --url {url} --email <your email> --password <pw>
@@ -548,7 +552,7 @@ pub fn renew_login_token(settings: config.Settings) -> config.Settings {
   // file: a login rewriting it between the two reads would otherwise pair
   // the old token with the new url.
   if saved.token != cfg.token { return settings }
-  if !renews_home_login(src, home, saved.url, cfg.url) { return settings }
+  if !renews_home_login(src, saved.url, cfg.url) { return settings }
   if !pb.token_needs_refresh(cfg.token, time.Now().Unix() as int) { return settings }
   match pb.refresh_token(cfg.url, cfg.token) {
     Ok(fresh) => {
@@ -565,7 +569,7 @@ pub fn renew_login_token(settings: config.Settings) -> config.Settings {
   }
 }
 
-/// Whether the effective token comes from the home config at `home` and the
+/// Whether the effective token comes from the home config and the
 /// effective `url` is exactly the home config's url, whatever set it (or the
 /// url is the default and the home config names none). The refresh request
 /// carries the token, so it must go to the server that issued it: an LLL_URL
@@ -577,9 +581,20 @@ pub fn renew_login_token(settings: config.Settings) -> config.Settings {
 /// case, localhost for 127.0.0.1) could only widen the set of urls that
 /// receive the token; a near-miss skips one renewal, which is the safe way
 /// to be wrong.
-fn renews_home_login(src: config.Sources, home: string, home_url: string, url: string) -> bool {
-  if src.token != f"file:{home}" { return false }
-  if home_url == "" { return src.url == "default" }
+fn renews_home_login(src: config.Sources, home_url: string, url: string) -> bool {
+  let from_home = match src.token {
+    Some(config.Source.HomeFile(_)) => true,
+    Some(config.Source.RepoFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => false,
+  }
+  if !from_home { return false }
+  if home_url == "" {
+    return match src.url {
+      Some(config.Source.Default) => true,
+      Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.RepoFile(_)) |
+        Some(config.Source.HomeFile(_)) | None => false,
+    }
+  }
   url == home_url
 }
 

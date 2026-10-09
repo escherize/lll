@@ -21,7 +21,7 @@ import "tokens"
 /// team that lives only in this process is not an option. No one to ask
 /// (stdin is not a terminal: scripts, agents, CI) means no boot.
 ///
-/// `source` is where `want` came from, as `config.load_traced` reports it;
+/// `source` is where `want` came from, as `config.Settings.traced` reports it;
 /// `throwaway` is true when the boot named its own --pb-dir.
 ///
 /// TASK-115: a boot that settles a team must leave it settled. `LLL_TEAM=X
@@ -31,7 +31,7 @@ import "tokens"
 /// configured" all over again. Persisting closes that loop, under two
 /// conditions that keep it from becoming TASK-143's stray-file bug:
 ///
-///   - a `file:` source has persisted it already, so there is nothing to do
+///   - a file source has persisted it already, so there is nothing to do
 ///     and rewriting a committed .lll.toml on every boot would be churn;
 ///   - a --pb-dir boot is a throwaway or a scratch board, and the team it
 ///     settled is a fact about that database rather than about this
@@ -40,7 +40,7 @@ import "tokens"
 fn ensure_team(
   ctx: pb.Client,
   want: string,
-  source: string,
+  source: Option<config.Source>,
   throwaway: bool,
 ) -> Result<string, pb.CliError> {
   if want != "" {
@@ -68,10 +68,10 @@ fn ensure_team(
       },
     }
   }
-  // Same bargain as the configured branch above. The source is "" here — the
+  // Same bargain as the configured branch above. The source is None here — the
   // key was just typed, so no file supplies it yet and it is worth writing
   // unless this is a scratch board (TASK-143).
-  if should_save_team("", throwaway) { save_team(ctx, key)? }
+  if should_save_team(None, throwaway) { save_team(ctx, key)? }
   Ok(key)
 }
 
@@ -80,11 +80,14 @@ fn ensure_team(
 /// TASK-143 guard: a wrong answer here is a config file appearing in a
 /// directory nobody attached, which is a bug that shows up hours later
 /// somewhere else entirely.
-fn should_save_team(source: string, throwaway: bool) -> bool {
+fn should_save_team(source: Option<config.Source>, throwaway: bool) -> bool {
   // A --pb-dir boot's team belongs to that database, not to this directory.
   if throwaway { return false }
   // A file already carries it; rewriting it every boot is churn.
-  !strings.HasPrefix(source, "file:")
+  match source {
+    Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) => false,
+    Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => true,
+  }
 }
 
 /// A configured team key, created on the server if it is missing. Another
@@ -134,7 +137,7 @@ fn board_identity(
   let admin = config.AdminCreds { email, password: pass }
   let board = ctx
     .with_settings(ctx.settings.with_admin(admin))
-    .with_token(token, "")
+    .with_token(token, None)
     .renewing(Some(pb.Renewal { admin, member: member.id.string() }))
   let id = member.id.string()
   let refresh: fn() -> Result<string, pb.CliError> = || {

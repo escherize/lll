@@ -110,6 +110,7 @@ python3 -m unittest discover -s scripts -p 'test_no_ambient_env.py'
 python3 -m unittest discover -s scripts -p 'test_write_layer.py'
 python3 -m unittest discover -s scripts -p 'test_module_deps.py'
 python3 -m unittest discover -s scripts -p 'test_typed_boundaries.py'
+python3 -m unittest discover -s scripts -p 'test_typed_sources.py'
 python3 -m unittest discover -s scripts -p 'test_migration_names.py'
 python3 scripts/check_assets.py
 """

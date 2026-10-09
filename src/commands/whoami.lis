@@ -3,6 +3,7 @@ import "go:encoding/json"
 import "go:fmt"
 import "go:strings"
 
+import "config"
 import "flags"
 import "models"
 import "pb"
@@ -156,14 +157,14 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
     let access = access_line(ctx, me, body)?.unwrap_or("")
     return print_json(WhoamiJson {
       id: me.id, name, email: me.email, kind, server: cfg.url, team: cfg.team,
-      token_source: src.token, scope: me.scope, mode: me.mode, access,
+      token_source: config.origin(src.token), scope: me.scope, mode: me.mode, access,
     }, "whoami")
   }
   fmt.Println(f"{name} <{me.email}>")
   fmt.Println(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none; run 'lll attach')" } else { cfg.team }
   fmt.Println(f"team    {team}")
-  fmt.Println(f"token   {src.token}")
+  fmt.Println(f"token   {config.origin(src.token)}")
   if let Some(access) = access_line(ctx, me, body)? {
     fmt.Println(f"access  {access}")
   }

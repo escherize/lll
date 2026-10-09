@@ -298,10 +298,10 @@ check what is configured with 'lll config list'"),
           )
         } else if cfg.token != "" {
           fmt.Println(
-            f"auth   the token from {src.token} is not valid for {db_url}; booting on the superuser credentials instead; the cli line below says what the CLI does",
+            f"auth   the token from {config.origin(src.token)} is not valid for {db_url}; booting on the superuser credentials instead; the cli line below says what the CLI does",
           )
         }
-        ctx = ctx.with_token(tok, "")
+        ctx = ctx.with_token(tok, None)
         fmt.Println(
           "auth   rules are authenticated-only; bootstrapping with superuser credentials before signing in the board as a member",
         )
@@ -340,7 +340,7 @@ password in its own data directory's .lll-admin.json."),
     Ok(team) => team,
     Err(e) => {
       let credential = if member_token_ok {
-        f"token from {src.token}"
+        f"token from {config.origin(src.token)}"
       } else {
         "superuser token generated for this startup"
       }
@@ -361,7 +361,11 @@ password in its own data directory's .lll-admin.json."),
     )
   }
   if demo {
-    seed_demo(ctx, team, member.name, db_url, strings.HasPrefix(src.token, "file:"))?
+    let token_in_file = match src.token {
+      Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) => true,
+      Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => false,
+    }
+    seed_demo(ctx, team, member.name, db_url, token_in_file)?
   }
   let chosen = free_port(web_port)
   if chosen != web_port {
@@ -392,7 +396,6 @@ password in its own data directory's .lll-admin.json."),
         token_source: src.token,
         home_token: home.token,
         home_url: home.url,
-        home_path: ctx.settings.home_path().map_err(pb.failed)?,
         db_url,
       },
     )
@@ -536,12 +539,10 @@ struct CliState {
   /// The board listens on loopback only.
   loopback: bool,
   /// Where the configured token came from (config.Sources.token).
-  token_source: string,
+  token_source: Option<config.Source>,
   /// The token and url in the home config file, "" when absent.
   home_token: string,
   home_url: string,
-  /// The home config file's path, to tell its token from a repo file's.
-  home_path: string,
   /// This boot's API url.
   db_url: string,
 }
@@ -575,22 +576,25 @@ fn cli_login_plan(s: CliState) -> CliLogin {
       "a board bound beyond this machine leaves the CLI's login alone",
     )
   }
-  if s.token_source == "env:LLL_TOKEN" && s.home_token != "" {
-    return CliLogin.Keep(
-      "LLL_TOKEN in this shell is not valid for this server: unset it (the home config keeps its own token)",
-    )
-  }
-  // A repo file's token outranks the home config's, and 'lll logout' clears
-  // only the home one, so the repo line is named first.
-  if let Some(path) = strings.CutPrefix(s.token_source, "file:") {
-    if path != s.home_path {
+  match s.token_source {
+    Some(config.Source.Env(name)) => {
+      if s.home_token != "" {
+        return CliLogin.Keep(
+          f"{name} in this shell is not valid for this server: unset it (the home config keeps its own token)",
+        )
+      }
+    },
+    // A repo file's token outranks the home config's, and 'lll logout' clears
+    // only the home one, so the repo line is named first.
+    Some(config.Source.RepoFile(path)) => {
       let home = if s.home_token != "" {
         "; if the home config's token is not valid here either, also run 'lll logout'"
       } else { "" }
       return CliLogin.Keep(
         f"the token in {path} is not valid for this server: remove that line{home}, then restart lll up",
       )
-    }
+    },
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => (),
   }
   if s.home_token != "" {
     return CliLogin.Keep(
@@ -612,20 +616,24 @@ fn log_cli_in(
   name: string,
   db_url: string,
   plan: CliLogin,
-  token_source: string,
+  token_source: Option<config.Source>,
 ) -> Result<Slice<string>, pb.CliError> {
   match plan {
-    CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {token_source}"]),
+    CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {config.origin(token_source)}"]),
     CliLogin.Untouched(why) => Ok([f"cli    unchanged: {why}"]),
     CliLogin.Keep(how) => Ok([f"cli    not logged in to this board: {how}"]),
     CliLogin.Save => {
       let _ = set_home_key(ctx.settings, "url", db_url)?
       let path = set_home_key(ctx.settings, "token", ctx.token())?
       let mut lines = [f"cli    logged in as {name}; url and token saved to {path}"]
-      if token_source == "env:LLL_TOKEN" {
-        lines = lines.append(
-          "cli    LLL_TOKEN in this shell overrides that login, and this server does not accept it: unset LLL_TOKEN",
-        )
+      match token_source {
+        Some(config.Source.Env(name)) => {
+          lines = lines.append(
+            f"cli    {name} in this shell overrides that login, and this server does not accept it: unset {name}",
+          )
+        },
+        Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) |
+          Some(config.Source.Default) | None => (),
       }
       Ok(lines)
     },

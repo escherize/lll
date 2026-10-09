@@ -8,9 +8,7 @@ fn test_client(url: string, token: string, team: string) -> pb.Client {
   pb.Client.new(config.given(
     config.Config { url, token, team, .. },
     config.Sources {
-      url: "test",
-      token: "test",
-      team: "file:/test/.lll.toml",
+      team: Some(config.Source.RepoFile("/test/.lll.toml")),
       ..,
     },
     config.Env { .. },
