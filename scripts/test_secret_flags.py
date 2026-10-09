@@ -23,10 +23,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SECRET_FLAGS = {'--password', '--old-password', '--admin-password', '--token', '--secret'}
 SECRET_WORD = re.compile(r'password|token|secret', re.I)
+REVEAL = re.compile(r'\breveal\b')
 FLAG = re.compile(r'name:\s*"(--[a-z-]+)",(?:[^}]*?hint:\s*"([^"]*)")?', re.S)
 
-# (relative path, stripped line) -> where the text goes. Keep it short: a new
-# entry is a new place a secret leaves its type, and the PR adding it says why.
+# (relative path, stripped line) -> where the text goes. Each line is allowed
+# once per file. Keep it short: a new entry is a new place a secret leaves
+# its type, and the PR adding it says why.
 REVEALS = {
     ('src/commands/login.lis', 'let tok = strings.TrimSpace(given.reveal())'):
         '--token: sent to the access route, then saved to the home config',
@@ -90,21 +92,25 @@ def violations(files, reveals=REVEALS):
             found.append(f'{", ".join(declared[name])}: declares {name}, which nothing reads with secret.Secret.read')
     seen = set()
     for rel, text in files:
+        if rel.startswith('src/secret/'):
+            continue
         for n, line in enumerate(text.splitlines(), 1):
-            if '.reveal()' not in line or line.strip().startswith('//'):
+            if not REVEAL.search(line) or line.strip().startswith('//'):
                 continue
             key = (rel, line.strip())
             if key not in reveals:
-                found.append(f'{rel}:{n}: reveal() outside the allowed send/save sites: {line.strip()}')
+                found.append(f'{rel}:{n}: reveal outside the allowed send/save sites: {line.strip()}')
+            elif key in seen:
+                found.append(f'{rel}:{n}: a second copy of an allowed reveal line: {line.strip()}')
             seen.add(key)
     for rel, line in sorted(set(reveals) - seen):
         found.append(f'{rel}: allowed reveal no longer present, drop it from REVEALS: {line}')
     secret = dict(files).get('src/secret/secret.lis', '')
     if re.search(r'pub struct Secret\s*\{[^}]*\bpub\b', secret):
         found.append('src/secret/secret.lis: Secret has a public field')
-    for name in re.findall(r'pub fn (\w+)\(self[^)]*\)\s*->\s*string', secret):
-        if name not in ('reveal', 'string', 'go_string'):
-            found.append(f'src/secret/secret.lis: Secret.{name} returns a string')
+    for name, ret in re.findall(r'pub fn (\w+)\([^)]*\)\s*->\s*([^{]+)\{', secret):
+        if re.search(r'string|byte', ret) and name not in ('read', 'reveal', 'string', 'go_string'):
+            found.append(f'src/secret/secret.lis: {name} returns text ({ret.strip()})')
     return found
 
 
@@ -140,9 +146,13 @@ class SecretFlagsTest(unittest.TestCase):
             [base[0], base[1], ('src/commands/b.lis', 'fmt.Println(s.reveal())')],
             [('src/secret/secret.lis', 'pub struct Secret { pub value: string }'), base[1]],
             [('src/secret/secret.lis', 'pub fn text(self) -> string { self.value }'), base[1]],
+            [('src/secret/secret.lis', 'pub fn bytes(s: Secret) -> Option<Slice<byte>> {'), base[1]],
+            [base[0], base[1], ('src/commands/b.lis', 'fmt.Println(chosen.map_or("", secret.Secret.reveal))')],
         ]
         for files in planted:
             self.assertTrue(violations(files, {}), files)
+        twice = [base[0], base[1], ('src/commands/b.lis', 'send(s.reveal())\nsend(s.reveal())')]
+        self.assertTrue(violations(twice, {('src/commands/b.lis', 'send(s.reveal())'): 'a send'}))
 
 
 if __name__ == '__main__':

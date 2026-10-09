@@ -215,7 +215,7 @@ pub fn given_admin_login(settings: config.Settings, p: flags.Parsed) -> Result<A
   let email = p.one("--admin-email")
   // Only one flag can read stdin: a second reader would lose what the first
   // one buffered.
-  if secret.from_stdin(p, "--admin-password") && (secret.from_stdin(p, "--password") || secret.from_stdin(p, "--old-password")) {
+  if secret.from_stdin(p, "--admin-password") && (secret.from_stdin(p, "--password") || secret.from_stdin(p, "--old-password") || secret.from_stdin(p, "--token")) {
     return Err(flags.usage_error("only one password flag can read stdin ('-'); pass the other as a value"))
   }
   let pass = if p.given("--admin-password") {
