@@ -96,7 +96,7 @@ pub fn check_kind(val: string) -> Result<string, pb.CliError> {
   if kind == "" { return Ok("wiki") }
   if records.doc_kinds().find(|k| k == kind).is_none() {
     return Err(
-      flags.usage_error(f"unknown kind '{kind}' (use one of: {strings.Join(records.doc_kinds(), ", ")})"),
+      flags.usage_error(flags.not_in("kind", kind, records.doc_kinds())),
     )
   }
   Ok(kind)
@@ -110,7 +110,7 @@ pub fn check_confidence(val: string) -> Result<string, pb.CliError> {
   let c = strings.TrimSpace(strings.ToLower(val))
   if c == "" { return Ok("confirmed") }
   if c != "suspected" && c != "confirmed" {
-    return Err(flags.usage_error(f"unknown confidence '{c}' (use: suspected, confirmed; 'finding refute SLUG -b why' is how a finding becomes refuted)"))
+    return Err(flags.usage_error(flags.not_in("confidence", c, ["suspected", "confirmed"])))
   }
   Ok(c)
 }

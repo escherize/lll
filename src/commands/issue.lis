@@ -40,16 +40,9 @@ fn value_or_stdin(val: string, flag: string) -> Result<string, pb.CliError> {
 /// A --priority value: a name on the scale (any case) or its number.
 fn check_priority(val: string) -> Result<models.Priority, pb.CliError> {
   if let Some(p) = models.Priority.named(strings.ToLower(val)) { return Ok(p) }
-  let Ok(n) = strconv.Atoi(val) else {
-    return Err(flags.usage_error(
-      f"unknown priority '{val}' (use none, urgent, high, medium, low, or 0-4)",
-    ))
-  }
-  let Some(p) = models.Priority.from_wire(n) else {
-    return Err(flags.usage_error(
-      f"--priority must be 0-4 (0 none, 1 urgent, 2 high, 3 medium, 4 low), got {n}",
-    ))
-  }
+  let refused = flags.usage_error(flags.not_in("priority", val, priority_values()))
+  let Ok(n) = strconv.Atoi(val) else { return Err(refused) }
+  let Some(p) = models.Priority.from_wire(n) else { return Err(refused) }
   Ok(p)
 }
 
@@ -88,6 +81,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       alias: "-p",
       value: true,
       hint: priority_hint(),
+      values: priority_values(),
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
@@ -201,6 +195,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       alias: "-p",
       value: true,
       hint: priority_hint(),
+      values: priority_values(),
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
@@ -357,6 +352,10 @@ fn issue_release_spec() -> Slice<flags.Flag> {
 
 /// Enum values ride the usage line, generated so they cannot drift (1.0
 /// fleet: three of ten read sixty lines of help to find them).
+fn priority_values() -> Slice<string> {
+  display.priorities().append(["0", "1", "2", "3", "4"]...)
+}
+
 fn priority_hint() -> string {
   strings.Join(display.priorities(), "|") + "|0-4"
 }

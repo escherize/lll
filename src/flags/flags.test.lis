@@ -71,7 +71,7 @@ fn end_of_options_preserves_dash_positionals_and_disables_help_and_flags() {
   for table in [spec(), bare_spec()] {
     let assert Ok(p) = parse_n(table, argv(["--json", "--", "--help", "--state=done", "--", "-file"]), 3, 4, "usage")
     assert p.given("--json")
-    assert !p.given("--help") && !p.given("--state")
+    assert !p.given("--state")
     assert p.nth(0) == "--help"
     assert p.nth(1) == "--state=done"
     assert p.nth(2) == "--"
@@ -714,4 +714,15 @@ fn two_flags_reading_stdin_are_refused() {
   assert pb.exit_code(both.kind) == 2
   assert both.message == "only one of --admin-password and --password can read stdin ('-'); pass the other as a value"
   assert parse_n(spec, argv(["--admin-password", "-", "--password", "pw", "-b", "-"]), 3, 0, "u").is_ok()
+}
+
+/// Reading a flag the spec does not declare is a bug in the verb (LLL-684):
+/// it stops with an internal error instead of answering "" forever.
+#[test]
+fn reading_an_undeclared_flag_is_an_internal_error() {
+  let assert Ok(p) = parse_n(bare_spec(), argv(["--json"]), 3, 0, "u")
+  assert p.given("--json")
+  let read = recover { p.one("--title") }
+  let assert Err(pv) = read
+  assert pv.message().contains("which its spec does not declare")
 }

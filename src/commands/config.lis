@@ -301,7 +301,7 @@ fn config_get(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       pb.failed("the token is a secret and is not printed; 'lll config list' shows where it comes from"),
     ),
     other => return Err(
-      flags.usage_error(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
+      flags.usage_error(flags.not_in("config key", other, ["url", "web_url", "team", "sort"])),
     ),
   }
   if origin.is_none() { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }

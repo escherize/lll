@@ -2,7 +2,6 @@ import "display"
 import "records"
 import "go:encoding/json"
 import "go:net/url"
-import "go:strings"
 
 import "models"
 import "output"
@@ -137,7 +136,7 @@ fn project_delete_spec() -> Slice<flags.Flag> {
 fn check_status(val: string) -> Result<string, pb.CliError> {
   if records.project_statuses().find(|s| s == val).is_none() {
     return Err(
-      flags.usage_error(f"unknown status '{val}' (use one of: {strings.Join(records.project_statuses(), ", ")})"),
+      flags.usage_error(flags.not_in("status", val, records.project_statuses())),
     )
   }
   Ok(val)

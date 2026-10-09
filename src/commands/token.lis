@@ -595,7 +595,7 @@ workflow. --env prints only the two export lines on stdout:
 /// credential or server call, with the spelling that would work.
 fn require_bot_prefix(command: string, name: string) -> Result<(), pb.CliError> {
   if strings.HasPrefix(name, "bot-") { return Ok(()) }
-  Err(flags.usage_error(f"bot names are reserved to the bot- prefix - got '{name}'; try '{command} bot-{name}'"))
+  Err(flags.usage_error(flags.bot_prefix(command, name)))
 }
 
 /// The credential `lll bot` creates and rotates with, and the member it

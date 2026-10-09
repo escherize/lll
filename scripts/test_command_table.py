@@ -9,7 +9,9 @@ runs, and src/flags/hints.lis is the one rule that answers a wrong guess.
 
 This test reads the non-test .lis sources and holds that shape:
 
-- every handler reads only flags its own spec declares. For each
+- every handler reads only flags its own spec declares (Parsed also stops
+  with an internal error at run time on such a read; this finds it without
+  running the verb). For each
   flags.Command literal it follows calls from the `run:` handler and from the
   `spec:` expression through src/commands and src/flags, collects the flag
   names read (`.one("--x")`, `.given(...)`, `.all(...)`, or a helper called
@@ -21,10 +23,10 @@ This test reads the non-test .lis sources and holds that shape:
   help_requested; os.Args outside src/main.lis), so no verb lives outside
   the table;
 - no spec declares --help (the table answers it, exit 0, everywhere);
-- the wording of a did-you-mean or recovery hint for a command line
-  ("did you mean", "unknown ... command", "it is ... verb", a `Guess` table)
-  appears only in src/flags/hints.lis, so a hand-written hint table cannot
-  reappear beside a verb.
+- the wording of a did-you-mean or recovery hint ("did you mean", "unknown
+  ... command", "it is ... verb", "(use one of: ...)", "; try '...'", "to X
+  one, run", a `Guess` table) appears only in src/flags/hints.lis, so a
+  hand-written hint table cannot reappear beside a verb.
 
 Known limits: the call graph is by name within src/commands and src/flags,
 so it over-approximates (a helper that reads a flag on one path counts for
@@ -42,7 +44,8 @@ CALL = re.compile(r'(?<![\w.])(\w+)\s*\(')
 FLAGS_CALL = re.compile(r'\bflags\.(\w+)\s*\(')
 
 # Hint wording outside the rule, each with why it is not a command-line hint.
-HINT = re.compile(r'did you mean|unknown (?:[a-z]+ )*command|it is an? [a-z]+ verb|\bGuess\s*\{')
+HINT = re.compile(r'did you mean|unknown (?:[a-z]+ )*command|it is an? [a-z]+ verb|\bGuess\s*\{'
+                  r"|\bno [a-z]+ verb\b|\bto [a-z]+ (?:one|it),? run\b|\(use one of: |\(use: [a-z]|got '[^']*'; try '|; keys: |does not [a-z]+; to ")
 HINT_ALLOW = {
     'src/query/query.lis': "the board's state parser for URL filters; the CLI refuses the same value first, in the parser, with the same words (issue_filters.test pins that they match)",
 }
@@ -243,6 +246,10 @@ class CommandTableTest(unittest.TestCase):
         self.assertEqual({a or b for a, b in READ.findall('p.one("--a") secret.from_stdin(p, "--b")')}, {'--a', '--b'})
         self.assertTrue(HINT.search('f"unknown issue command: \'{w}\'"'))
         self.assertTrue(HINT.search('"it is a member verb"'))
+        for planted in ["no issue verb 'rm'; to remove one run lll issue delete", "unknown kind 'x' (use one of: a, b)",
+                        "bad name - got 'x'; try 'lll bot create bot-x'", "unknown key 'x'; keys: a, b",
+                        "update does not claim; to claim, run: lll issue claim KEY"]:
+            self.assertTrue(HINT.search(planted), planted)
         for allowed in list(HINT_ALLOW) + list(PARSER_ALLOW):
             self.assertTrue((ROOT / allowed).exists(), allowed)
 

@@ -229,10 +229,14 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
 
 impl Parsed {
   pub fn positional_count(self) -> int { self.pos.length() }
-  /// The canonical name for a spelling, or the name itself when unknown.
+  /// The canonical name for a spelling. A spelling the spec does not declare
+  /// is a bug in the verb, not a user error (LLL-684): its value would always
+  /// be empty, which is how a renamed flag kept a dead branch for a release
+  /// (attach's -k). It stops the command with an internal error, so a test
+  /// or the first run that reaches the read finds it, instead of a silent "".
   fn canon(self, name: string) -> string {
     let Some(fl) = self.spec.find(|f| spells(f, name)) else {
-      return name
+      panic(f"lll internal error: a verb read the flag {name}, which its spec does not declare; please report this")
     }
     fl.name
   }

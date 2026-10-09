@@ -68,6 +68,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "set the team's glyph, beside its key ('' clears it)",
       spec: [json_after_flag("the team record")],
       positional: "KEY EMOJI",
+      missing: "the emoji is one emoji; an empty '' clears it",
       run: team_set_emoji,
       ..
     },
@@ -292,9 +293,6 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// inverts the rule TASK-83 was built on.
 fn team_set_accent(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
-  if input.parsed.positional_count() != 2 {
-    return Err(flags.usage_error("usage: lll team set-accent KEY #rrggbb (empty '' clears it)"))
-  }
   let key = input.parsed.first()
   let raw = input.parsed.nth(1)
   // The colour is checked before the lookup: a typo is the likelier mistake
@@ -337,9 +335,6 @@ fn accent_value(raw: string) -> Result<string, pb.CliError> {
 /// the accent is: a shared field only the web can write inverts the rule.
 fn team_set_emoji(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
-  if input.parsed.positional_count() != 2 {
-    return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
-  }
   let key = input.parsed.first()
   let glyph = records.team_emoji_value(input.parsed.nth(1))?
   let Some(t) = records.find_team(ctx, key)? else {

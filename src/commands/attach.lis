@@ -82,7 +82,7 @@ fn attach(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     return Err(pb.failed(f"no team key in '{name}' to derive one from; pass it: lll attach --key KEY"))
   }
   if p.given("--key") {
-    if let Some(problem) = records.team_key_problem(key) { return Err(pb.failed(problem)) }
+    if let Some(problem) = records.team_key_problem(key) { return Err(flags.usage_error(problem)) }
   }
 
   // Attaching to an archived team is refused, not silently revived: archive

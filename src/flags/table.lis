@@ -171,7 +171,6 @@ fn command(
     let page = if c.page != "" { c.page } else { usage_help(usage, c.spec) }
     return Ok(Invocation.Help(Topic.Page(page)))
   }
-  if let Some(hint) = verb_as_flag(noun, c, args, start) { return Err(usage_error(hint)) }
   let (least, most) = arity(c.positional)
   let parsed = match parse_n(c.spec, args, start, most, usage) {
     Ok(p) => p,
@@ -179,6 +178,7 @@ fn command(
       if most == 0 && e.message.starts_with("unexpected argument") {
         return Err(e.with_message(extra_argument(path, e.message)))
       }
+      if let Some(hint) = flag_guess(path, c.spec, args, start) { return Err(e.with_message(hint)) }
       return Err(e)
     },
   }

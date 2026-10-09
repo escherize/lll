@@ -89,7 +89,7 @@ fn another_nouns_verb_as_the_command_names_its_noun() {
 /// 18), with its values when it has a closed set (case 20).
 #[test]
 fn an_update_field_typed_as_a_verb_names_the_flag() {
-  assert refusal(["lll", "issue", "priority"]) == "unknown issue command 'priority'; to change it use 'lll issue update KEY-123 --priority <name>'"
+  assert refusal(["lll", "issue", "priority"]).starts_with("unknown issue command 'priority'; to change it use 'lll issue update KEY-123 --priority <name>' (one of: none, urgent")
   assert refusal(["lll", "issue", "state", "FLEET-4"]).contains("--state <name>' (one of: backlog, todo, in-progress, in-review, done, cancelled)")
   // 'title' is a verb of its own.
   assert refusal(["lll", "issue", "title"]) == ""
@@ -118,14 +118,48 @@ fn a_comment_sub_verb_guess_names_the_form_that_does_it() {
   assert runs(["lll", "issue", "comment", "edit", "FLEET-4", "1", "-b", "x"])
 }
 
-/// 1.0 fleet: claiming by update was guessed three times; another verb typed
-/// as a flag names that verb.
+/// 1.0 fleet: claiming by update was guessed three times. That one guess
+/// is in the table; another verb's name as a flag is not read as a verb
+/// (PR #348 review: '--delete' on a comment pointed at deleting the issue).
 #[test]
-fn another_verb_typed_as_a_flag_names_the_verb() {
+fn only_the_guessed_flag_names_another_verb() {
   assert refusal(["lll", "issue", "update", "FLEET-4", "--claim"]) == "update does not claim; to claim, run: lll issue claim FLEET-4"
   assert refusal(["lll", "issue", "update", "--claim"]) == "update does not claim; to claim, run: lll issue claim KEY"
   // A declared flag is never refused: 'issue next --claim' claims.
   assert runs(["lll", "issue", "next", "--claim"])
+  for args in [
+    ["lll", "issue", "comment", "FLEET-4", "1", "--delete"],
+    ["lll", "issue", "comment", "FLEET-4", "--edit"],
+    ["lll", "label", "edit", "bug", "--delete"],
+    ["lll", "issue", "view", "FLEET-4", "--id"],
+  ] {
+    let msg = refusal(args)
+    assert msg.starts_with("unknown flag: '--")
+    assert !msg.contains("run: lll")
+  }
+  // The --url teaching survives on every issue verb.
+  assert refusal(["lll", "issue", "list", "--url", "http://x"]).contains("This command takes no --url")
+}
+
+/// Server-wide and offline commands get no LLL_TEAM override hint, offline
+/// ones no endpoint text; whoami names its bare form (LLL-493).
+#[test]
+fn scope_hints_fit_the_command() {
+  for args in [["lll", "version", "--team", "X"], ["lll", "completions", "bash", "--team", "X"]] {
+    assert refusal(args).contains("is server-wide: no team applies to it")
+  }
+  assert !refusal(["lll", "version", "--url", "http://x"]).contains("endpoint")
+  assert !refusal(["lll", "completions", "bash", "--url", "http://x"]).contains("endpoint")
+  assert refusal(["lll", "whoami", "--team", "X"]).contains("run it bare to see the identity, server and team")
+}
+
+/// Value refusals outside the parser speak through the rule too.
+#[test]
+fn value_refusals_share_one_shape() {
+  assert flags.not_in("confidence", "maybe", ["suspected", "confirmed"]) == "unknown confidence 'maybe' (use one of: suspected, confirmed; 'finding refute SLUG -b why' is how a finding becomes refuted)"
+  assert refusal(["lll", "issue", "create", "-t", "x", "--priority", "9"]).starts_with("unknown priority '9' (use one of: none, urgent, high, medium, low, 0, 1, 2, 3, 4)")
+  assert runs(["lll", "issue", "create", "-t", "x", "--priority", "HIGH"])
+  assert refusal(["lll", "team", "set-emoji", "ENG"]).starts_with("the emoji is one emoji; an empty '' clears it")
 }
 
 /// The 1.0 fleet: one member's details live under access; 'lll bot list'
