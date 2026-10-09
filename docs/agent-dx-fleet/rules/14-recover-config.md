@@ -86,7 +86,9 @@ Use this JSON shape:
 }
 ```
 
-`answer.exit_codes_seen` lists the failing exit codes you met, in order.
+`answer.exit_codes_seen` lists the non-zero exit codes you met, in order
+(e.g. `[6]`). The first `./lll whoami` failure is planted: record it there and
+in the call log, not in `failures`.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact
