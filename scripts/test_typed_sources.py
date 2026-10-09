@@ -11,10 +11,13 @@ keeps the strings from coming back, reading every non-test .lis file:
 
 - no origin is compared to, or taken apart as, a string: no "file:",
   "env:" or "flag:" in a prefix or suffix test, no ".lll.toml" suffix test,
-  no comparison with an origin literal;
-- a match that names a config.Source has no `_ =>` arm, so a new layer
-  fails to compile in every hint until the hint says what fixes it;
-- no `if let` picks one Source out, for the same reason.
+  no string test or comparison on config.origin(...), no comparison with an
+  origin literal;
+- a match that names a config.Source has no arm that catches every source
+  (`_`, a binding like `other`, or `Some(_)`), so a new layer fails to
+  compile in every hint until the hint says what fixes it;
+- no `if let` picks one Source out, and no `==`/`!=` compares one, for the
+  same reason.
 
 config.origin is the one place an origin becomes a string, for printing.
 """
@@ -24,12 +27,18 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 ORIGIN = r'"(?:file:|env:|flag:)'
-TAKES_APART = re.compile(
-    r'(?:HasPrefix|HasSuffix|TrimPrefix|TrimSuffix|CutPrefix|CutSuffix|starts_with|ends_with|contains|Contains)'
-    r'\([^)]*(?:' + ORIGIN + r'|"\.lll\.toml"\))')
+STRING_TESTS = re.compile(
+    r'\b(?:HasPrefix|HasSuffix|TrimPrefix|TrimSuffix|CutPrefix|CutSuffix|starts_with|ends_with|contains|Contains)\(')
 COMPARES = re.compile(
-    r'(?:==|!=)\s*f?(?:' + ORIGIN + r'|"default")|f?(?:' + ORIGIN + r'[^"]*"|"default")\s*(?:==|!=)')
+    r'(?:==|!=)\s*f?(?:' + ORIGIN + r'|"default")|f?(?:' + ORIGIN + r'[^"]*"|"default")\s*(?:==|!=)'
+    # A printed origin compared with anything: compare the Source instead.
+    r'|\borigin\([^()]*\)\s*(?:==|!=)|(?:==|!=)\s*(?:config\.)?origin\('
+    # A Source compared with ==: a hidden one-variant `if let`.
+    r'|(?:==|!=)\s*(?:Some\(\s*)?(?:config\.)?Source\.|\bSource\.\w+(?:\([^()]*\))?\)?\s*(?:==|!=)')
 PICKS_ONE = re.compile(r'\bif let\b[^{]*\bSource\.')
+NAMES_SOURCE = re.compile(r'\bSource\.|\b(?:Flag|Env|RepoFile|HomeFile)\(')
+# An alternative that matches any Source: `_`, a binding, or Some of either.
+CATCH_ALL = re.compile(r'^(?:Some\(\s*)?[a-z_]\w*\s*\)?$')
 
 
 def sources(root=ROOT):
@@ -42,16 +51,25 @@ def sources(root=ROOT):
     return out
 
 
+def balanced(text, start):
+    """The text from `start` (just past an opening paren or brace) to its match."""
+    depth, k = 1, start
+    while depth and k < len(text):
+        depth += {'(': 1, '{': 1, ')': -1, '}': -1}.get(text[k], 0)
+        k += 1
+    return text[start:k - 1]
+
+
+def without_strings(code):
+    """`code` with every string literal emptied, so its braces and commas
+    cannot be mistaken for code."""
+    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
+
+
 def match_bodies(code):
-    """The text between the braces of each `match ... {`, nested ones included."""
-    bodies = []
-    for m in re.finditer(r'\bmatch\b[^{\n]*\{', code):
-        depth, k = 1, m.end()
-        while depth and k < len(code):
-            depth += {'{': 1, '}': -1}.get(code[k], 0)
-            k += 1
-        bodies.append(code[m.end():k - 1])
-    return bodies
+    """The text between the braces of each `match ... {`, nested ones
+    included, whether or not the brace is on the match's own line."""
+    return [balanced(code, m.end()) for m in re.finditer(r'\bmatch\b[^{;]*\{', code)]
 
 
 def top_level(body):
@@ -67,20 +85,47 @@ def top_level(body):
     return ''.join(out)
 
 
+def split_top(text, sep):
+    """`text` split at each `sep` outside parentheses and brackets."""
+    parts, depth, cur = [], 0, []
+    for c in text:
+        if c in '([':
+            depth += 1
+        elif c in ')]':
+            depth -= 1
+        if c == sep and depth == 0:
+            parts.append(''.join(cur))
+            cur = []
+        else:
+            cur.append(c)
+    parts.append(''.join(cur))
+    return parts
+
+
+def arm_patterns(body):
+    """The pattern of each arm of a match body."""
+    return [arm.split('=>')[0].strip() for arm in split_top(top_level(body), ',') if '=>' in arm]
+
+
 def violations(files):
     found = []
     for rel, text in files:
         code = '\n'.join(l for l in text.split('\n') if not l.lstrip().startswith('//'))
-        for m in TAKES_APART.finditer(code):
-            found.append(f'{rel}: {m.group(0)}: match on config.Source, not on its printed form')
+        for m in STRING_TESTS.finditer(code):
+            args = balanced(code, m.end())
+            if re.search(ORIGIN + r'|"\.lll\.toml"|\borigin\(', args):
+                found.append(f'{rel}: {m.group(0)}{args}): match on config.Source, not on its printed form')
         for m in COMPARES.finditer(code):
-            found.append(f'{rel}: {m.group(0)}: compare config.Source values, not origin strings')
+            found.append(f'{rel}: {m.group(0)}: match on config.Source; do not compare it or its printed form')
         for m in PICKS_ONE.finditer(code):
             found.append(f'{rel}: {m.group(0)}: match every config.Source, so a new one must be handled')
-        for body in match_bodies(code):
-            arms = top_level(body)
-            if 'Source.' in arms and re.search(r'(?:^|[,{(]|\s)_\s*=>', arms):
-                found.append(f'{rel}: a match on config.Source has a `_ =>` arm; name every source')
+        for body in match_bodies(without_strings(code)):
+            patterns = arm_patterns(body)
+            if not any(NAMES_SOURCE.search(p) for p in patterns):
+                continue
+            for p in patterns:
+                if any(CATCH_ALL.match(alt.strip()) for alt in split_top(p, '|')):
+                    found.append(f'{rel}: `{p} =>` in a match on config.Source catches every source; name each one')
     return found
 
 
@@ -101,6 +146,15 @@ class TypedSourcesTest(unittest.TestCase):
             'if "flag:--team" == origin {}',
             'if let Some(config.Source.RepoFile(path)) = src.token {}',
             'match src.url {\n  Some(config.Source.Default) => 1,\n  _ => 2,\n}',
+            'match src.url {\n  Some(config.Source.Default) => 1,\n  Some(_) | None => 2,\n}',
+            'match src.url {\n  Some(config.Source.Default) => 1,\n  other => 2,\n}',
+            'match src.url {\n  Some(config.Source.Default) => { 1 },\n  _ => 2,\n}',
+            'let x = match\n  src.url {\n  Some(config.Source.Default) => 1,\n  _ => 2,\n}',
+            'if src.url == Some(config.Source.Default) {}',
+            'if Source.Default != s {}',
+            'if strings.HasPrefix(config.origin(src.url), "file:") {}',
+            'if strings.HasSuffix(config.origin(src.url), ".lll.toml") {}',
+            'if config.origin(src.url) == "default" {}',
         ]
         for code in planted:
             self.assertTrue(violations([('src/x/x.lis', code)]), code)
@@ -109,7 +163,8 @@ class TypedSourcesTest(unittest.TestCase):
             'let path = filepath.Join(dir, ".lll.toml")',
             'if exists(".lll.toml") { return Some(".lll.toml") }',
             '// a comment may say strings.HasPrefix(origin, "file:")',
-            'match src.url {\n  Some(config.Source.Default) => 1,\n  Some(_) | None => 2,\n}',
+            'match src.url {\n  Some(config.Source.Default) => f"{a}, b",\n  Some(config.Source.Env(name)) | None => g(name, 1),\n}',
+            'let from = if source.is_none() { "unset" } else { config.origin(source) }',
             'match kind {\n  Kind.A => { match x { _ => 1 } },\n  _ => 2,\n}',
         ]
         self.assertEqual(violations([('src/x/x.lis', c) for c in clean]), [])

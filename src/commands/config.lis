@@ -348,10 +348,7 @@ fn committed_token_warning(ctx: pb.Client, source: Option<config.Source>) -> Opt
 }
 
 fn print_origin(source: Option<config.Source>, key: string, value: string) {
-  let from = match source {
-    None => "unset",
-    Some(_) => config.origin(source),
-  }
+  let from = if source.is_none() { "unset" } else { config.origin(source) }
   let role = match key {
     "url" => "\tAPI base (reads and writes)",
     "web_url" => "\tboard base (browser links)",
