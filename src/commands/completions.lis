@@ -1,31 +1,27 @@
-import "go:fmt"
 import "go:strings"
 
 import "flags"
+import "output"
 import "pb"
 
 // `lll completions <shell>` — static completion scripts, all generated from
 // the one command table below (nouns, verbs per noun, flags per verb).
 
-pub fn completions(args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn completions(args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let parsed = flags.parse([], args, 2, true, completions_usage())?
   let shell = parsed.first()
   if shell == "" {
-    fmt.Println(completions_usage())
-    return Ok(())
+    return Ok(output.line(completions_usage()))
   }
   match shell {
     "bash" => {
-      fmt.Print(bash_script())
-      Ok(())
+      Ok(output.text(bash_script()))
     },
     "zsh" => {
-      fmt.Print(zsh_script())
-      Ok(())
+      Ok(output.text(zsh_script()))
     },
     "fish" => {
-      fmt.Print(fish_script())
-      Ok(())
+      Ok(output.text(fish_script()))
     },
     other => Err(flags.usage_error(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
   }

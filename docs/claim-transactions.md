@@ -55,6 +55,21 @@ token, leaves the claim alone, as before: a PATCH carries no force and writes
 no comment. The CLI spells it `lll issue update KEY --state done
 [--keep-claim]`.
 
+Both rules are one table (LLL-685): the from-state, the caller's hold (none,
+its own, another session's, another member's) and the ask (a close, or a
+move to a state, with `keep_claim` and, for a close, `force`) give the
+claim's fate: untouched, released, kept, force-released or left with its
+holder, or a refusal (`needs_force`, `claim_held`). The server enforces it:
+`TransitionClaim` in `gopb/transition.go`, which `/close` and the finish
+rule read. The client statement of the same table is `move_effect` and
+`close_effect` in `src/models/transition.lis`; `src/models/transition.test.lis`
+runs every row through both and fails when they disagree. The client does
+not refuse or predict from it: the server checks the agent label, a
+read-only member and an archived team first, so the CLI sends what was asked
+and reports what the server did. Every client state write goes through
+`models.transition`, and the write layer puts a state on the wire only as
+the `StateWrite` it makes (`scripts/test_transition_ratchet.py`).
+
 A claimed issue cannot be deleted (LLL-662). The issues DELETE request is
 refused while a claim exists, for every caller, because the claim relation
 cascades and the hold would vanish with no record. `lll issue delete KEY

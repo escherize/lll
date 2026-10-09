@@ -49,9 +49,11 @@ pub struct Replacement {
   pub new: string,
 }
 
-/// One edit of one issue, from the CLI or the board.
+/// One edit of one issue, from the CLI or the board. A state change is the
+/// Effects models.transition planned for it (LLL-685): no edit sets a state
+/// the transition table has not seen.
 pub struct IssuePatch {
-  pub state: Option<models.IssueState>,
+  pub state: Option<models.Effects>,
   // The board's manual position; only a card move sets it.
   pub sort: Option<float64>,
   pub priority: Option<models.Priority>,
@@ -107,8 +109,9 @@ impl IssuePatch {
 /// route) is handed. A None field is left out, so the record keeps it.
 #[json]
 struct IssueFields {
+  // Only a planned transition's write (models.Effects.write) fills it.
   #[json(omitempty)]
-  state: Option<string>,
+  state: Option<models.StateWrite>,
   #[json(omitempty)]
   sort: Option<float64>,
   #[json(omitempty)]
@@ -153,17 +156,27 @@ pub enum UpdateFailure {
 /// edits the assignee, which goes through the claim route. Its agent label
 /// rides every write, because a move into done or cancelled releases the
 /// caller's own claim (the finish rule, gopb finishReleases) and the label
-/// says which session the caller is. `keep_claim` opts out of that release.
+/// says which session the caller is. The opt-out from that release rides
+/// with the state, in the patch's Effects. `observed` is the claim the
+/// caller already read, which an assignee edit names to the claim route.
 pub struct UpdateOptions {
   pub stamp: Option<string>,
   pub claim: ClaimAs,
-  pub keep_claim: bool,
+  pub observed: ClaimRead,
+}
+
+/// Whether the caller read the issue's claim before the update: Read carries
+/// that claim's id (None for unclaimed), so the write layer does not read it
+/// a second time.
+pub enum ClaimRead {
+  Unread,
+  Read(Option<models.ClaimId>),
 }
 
 impl UpdateOptions {
   /// No stamp, no label, no force: a plain edit as `caller`.
   pub fn as_caller(caller: pb.Caller) -> UpdateOptions {
-    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. }, keep_claim: false }
+    UpdateOptions { stamp: None, claim: ClaimAs { caller, .. }, observed: ClaimRead.Unread }
   }
 }
 
@@ -194,14 +207,15 @@ pub fn update_issue(
     Relation.Keep => false,
     _ => true,
   }
-  let observed = if assigning {
-    match claims.observed_id(ctx, issue.id) {
+  let observed = match (assigning, opts.observed) {
+    (false, _) => None,
+    (true, ClaimRead.Read(id)) => id,
+    (true, ClaimRead.Unread) => match claims.observed_id(ctx, issue.id) {
       Ok(id) => id,
       Err(e) => return Err(UpdateFailure.Failed(e)),
-    }
-  } else {
-    None
+    },
   }
+  let keep_claim = patch.state.map_or(false, |e| e.keep_claim())
   let mut current = issue
   let mut attempt = 1
   loop {
@@ -218,7 +232,7 @@ pub fn update_issue(
       assigning,
       observed,
       opts.claim,
-      opts.keep_claim,
+      keep_claim,
     )
     match result {
       Ok(t) => return Ok(t),
@@ -339,7 +353,7 @@ fn issue_fields(
   }
   Ok((
     IssueFields {
-      state: patch.state.map(|s| s.wire()),
+      state: patch.state.map(|e| e.write()),
       sort: patch.sort,
       priority: patch.priority.map(|p| p.wire()),
       assignee: relation_value(patch.assignee, |id| id.string()),

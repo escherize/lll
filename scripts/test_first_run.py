@@ -84,7 +84,9 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
         out = run(board_dir, env, 'member', 'invite', 'kim', '--email', 'kim@example.com', '--team', 'FIRST')
         assert out.returncode == 0, out.stdout + out.stderr
         temp = re.search(r'temporary password: (\S+)', out.stdout).group(1)
-        assert f'lll member set-password kim --old-password {temp}' in out.stdout, out.stdout
+        # The hint prompts for the old password; the value is printed once.
+        assert 'lll member set-password kim --old-password -' in out.stdout, out.stdout
+        assert out.stdout.count(temp) == 1, out.stdout
         assert '/t/FIRST/?board_token=' in out.stdout, out.stdout
         kim_dir = root / 'kim'
         kim_dir.mkdir()

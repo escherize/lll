@@ -50,7 +50,7 @@ fn only_an_empty_token_means_absent() {
 #[test]
 fn a_refused_default_url_points_at_login_url() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://127.0.0.1:8090", "default", e)
+  let msg = unreachable_hint("http://127.0.0.1:8090", Some(config.Source.Default), e)
   assert msg.message.contains("127.0.0.1:8090")
   assert msg.message.contains("lll login --url")
 }
@@ -58,7 +58,7 @@ fn a_refused_default_url_points_at_login_url() {
 #[test]
 fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://tracker.example.com:8091", "", e)
+  let msg = unreachable_hint("http://tracker.example.com:8091", None, e)
   assert msg.message.contains("tracker.example.com:8091")
   assert !msg.message.contains("lll login --url")
 }
@@ -67,13 +67,13 @@ fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
 #[test]
 fn a_refused_saved_url_names_its_file_and_the_fix() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://old.example.com", "file:/home/a/.config/lll/lll.toml", e)
+  let msg = unreachable_hint("http://old.example.com", Some(config.Source.HomeFile("/home/a/.config/lll/lll.toml")), e)
   assert msg.message.contains("comes from /home/a/.config/lll/lll.toml")
   assert msg.message.contains("lll config set url URL")
-  let env = unreachable_hint("http://old.example.com", "env:LLL_URL", e)
+  let env = unreachable_hint("http://old.example.com", Some(config.Source.Env("LLL_URL")), e)
   assert env.message.contains("LLL_URL in the environment")
   assert !env.message.contains("lll login --url")
-  let repo = unreachable_hint("http://old.example.com", "file:/r/.lll.toml", e)
+  let repo = unreachable_hint("http://old.example.com", Some(config.Source.RepoFile("/r/.lll.toml")), e)
   assert repo.message.contains("edit its url line")
   assert !repo.message.contains("config set url")
 }
@@ -159,7 +159,7 @@ fn a_renewed_token_reaches_every_copy_of_the_client() {
   c.renew_to("new")
   assert copy.token() == "new"
   // with_token starts a separate session: the original keeps its own.
-  let other = c.with_token("other", "")
+  let other = c.with_token("other", None)
   assert other.token() == "other"
   assert c.token() == "new"
 }
@@ -301,7 +301,7 @@ fn a_refused_file_token_is_replaced_by_the_one_the_file_holds_now() {
   assert body.contains("\"t1\"")
   assert c.token() == fresh
   // A token a boot handed over is never traded for a file's.
-  let handed = c.with_token(old, "")
+  let handed = c.with_token(old, None)
   let assert Err(_) = handed.get("/api/collections/teams/records")
   assert handed.token() == old
 }
@@ -342,11 +342,111 @@ fn another_servers_token_in_the_file_is_never_sent_here() {
 /// password paths; the holder of a valid token has one too.
 #[test]
 fn an_expired_token_names_login_token_and_config_check() {
-  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "file:/home/a/.config/lll/lll.toml")
+  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.HomeFile("/home/a/.config/lll/lll.toml")), "lll login")
   assert msg.message.contains("lll login --token -")
   assert msg.message.contains("lll config check")
   // LLL_TOKEN outranks a login, so the message says to fix the variable.
-  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "env:LLL_TOKEN")
+  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", Some(config.Source.Env("LLL_TOKEN")), "lll login")
   assert env.message.contains("LLL_TOKEN outranks the saved token")
   assert !env.message.contains("lll login --token -")
+}
+
+// LLL-687: every hint that says how to fix the url or the token, one row
+// per source. A new config.Source fails to compile in each hint's match
+// before it can reach these tables; its row here then pins what it says.
+
+#[test]
+fn the_unreachable_hint_names_each_url_source() {
+  let e = errors.New("connection refused")
+  let plain = unreachable("http://h", e).message
+  let rows: Slice<(Option<config.Source>, string)> = [
+    (Some(config.Source.Flag("--url")), "\nthis url comes from --url"),
+    (Some(config.Source.Env("LLL_URL")), "\nthis url comes from LLL_URL in the environment; correct or unset it"),
+    (Some(config.Source.RepoFile("/r/.lll.toml")), "\nthis url comes from /r/.lll.toml; edit its url line, or remove it to use the machine's"),
+    (Some(config.Source.HomeFile("/h/lll/lll.toml")), "\nthis url comes from /h/lll/lll.toml; fix with 'lll config set url URL' or 'lll login --url URL'"),
+    (Some(config.Source.Default), "\nno url is configured on this machine; connect with: lll login --url https://your-server"),
+    (None, ""),
+  ]
+  for (source, line) in rows {
+    assert unreachable_hint("http://h", source, e).message == plain + line
+  }
+}
+
+#[test]
+fn the_not_logged_in_remedy_names_a_url_only_when_someone_chose_it() {
+  let rows: Slice<(Option<config.Source>, string)> = [
+    (Some(config.Source.Flag("--url")), "not logged in to http://h\n"),
+    (Some(config.Source.Env("LLL_URL")), "not logged in to http://h\n"),
+    (Some(config.Source.RepoFile("/r/.lll.toml")), "not logged in to http://h\n"),
+    (Some(config.Source.HomeFile("/h/lll/lll.toml")), "not logged in to http://h\n"),
+    (Some(config.Source.Default), "not logged in to http://h (the default; nothing here configured a url)\n"),
+    (None, "not logged in to http://h\n"),
+  ]
+  for (source, head) in rows {
+    let msg = not_logged_in("http://h", source).message
+    assert msg.starts_with(head)
+    let defaulted = head.contains("the default")
+    assert msg.contains("lll login --url <your server url>") == defaulted
+  }
+}
+
+#[test]
+fn the_token_refusals_name_each_token_source() {
+  let rows: Slice<(Option<config.Source>, string, string)> = [
+    (Some(config.Source.Flag("--token")), "your token", "the configured token"),
+    (Some(config.Source.Env("LLL_TOKEN")), "the token in LLL_TOKEN", "LLL_TOKEN"),
+    (Some(config.Source.RepoFile("/r/.lll.toml")), "the token in /r/.lll.toml", "/r/.lll.toml"),
+    (Some(config.Source.HomeFile("/h/lll/lll.toml")), "the token in /h/lll/lll.toml", "/h/lll/lll.toml"),
+    (Some(config.Source.Default), "your token", "the configured token"),
+    (None, "your token", "the configured token"),
+  ]
+  for (source, named, corrupted) in rows {
+    assert token_named(source) == named
+    assert stale_token("http://h", source, "lll login").message.starts_with(f"{named} was rejected by http://h\n")
+    assert expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", source, "lll login").message.starts_with(f"{named} expired at ")
+    assert corrupted_token(source).message.starts_with(f"the token in {corrupted} is corrupted:")
+  }
+}
+
+#[test]
+fn the_token_fix_follows_what_outranks_a_login() {
+  let login = "'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify"
+  let rows: Slice<(Option<config.Source>, string)> = [
+    (Some(config.Source.Flag("--token")), login),
+    (Some(config.Source.Env("LLL_TOKEN")), "LLL_TOKEN outranks the saved token: set it to a valid one ('lll token create <member>' mints an agent's), or unset it to use the saved one ('lll login' saves a new one). Then 'lll config check' to verify"),
+    // A login lands in the home file, which the repo file outranks.
+    (Some(config.Source.RepoFile("/r/.lll.toml")), "remove the token line from /r/.lll.toml, which outranks the saved token; then 'lll login' saves a new one to the home config. Then 'lll config check' to verify"),
+    (Some(config.Source.HomeFile("/h/lll/lll.toml")), login),
+    (Some(config.Source.Default), login),
+    (None, login),
+  ]
+  for (source, fix) in rows {
+    assert token_fix(source, "lll login") == fix
+  }
+}
+
+// LLL-688: a hint names --url when a repo file, the environment or a flag
+// chose the url, because a plain 'lll login' refuses such a url.
+#[test]
+fn the_login_hint_names_a_url_somebody_else_chose() {
+  assert login_command("http://b", Some(config.Source.RepoFile("/r/.lll.toml"))) == "lll login --url http://b"
+  assert login_command("http://b", Some(config.Source.Env("LLL_URL"))) == "lll login --url http://b"
+  assert login_command("http://b", Some(config.Source.Flag("--url"))) == "lll login --url http://b"
+  assert login_command("http://b", Some(config.Source.HomeFile("/h/lll.toml"))) == "lll login"
+  assert login_command("http://b", Some(config.Source.Default)) == "lll login"
+  assert token_fix(Some(config.Source.HomeFile("/h/lll.toml")), "lll login --url http://b").contains("'lll login --url http://b --token -'")
+}
+
+#[test]
+fn a_withheld_login_names_the_layer_that_chose_the_url() {
+  let held = |source| config.Withheld { home_url: "http://a", url: "http://b", url_source: source }
+  let repo = withheld_login(held(Some(config.Source.RepoFile("/r/.lll.toml"))))
+  // The safe fix first; logging in to the url a repo chose comes last,
+  // naming what it sends and what it replaces (LLL-688 re-review).
+  assert repo.message == "/r/.lll.toml points this command at http://b, but your saved login is for http://a, so it was not sent
+to use your saved login: remove the url line from /r/.lll.toml
+only if you trust http://b: lll login --url http://b (this sends your credentials to http://b and replaces the saved login for http://a)"
+  assert exit_code(repo.kind) == 6
+  assert withheld_login(held(Some(config.Source.Env("LLL_URL")))).message.contains("\nto use your saved login: unset LLL_URL\n")
+  assert withheld_login(held(Some(config.Source.Flag("--url")))).message.starts_with("--url points this command at http://b")
 }

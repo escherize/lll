@@ -3,7 +3,6 @@ import "claims"
 import "references"
 import "go:bytes"
 import "go:encoding/json"
-import "go:fmt"
 import "go:io"
 import "go:os"
 import "go:os/exec"
@@ -15,6 +14,7 @@ import "go:unicode/utf8"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "provenance"
 import "query"
@@ -23,7 +23,7 @@ import "writes"
 // The verbs that change an issue: create, update, close, delete, comment
 // (and comment edit/delete), pr and ref.
 
-fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   // A bare title is accepted alongside -t: `gh issue create`, `linear` and
@@ -101,15 +101,14 @@ fn create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // PocketBase expands the create response itself. A later read must not
   // turn a successful write into an apparent failure and invite retries.
   if p.given("--json") {
-    return print_issue_json(body, None)
+    return issue_document(body, None)
   }
   let mut reuse = CreationReuse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &reuse) {
     return Err(pb.failed(f"decoding creation reuse: {e}"))
   }
   let action = if reuse.reused { "Reused" } else { "Created" }
-  fmt.Println(f"{action} {team.key}-{created.number}: {created.title}")
-  Ok(())
+  Ok(output.line(f"{action} {team.key}-{created.number}: {created.title}"))
 }
 
 #[json]
@@ -135,7 +134,7 @@ fn parse_description_replacement(
   Ok((parts[0], parts[1]))
 }
 
-fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -262,7 +261,9 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // the issue back after 'Updated KEY' because it said nothing else.
   let mut changed: Slice<string> = []
   if let Some(s) = state { changed = changed.append(f"state={s.wire()}") }
-  if let Some(n) = priority { changed = changed.append(f"priority={n.wire()}") }
+  // The name, not the wire number: four final-replay agents (case 18) set
+  // high and read back priority=2.
+  if let Some(n) = priority { changed = changed.append(f"priority={n.name()}") }
   let mut assignee = writes.Relation.Keep
   // The 1.0 fleet: a worker "claimed" with '--assignee <itself>'. Assigning
   // is not claiming, so text output says how to hold the issue.
@@ -333,22 +334,26 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // `--emoji ""` clears the marker, so this one keys off the flag, not the value.
   if emoji_set { changed = changed.append(f"emoji={emoji}") }
 
-  let mut patch = writes.IssuePatch { state, priority, assignee, project, labels, description, .. }
+  let assigning = assignee_name != ""
+  // One read of the claim before the write (LLL-685): an assignee edit
+  // names it to the claim route, and a finishing move compares it with the
+  // claim read back after the write to say what the server did. Only a move
+  // into done or cancelled can release; re-saving the same state does not.
+  let finishing_move = state.map_or(false, |to| to.is_terminal() && issue.state() != Some(to))
+  let read_claim = assigning || finishing_move
+  let held_before = if read_claim { fetch_claim(ctx, issue.id)? } else { None }
+  let observed = if read_claim { writes.ClaimRead.Read(held_before.map(|h| h.id)) } else { writes.ClaimRead.Unread }
+  let me = records.token_member(ctx.token())
+  let hold = models.hold_of(held_before, me, agent)
+  let mut patch = writes.IssuePatch { priority, assignee, project, labels, description, .. }
+  if let Some(to) = state { patch.state = Some(models.transition(models.Ask.Move { to, keep_claim })) }
   if title_set { patch.title = Some(title) }
   if emoji_set { patch.emoji = Some(emoji) }
   let opts = writes.UpdateOptions {
     stamp: since,
     claim: writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason },
-    keep_claim,
+    observed,
   }
-  // Whether the caller held the claim before a finishing move: read again
-  // afterwards, it says what the server did with it.
-  let me = pb.token_subject(ctx.token())
-  // Only a move into done or cancelled can release; re-saving the same state does not.
-  let moves = state.is_some() && state != issue.state()
-  let held_before = if finishing && moves { fetch_claim(ctx, issue.id)? } else { None }
-  let mine_before = held_before.map_or(false, |h| me == Some(h.member.string()))
-  let assigning = assignee_name != ""
   let result = match writes.update_issue(ctx, issue, patch, opts) {
     Ok(t) => t,
     Err(writes.UpdateFailure.Failed(e)) => {
@@ -374,34 +379,43 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
       released = f" (released {t.member_name}'s claim{forced})"
     }
   }
-  if p.given("--json") { return print_issue_after(ctx, key) }
+  if p.given("--json") { return issue_after(ctx, key) }
   // A finishing move says what became of the claim it found, read back
   // from the server: released, kept on request, or left with a holder
   // whose claim this caller's move does not release (another member, or
-  // another agent label on this token).
-  if released == "" && held_before.is_some() {
-    match fetch_claim(ctx, issue.id)? {
-      None => if mine_before { released = "; released your claim (assignee kept)" },
-      Some(h) => {
-        if keep_claim && mine_before && (h.agent == "" || agent == "" || h.agent == agent) {
-          released = "; kept your claim"
-        } else {
-          let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
-          released = f"; {holder} still holds the claim: only the holder's own finish releases it"
-        }
-      },
+  // another agent label on this token). The claim rule says when there is
+  // anything to say.
+  if released == "" {
+    if let Some(to) = state {
+      if models.move_effect(issue.state(), to, hold, keep_claim) != models.ClaimEffect.Untouched {
+        released = finish_note(hold, keep_claim, fetch_claim(ctx, issue.id)?, me, agent)
+      }
     }
   }
-  fmt.Println(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
+  let mut out = output.line(f"Updated {issue.expand.team.key}-{issue.number}: {strings.Join(changed, ", ")}{released}")
   // Already claimed (by the caller, or the write would have been refused):
   // the hint would be wrong. A finish released the claim on purpose.
   if self_assigned && !finishing {
     let held = fetch_claim(ctx, issue.id)?
     if held.is_none() {
-      fmt.Println(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
+      out = out.notice(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
     }
   }
-  Ok(())
+  Ok(out)
+}
+
+/// The success line's word on what a finishing move did to the claim:
+/// `before` is the hold read before the write, `after` the claim read back.
+fn finish_note(before: models.Hold, keep_claim: bool, after: Option<models.Claim>, me: Option<models.MemberId>, agent: string) -> string {
+  let mine_before = before == models.Hold.Caller || before == models.Hold.OtherSession
+  let Some(h) = after else {
+    return if mine_before { "; released your claim (assignee kept)" } else { "" }
+  }
+  if keep_claim && mine_before && models.hold_of(Some(h), me, agent) == models.Hold.Caller {
+    return "; kept your claim"
+  }
+  let holder = display.byline(display.member_name(h.member, h.expand.member.name, "an unknown member"), h.agent)
+  f"; {holder} still holds the claim: only the holder's own finish releases it"
 }
 
 /// --assignee as given; an empty value is 'none' (the 1.0 fleet: three of ten
@@ -465,7 +479,7 @@ fn update_failure(key: string, failure: writes.UpdateFailure, stamped: bool) -> 
 /// keeps the holder's hold. Closing an issue someone else holds follows the
 /// release rule: refused without --force, and a forced close comments with
 /// --reason.
-fn close_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn close_issue(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue close [KEY-123] [--keep-claim] [--force [--reason \"why\"]]"
   let p = input.parsed
@@ -477,28 +491,31 @@ fn close_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
   let observed = claims.observed_id(ctx, issue.id)?
+  // The server decides what the close does to the claim (gopb
+  // TransitionClaim), after the checks it alone makes.
+  let effects = models.transition(models.Ask.Close { keep_claim: keep, force })
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
-  let result = writes.close_issue(ctx, issue.id, observed, by, keep).map_err(|e| {
+  let result = writes.close_issue(ctx, issue.id, observed, by, effects).map_err(|e| {
     if e.has_code(pb.ServerCode.NeedsForce) {
       e.with_message(f"{key}: {e.message} - 'lll issue close {key} --force --reason \"why\"' closes it anyway, releasing that claim and commenting on the issue")
     } else { e.with_message(f"{key}: {e.message}") }
   })?
-  if p.given("--json") { return print_issue_after(ctx, key) }
-  fmt.Println(f"Closed {key} ● done")
+  if p.given("--json") { return issue_after(ctx, key) }
+  let mut out = output.line(f"Closed {key} ● done")
   if result.claim_id != "" {
     let holder = display.byline(result.member_name, result.agent)
     if keep {
-      fmt.Println(f"Claim kept by {holder}; 'lll issue release {key}' gives it back.")
+      out = out.line(f"Claim kept by {holder}; 'lll issue release {key}' gives it back.")
     } else if result.forced {
-      fmt.Println(f"Released {holder}'s claim; forced, and commented on the issue.")
+      out = out.line(f"Released {holder}'s claim; forced, and commented on the issue.")
     } else {
-      fmt.Println(f"Released {holder}'s claim; assignee unchanged.")
+      out = out.line(f"Released {holder}'s claim; assignee unchanged.")
     }
   }
-  Ok(())
+  Ok(out)
 }
 
-fn delete_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn delete_issue(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let id = p.first()
@@ -537,11 +554,10 @@ fn delete_issue(input: flags.CommandInput) -> Result<(), pb.CliError> {
   writes.delete_issue(ctx, issue.id).map_err(|e| {
     if held.is_some() { e.with_message(f"{e.message}\nthe claim on {label} was released, but the issue was not deleted") } else { e }
   })?
-  fmt.Println(f"Deleted {label}")
-  Ok(())
+  Ok(output.line(f"Deleted {label}"))
 }
 
-fn comment(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn comment(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -567,15 +583,17 @@ fn comment(input: flags.CommandInput) -> Result<(), pb.CliError> {
 
   if !body_set {
     let comments = records.fetch_comments(ctx, issue.id)?
-    if p.given("--json") { return print_list_json(comments, whole_list(comments.length()), "comments") }
-    if comments.is_empty() { return say_empty("comments") }
-    print_comments(comments)
+    if p.given("--json") { return list_json(comments, whole_list(comments.length()), "comments") }
+    if comments.is_empty() { return Ok(empty_list("comments")) }
     // Fleet tasks 4 and 5: every waiting agent re-read this list five times
     // ten seconds apart. The verb that blocks instead is named where the
-    // polling happens.
+    // polling happens, as a notice: a script reading the list gets the list.
     let key = f"{issue.expand.team.key}-{issue.number}"
-    fmt.Println(f"(waiting for the next one? 'lll issue watch {key} --until TEXT' blocks until a comment containing TEXT arrives)")
-    return Ok(())
+    return Ok(
+      comments_output(comments).notice(
+        f"(waiting for the next one? 'lll issue watch {key} --until TEXT' blocks until a comment containing TEXT arrives)",
+      ),
+    )
   }
   if body == "" { return Err(flags.usage_error(f"-b cannot be empty\nusage: {usage}")) }
 
@@ -588,19 +606,15 @@ fn comment(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
 
   let created = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body })?
-  if p.given("--json") {
-    fmt.Println(contract_json(created.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
-  }
+  if p.given("--json") { return Ok(json_body(created)) }
   // Show the authenticated author at the write, so token switches are visible.
   let as_who = if author_name == "" { "with no author; use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
-  fmt.Println(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}")
-  Ok(())
+  Ok(output.line(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}"))
 }
 
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and
 /// errors. Record the returned PR only after gh confirms successful creation.
-fn pr_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn pr_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue pr [KEY-123]"
   let id = input.parsed.first()
@@ -618,8 +632,9 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let key = f"{issue.expand.team.key}-{issue.number}"
   let (body, linked_only) = pr_body(issue_url(ctx, issue)?, issue.description)?
   let _ = records.active_issue(issue)?
+  let mut out = output.none()
   if linked_only {
-    let _ = fmt.Fprintln(os.Stderr, "issue description exceeds the PR body limit; linking to the full description instead")
+    out = out.notice("issue description exceeds the PR body limit; linking to the full description instead")
   }
 
   let mut cmd = exec.Command(
@@ -659,8 +674,8 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
     if let Err(save) = writes.append_ref(ctx, issue.id, existing_ref) {
       return Err(save.with_message(f"A pull request already exists: {existing_url}\nCould not confirm {existing_ref} on {key}: {save.message}\nRetry only the reference save: lll issue ref {key} {existing_ref}"))
     }
-    let _ = fmt.Fprintln(os.Stderr, f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
-    return Ok(())
+    out = out.notice(f"a pull request already existed for this branch; recorded {existing_ref} on {key}")
+    return Ok(out)
   }
   let Some((pr_url, reference)) = references.from_pr_output(captured.String()) else {
     return Err(pb.failed("gh pr create succeeded but did not report one unambiguous PR URL; the issue was not changed. Inspect the gh output before retrying; do not create a duplicate PR."))
@@ -668,13 +683,13 @@ fn pr_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = writes.append_ref(ctx, issue.id, reference) {
     return Err(e.with_message(f"PR created: {pr_url}\nCould not confirm {reference} on {key}: {e.message}\nRetry only the reference save: lll issue ref {key} {reference}"))
   }
-  Ok(())
+  Ok(out)
 }
 
 /// Both positionals are required, unlike the verbs that infer the issue from the
 /// branch: a lone `ref linear:ENG-118` is shaped exactly like a KEY, so guessing
 /// which one it is would silently append a wrong ref, and there is no unref.
-fn ref_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn ref_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue ref KEY-123 REF"
   let p = input.parsed
@@ -685,7 +700,7 @@ fn ref_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let outcome = writes.append_ref(ctx, issue.id, reference)?
   let action = if outcome.added { "Added" } else { "Already recorded" }
   let key = f"{issue.expand.team.key}-{issue.number}"
-  issue_done(ctx, p, key, f"{action} {reference} on {key}")
+  issue_ending(ctx, p, key, f"{action} {reference} on {key}")
 }
 
 /// Keep the issue as the authoritative full text when its description is
@@ -700,9 +715,10 @@ fn pr_body(link: string, description: string) -> Result<(string, bool), pb.CliEr
   Ok((fallback, true))
 }
 
-/// Print comments as "author (3h ago)", or "author [bot via OWNER] (3h ago)",
+/// Comments as "author (3h ago)", or "author [bot via OWNER] (3h ago)",
 /// then the indented body.
-fn print_comments(comments: Slice<models.Comment>) {
+fn comments_output(comments: Slice<models.Comment>) -> output.Output {
+  let mut out = output.none()
   // Numbered so 'comment edit KEY N' and 'comment delete KEY N' have a
   // handle (TASK-320): position in creation order, not the record id.
   let mut n = 0
@@ -710,9 +726,9 @@ fn print_comments(comments: Slice<models.Comment>) {
     n += 1
     let author = display.comment_byline(c.author_kind, c.author, c.expand.author.name, c.agent, "anon")
     let tag = if c.author_kind == "system" { "" } else { display.author_tag(c.expand.author.is_bot(), c.expand.author.owner_name()) }
-    fmt.Println(f"#{n} {author}{tag} ({display.relative(c.created)})")
-    fmt.Println(f"  {c.body}")
+    out = out.line(f"#{n} {author}{tag} ({display.relative(c.created)})").line(f"  {c.body}")
   }
+  out
 }
 
 /// `lll issue comment edit KEY N -b "body"` and `... delete KEY N`. N is the
@@ -725,7 +741,7 @@ fn comment_commands() -> Slice<flags.Command> {
   ]
 }
 
-fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), pb.CliError> {
+fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<output.Output, pb.CliError> {
   let spec = comment_mutate_spec(verb)
   let usage = flags.usage(f"lll issue comment {verb}", spec, "KEY-123 N")
   if p.first() == "" || p.nth(1) == "" { return Err(flags.usage_error(f"usage: {usage}")) }
@@ -756,8 +772,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), p
       return Err(aborted())
     }
     writes.delete_comment(ctx, c.id)?
-    fmt.Println(f"Deleted comment #{n} on {key} (was {whose}'s)")
-    return Ok(())
+    return Ok(output.line(f"Deleted comment #{n} on {key} (was {whose}'s)"))
   }
   let mut body = ""
   if p.given("-b") {
@@ -769,8 +784,7 @@ fn comment_mutate(ctx: pb.Client, verb: string, p: flags.Parsed) -> Result<(), p
     return Err(flags.usage_error(f"comment edit needs the new body: -b \"...\" (or '-b -' from stdin)\nusage: {usage}"))
   }
   writes.edit_comment(ctx, c.id, body)?
-  fmt.Println(f"Edited comment #{n} on {key}")
-  Ok(())
+  Ok(output.line(f"Edited comment #{n} on {key}"))
 }
 
 fn comment_mutate_spec(verb: string) -> Slice<flags.Flag> {

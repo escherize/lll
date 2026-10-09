@@ -1,5 +1,7 @@
 import "go:os"
 import "go:path/filepath"
+import "config"
+import "pb"
 
 // LLL-441 review: the home config is replaced by rename, and a rename onto a
 // symlink replaces the link. A dotfile-managed (stow, chezmoi) config must
@@ -29,4 +31,74 @@ fn writing_a_missing_home_config_creates_it() {
   let assert Ok(_) = write_home_config(path, "url = \"u\"\n")
   let assert Ok(data) = os.ReadFile(path)
   assert data as string == "url = \"u\"\n"
+}
+
+/// A client whose url and token came from `source`, reading no file.
+fn sourced(source: Option<config.Source>) -> pb.Client {
+  pb.Client.new(config.given(
+    config.Config { url: "http://h", token: "t", .. },
+    config.Sources { url: source, token: source, .. },
+    config.Env { home: "/h", .. },
+  ))
+}
+
+// LLL-687: only a token from a repo file is in a repo's history, one row per
+// source.
+#[test]
+fn only_a_repo_files_token_is_warned_about() {
+  let rows: Slice<(Option<config.Source>, Option<string>)> = [
+    (Some(config.Source.Flag("--token")), None),
+    (Some(config.Source.Env("LLL_TOKEN")), None),
+    (
+      Some(config.Source.RepoFile(".lll.toml")),
+      Some("warning: the token comes from .lll.toml, which is committed - move it to /h/.config/lll/lll.toml (or LLL_TOKEN) and mint a fresh one, since this one is in the repo's history"),
+    ),
+    (Some(config.Source.HomeFile("/h/.config/lll/lll.toml")), None),
+    (Some(config.Source.Default), None),
+    (None, None),
+  ]
+  for (source, warning) in rows {
+    assert committed_token_warning(sourced(source), source) == warning
+  }
+}
+
+// LLL-687: a refused superuser login names where the url was chosen, one row
+// per source.
+#[test]
+fn a_refused_superuser_login_names_where_the_url_came_from() {
+  let refused = pb.CliError { kind: pb.ErrorKind.Auth, status: 400, code: None, message: "Failed to authenticate.", said: None }
+  let chosen = "authenticating as the superuser: Failed to authenticate.\nif the administrator credentials are right, check the server: "
+  let rows: Slice<(Option<config.Source>, string)> = [
+    (Some(config.Source.Flag("--url")), chosen + "--url names another one"),
+    (Some(config.Source.Env("LLL_URL")), chosen + "LLL_URL names another one"),
+    (Some(config.Source.RepoFile(".lll.toml")), chosen + ".lll.toml names another one"),
+    (Some(config.Source.HomeFile("/h/.config/lll/lll.toml")), chosen + "/h/.config/lll/lll.toml names another one"),
+    (
+      Some(config.Source.Default),
+      "authenticating as the superuser: Failed to authenticate.\nthat url is the built-in default: nothing here configured one, so the credentials\nwere almost certainly sent to the wrong server. Name it: --url <your server url>",
+    ),
+    (None, chosen + "--url names another one"),
+  ]
+  for (source, message) in rows {
+    assert superuser_auth_failed(sourced(source), refused).message == message
+  }
+}
+
+// LLL-687: after a password change, the revoked token is replaced in place
+// only when it came from the home config; anything that outranks the home
+// config is named with its own fix. One row per source.
+#[test]
+fn a_revoked_token_is_replaced_where_it_came_from() {
+  let rows: Slice<(Option<config.Source>, Option<string>)> = [
+    (Some(config.Source.Flag("--token")), Some("tokens minted before this change are revoked, including the one from flag:--token; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+    (Some(config.Source.Env("LLL_TOKEN")), Some("tokens minted before this change are revoked, including the one from env:LLL_TOKEN; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+    (Some(config.Source.RepoFile(".lll.toml")), Some("tokens minted before this change are revoked, including the one in .lll.toml: remove its token line, which outranks the home config, then log in again with: lll login --email a@x")),
+    (Some(config.Source.HomeFile("/h/.config/lll/lll.toml")), None),
+    // Default and None never reach it (no token is refused first); pinned as they are.
+    (Some(config.Source.Default), Some("tokens minted before this change are revoked, including the one from default; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+    (None, Some("tokens minted before this change are revoked, including the one from ; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
+  ]
+  for (source, notice) in rows {
+    assert kept_token_notice(source, "a@x", "lll login") == notice
+  }
 }

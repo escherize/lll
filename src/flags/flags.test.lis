@@ -1,4 +1,5 @@
 import "config"
+import "output"
 import "pb"
 
 /// A client from literal settings (LLL-486): dispatch hands it to the verb.
@@ -161,7 +162,8 @@ fn parse_collects_a_single_positional_when_allowed() {
   assert p.first() == "ENG-6"
   // A second positional is rejected, naming the stray argument.
   let assert Err(msg) = parse(spec(), argv(["ENG-6", "ENG-7"]), 3, true, "")
-  assert msg.message == "unexpected argument: 'ENG-7'"
+  assert msg.message.starts_with("unexpected argument: 'ENG-7'")
+  assert msg.message.contains("this takes one issue key")
 }
 
 #[test]
@@ -478,7 +480,7 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
     spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
     positional: "", run: |input| {
       if input.parsed.one("-b") != "--help" { return Err(pb.failed("wrong body")) }
-      Ok(())
+      Ok(output.none())
     },
     ..
   }]
@@ -507,7 +509,7 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
     run: |input| {
       if input.parsed.positional_count() != 2 { return Err(pb.failed("missing positional")) }
       if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err(pb.failed("changed positional")) }
-      Ok(())
+      Ok(output.none())
     },
     ..
   }]
@@ -582,7 +584,7 @@ fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion()
       name: "view", alias: "show", hidden_alias: "read", summary: "view", positional: "KEY",
       run: |input| {
         if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
-        Ok(())
+        Ok(output.none())
       },
       ..
     },
@@ -594,7 +596,7 @@ fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion()
   let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "--help"])
   assert !help.message.contains("read")
   assert command_names(commands).equals(["view", "show"])
-  let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let without = [Command { name: "list", summary: "list", run: |_| Ok(output.none()), .. }]
   let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, ["lll", "team", "read"])
   assert pb.exit_code(plain.kind) == 2
 }
@@ -605,7 +607,7 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
     name: "view", alias: "show", summary: "view", page: "", spec: [],
     positional: "KEY", run: |input| {
       if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
-      Ok(())
+      Ok(output.none())
     },
     ..
   }]
@@ -622,12 +624,12 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
 #[test]
 fn hidden_command_dispatches_without_help_row_or_completion() {
   let commands = [
-    Command { name: "near", summary: "near", run: |_| Ok(()), .. },
+    Command { name: "near", summary: "near", run: |_| Ok(output.none()), .. },
     Command {
       name: "view", alias: "read", hidden: true, summary: "view", positional: "SLUG",
       run: |input| {
         if input.parsed.first() != "a-slug" { return Err(pb.failed("wrong slug")) }
-        Ok(())
+        Ok(output.none())
       },
       ..
     },
@@ -643,7 +645,7 @@ fn hidden_command_dispatches_without_help_row_or_completion() {
 
 #[test]
 fn empty_command_alias_does_not_resolve_an_empty_verb() {
-  let commands = [Command { name: "list", run: |_| Ok(()), .. }]
+  let commands = [Command { name: "list", run: |_| Ok(output.none()), .. }]
   assert resolve_command(commands, "").is_none()
   assert command_names(commands).equals(["list"])
 }
@@ -652,7 +654,7 @@ fn empty_command_alias_does_not_resolve_an_empty_verb() {
 /// is named back.
 #[test]
 fn a_top_level_command_typed_as_a_verb_is_suggested() {
-  let commands = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let commands = [Command { name: "list", summary: "list", run: |_| Ok(output.none()), .. }]
   let assert Err(e) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "whoami"])
   assert pb.exit_code(e.kind) == 2
   assert e.message.contains("unknown member command: 'whoami'; did you mean 'lll whoami'?")
@@ -660,9 +662,45 @@ fn a_top_level_command_typed_as_a_verb_is_suggested() {
   assert !plain.message.contains("did you mean")
 }
 
+// LLL-687: one row per source. A new source fails to compile in
+// url_default_hint before it can reach this table.
 #[test]
 fn the_url_default_hint_follows_where_the_url_came_from() {
-  assert url_default_hint("env:LLL_URL").contains("LLL_URL in the environment")
-  assert url_default_hint("file:/repo/.lll.toml").contains("/repo/.lll.toml; edit its url line")
-  assert url_default_hint("file:/home/me/.config/lll/lll.toml").contains("lll config set url URL")
+  let rows: Slice<(Option<config.Source>, string)> = [
+    (Some(config.Source.Flag("--url")), "to change the default, run 'lll config set url URL'"),
+    (Some(config.Source.Env("LLL_URL")), "the default comes from LLL_URL in the environment; correct or unset it"),
+    (Some(config.Source.RepoFile("/repo/.lll.toml")), "the default comes from /repo/.lll.toml; edit its url line"),
+    (Some(config.Source.HomeFile("/home/me/.config/lll/lll.toml")), "to change the default, run 'lll config set url URL'"),
+    (Some(config.Source.Default), "to change the default, run 'lll config set url URL'"),
+    (None, "to change the default, run 'lll config set url URL'"),
+  ]
+  for (source, want) in rows {
+    assert url_default_hint(source) == want
+  }
+}
+
+/// Final 1.0 replay, case 04: two agents guessed `config view`. A read verb a
+/// noun lacks points at its list; a noun without list gets no guess.
+#[test]
+fn a_read_verb_the_noun_lacks_points_at_its_list() {
+  let listing = [Command { name: "list", summary: "list", page: "", spec: [], run: |_| Ok(output.none()), .. }]
+  let assert Err(e) = dispatch(test_ctx(), "config", "", "", listing, ["lll", "config", "view"])
+  assert e.message.contains("did you mean 'lll config list'?")
+  let other = [Command { name: "set", summary: "set", page: "", spec: [], run: |_| Ok(output.none()), .. }]
+  let assert Err(bare) = dispatch(test_ctx(), "test", "", "", other, ["lll", "test", "view"])
+  assert !bare.message.contains("did you mean")
+}
+
+/// 1.0 fleet: `issue view FLEET-4 FLEET-5 FLEET-6` (cases 13 and 09).
+#[test]
+fn a_second_issue_key_says_one_key_per_call() {
+  assert extra_argument("FLEET-5", ["FLEET-4"]).contains("this takes one issue key")
+  assert extra_argument("extra", ["FLEET-4"]) == "unexpected argument: 'extra'"
+  assert extra_argument("FLEET-5", ["title"]) == "unexpected argument: 'FLEET-5'"
+}
+
+/// Final 1.0 replay, case 20: `issue update KEY status review`.
+#[test]
+fn a_stray_status_word_names_the_state_flag() {
+  assert extra_argument("status", ["FLEET-4"]).contains("use --state <name>")
 }

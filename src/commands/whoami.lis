@@ -1,10 +1,11 @@
 import "records"
 import "go:encoding/json"
-import "go:fmt"
 import "go:strings"
 
+import "config"
 import "flags"
 import "models"
+import "output"
 import "pb"
 
 // `lll whoami`: which member, server and team the CLI is acting as.
@@ -89,10 +90,10 @@ This leaves the saved attachment unchanged (see 'lll config --help')."
 
 /// `lll whoami` — the member or administrator identity, confirmed by a
 /// record lookup against the server rather than read off the config.
-pub fn whoami(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn whoami(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   if let Some(flag) = args.get(2) {
     if flag == "--help" || flag == "-h" {
-      fmt.Println(
+      return Ok(output.line(
         "lll whoami - show which member or administrator, server and team this machine is acting as
 
 Usage:
@@ -103,8 +104,7 @@ Usage:
 Confirms the stored token against the server, including administrator tokens.
 'lll config list' shows where each value came from; 'lll login' replaces the
 token with a member session, and 'lll bot create bot-NAME' provisions a bot identity.",
-      )
-      return Ok(())
+      ))
     }
     if flag != "--json" { return Err(flags.usage_error(whoami_arg_error(flag, args))) }
     if let Some(extra) = args.get(3) { return Err(flags.usage_error(whoami_arg_error(extra, args))) }
@@ -154,21 +154,20 @@ token with a member session, and 'lll bot create bot-NAME' provisions a bot iden
   if json_mode {
     let kind = if administrator { "administrator" } else { me.kind }
     let access = access_line(ctx, me, body)?.unwrap_or("")
-    return print_json(WhoamiJson {
+    return json_value(WhoamiJson {
       id: me.id, name, email: me.email, kind, server: cfg.url, team: cfg.team,
-      token_source: src.token, scope: me.scope, mode: me.mode, access,
+      token_source: config.origin(src.token), scope: me.scope, mode: me.mode, access,
     }, "whoami")
   }
-  fmt.Println(f"{name} <{me.email}>")
-  fmt.Println(f"server  {cfg.url}")
+  let mut out = output.line(f"{name} <{me.email}>").line(f"server  {cfg.url}")
   let team = if cfg.team == "" { "(none; run 'lll attach')" } else { cfg.team }
-  fmt.Println(f"team    {team}")
-  fmt.Println(f"token   {src.token}")
+  out = out.line(f"team    {team}")
+  out = out.line(f"token   {config.origin(src.token)}")
   if let Some(access) = access_line(ctx, me, body)? {
-    fmt.Println(f"access  {access}")
+    out = out.line(f"access  {access}")
   }
   if administrator {
-    fmt.Println("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot create bot-NAME' for a bot identity.")
+    out = out.line("Administrator tokens do not name a member. Use 'lll login' for a member session or 'lll bot create bot-NAME' for a bot identity.")
   }
-  Ok(())
+  Ok(out)
 }

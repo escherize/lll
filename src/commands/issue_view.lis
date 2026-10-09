@@ -1,12 +1,12 @@
 import "records"
 import "go:encoding/json"
-import "go:fmt"
 import "go:strings"
 
 import "display"
 import "flags"
 import "gitctx"
 import "models"
+import "output"
 import "pb"
 import "provenance"
 
@@ -79,7 +79,7 @@ fn view_labels(ctx: pb.Client, full: models.Issue) -> Result<string, pb.CliError
   Ok(strings.Join(names.map(|n| if shared.contains(n) { f"{n} ({key})" } else { n }), ", "))
 }
 
-fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let spec = issue_view_spec()
   let p = input.parsed
@@ -94,8 +94,8 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
 
   if open_web {
     let target = issue_url(ctx, records.fetch_issue(ctx, resolved)?)?
-    fmt.Println(f"Opening {target}")
-    return open_url(target)
+    open_url(target)?
+    return Ok(output.line(f"Opening {target}"))
   }
 
   let record = records.fetch_issue_record(ctx, resolved)?
@@ -105,20 +105,19 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let reads = begin_issue_view_reads(ctx, full, json_mode, raw_mode)
   if json_mode {
-    fmt.Println(issue_view_json(
+    return Ok(output.json(issue_view_json(
       record,
       await_issue_view(reads.comments, "comments")?,
       await_issue_view(reads.claim, "claim")?,
       await_issue_view(reads.docs, "docs")?,
       await_issue_view(reads.findings, "findings")?,
-    )?)
-    return Ok(())
+    )?))
   }
 
   // --raw: the issue as markdown, no chrome. For piping, and for an agent that
   // wants the text rather than a rendered table.
   if raw_mode {
-    fmt.Println(f"# {full.expand.team.key}-{full.number}: {full.title}")
+    let mut out = output.line(f"# {full.expand.team.key}-{full.number}: {full.title}")
     let source = provenance.fields(full)
     // Read while the other reads are in flight, before any of them is awaited.
     let labels = view_labels(ctx, full)?
@@ -135,36 +134,35 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     let labels_line = if labels == "" { None } else { Some(f"- **Labels:** {labels}") }
     if !source.is_empty() || claim_line.is_some() || labels_line.is_some() {
-      fmt.Println("")
-      for field in source { fmt.Println(f"- **{field.label}:** {field.value}") }
-      if let Some(line) = claim_line { fmt.Println(line) }
-      if let Some(line) = labels_line { fmt.Println(line) }
+      out = out.line("")
+      for field in source { out = out.line(f"- **{field.label}:** {field.value}") }
+      if let Some(line) = claim_line { out = out.line(line) }
+      if let Some(line) = labels_line { out = out.line(line) }
     }
     if full.description != "" {
-      fmt.Println("")
-      fmt.Println(full.description)
+      out = out.line("")
+      out = out.line(full.description)
     }
     let comments = await_issue_view(reads.comments, "comments")?
     if !full.attachments.is_empty() {
-      fmt.Println("\n## Attachments")
-      for name in full.attachments { fmt.Println(f"- {name}") }
+      out = out.line("\n## Attachments")
+      for name in full.attachments { out = out.line(f"- {name}") }
     }
     if comments.length() > 0 {
-      fmt.Println("")
-      fmt.Println("## Comments")
+      out = out.line("")
+      out = out.line("## Comments")
       for cm in comments {
         let author = display.comment_byline(cm.author_kind, cm.author, cm.expand.author.name, cm.agent, "ghost")
         // Absolute, not relative: --raw is machine output that gets stored
         // and re-read (an agent's brief, an exported mirror in Git), where
         // "5d ago" silently becomes a different string tomorrow.
         let tag = if cm.author_kind == "system" { "" } else { display.author_tag(cm.expand.author.is_bot(), cm.expand.author.owner_name()) }
-        fmt.Println(
+        out = out.line(
           f"- **{author}**{tag} ({display.absolute(cm.created)}): {cm.body}",
         )
       }
     }
-    print_findings_raw(await_issue_view(reads.findings, "findings")?)?
-    return Ok(())
+    return Ok(out.then(findings_raw(await_issue_view(reads.findings, "findings")?)))
   }
 
   let assignee = display.member_name(full.assignee, full.expand.assignee.name, "none")
@@ -175,12 +173,12 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut labels = view_labels(ctx, full)?
   if labels == "" { labels = "none" }
 
-  fmt.Println(f"{full.expand.team.key}-{full.number} {full.title}")
-  fmt.Println("")
-  fmt.Println(f"State:     {display.glyph(full.state())} {display.state_name(full.state())}")
-  fmt.Println(f"Priority:  {display.priority_name(full.priority())}")
-  fmt.Println(f"Assignee:  {assignee}")
-  for field in provenance.fields(full) { fmt.Println(f"{field.label}: {field.value}") }
+  let mut out = output.line(f"{full.expand.team.key}-{full.number} {full.title}")
+  out = out.line("")
+  out = out.line(f"State:     {display.glyph(full.state())} {display.state_name(full.state())}")
+  out = out.line(f"Priority:  {display.priority_name(full.priority())}")
+  out = out.line(f"Assignee:  {assignee}")
+  for field in provenance.fields(full) { out = out.line(f"{field.label}: {field.value}") }
   // The one place the second collection is read on a plain view: assignee says
   // who it is for, Claimed says who is holding it right now, and only the
   // latter is exclusive.
@@ -189,9 +187,9 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   match claim {
     Some(held) => {
       let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
-      fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
+      out = out.line(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
     },
-    None => fmt.Println("Claimed:   none"),
+    None => out = out.line("Claimed:   none"),
   }
   // The work-site slot (TASK-205), under the claim holder: the claim says
   // who, this says where. "(last seen)" once the work is over.
@@ -200,18 +198,18 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     if records.work_site_stale(full.state(), claim.is_some()) {
       work = f"{work} (last seen)"
     }
-    fmt.Println(f"Work:      {work}")
+    out = out.line(f"Work:      {work}")
   }
-  fmt.Println(f"Project:   {project}")
-  fmt.Println(f"Labels:    {labels}")
+  out = out.line(f"Project:   {project}")
+  out = out.line(f"Labels:    {labels}")
   if !full.attachments.is_empty() {
-    fmt.Println("Attachments:")
-    for name in full.attachments { fmt.Println(f"  {name}") }
+    out = out.line("Attachments:")
+    for name in full.attachments { out = out.line(f"  {name}") }
   }
   let linked_docs = await_issue_view(reads.docs, "docs")?
   if linked_docs.length() > 0 {
     let slugs = linked_docs.map(|d| d.slug)
-    fmt.Println(f"Docs:      {strings.Join(slugs, ", ")}")
+    out = out.line(f"Docs:      {strings.Join(slugs, ", ")}")
   }
   if full.blocked_by.length() > 0 {
     // Each blocker under its OWN team's key (LLL-674): a cross-team blocker
@@ -233,19 +231,19 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
       let counted = if open == 0 { "" } else { f"{open} open, " }
       tail = f"; {counted}{blockers.hidden} you cannot see, not ready"
     }
-    fmt.Println(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
+    out = out.line(f"Blocked by: {strings.Join(parts, ", ")}{tail}")
   }
   let blocks = await_issue_view(reads.blocks, "blocks")?
   if blocks.length() > 0 {
     let keys = blocks.map(|b| f"{b.expand.team.key}-{b.number}")
-    fmt.Println(f"Blocks:    {strings.Join(keys, ", ")}")
+    out = out.line(f"Blocks:    {strings.Join(keys, ", ")}")
   }
-  if full.emoji != "" { fmt.Println(f"Emoji:     {full.emoji}") }
-  fmt.Println(f"Created:   {display.relative(full.created)}")
-  fmt.Println(f"Updated:   {display.relative(full.updated)}")
+  if full.emoji != "" { out = out.line(f"Emoji:     {full.emoji}") }
+  out = out.line(f"Created:   {display.relative(full.created)}")
+  out = out.line(f"Updated:   {display.relative(full.updated)}")
   if full.description != "" {
-    fmt.Println("")
-    fmt.Println(full.description)
+    out = out.line("")
+    out = out.line(full.description)
   }
 
   // The brief mechanism (TASK-103 AC#3): an agent's task brief carries the
@@ -257,9 +255,9 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let linked = linked_docs.map(|d| d.slug)
   let findings = await_issue_view(reads.findings, "findings")?
   if findings.length() > 0 {
-    fmt.Println("")
-    fmt.Println("Related findings:")
-    fmt.Println("")
+    out = out.line("")
+    out = out.line("Related findings:")
+    out = out.line("")
     let mut area_matches = 0
     let mut hidden = 0
     for f in findings {
@@ -273,25 +271,25 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
       }
       let mut area = f.area
       if area == "" { area = "-" }
-      fmt.Println(f"{f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
+      out = out.line(f"{f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
     }
     if hidden > 0 {
-      fmt.Println(f"... and {hidden} more by area; 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
+      out = out.line(f"... and {hidden} more by area; 'lll finding list -a AREA' lists an area, 'lll issue view --raw' prints them all")
     }
   }
 
   let comments = await_issue_view(reads.comments, "comments")?
-  fmt.Println("")
+  out = out.line("")
   if comments.length() > 0 {
-    fmt.Println("Comments:")
-    fmt.Println("")
-    print_comments(comments)
+    out = out.line("Comments:")
+    out = out.line("")
+    out = out.then(comments_output(comments))
   } else {
     // Said, not omitted: an agent checking whether its comment landed
     // could not tell "none" from "not shown" (fleet: 2 of 10).
-    fmt.Println("Comments: none")
+    out = out.line("Comments: none")
   }
-  Ok(())
+  Ok(out)
 }
 
 /// Keep every server field intact while exposing the handoff context that
@@ -322,11 +320,11 @@ fn issue_view_json(
 
 /// `--json` on the verbs that change an issue (update, close, start, claim):
 /// the issue as it is after the write, in the list's per-item shape.
-fn print_issue_after(ctx: pb.Client, key: string) -> Result<(), pb.CliError> {
+fn issue_after(ctx: pb.Client, key: string) -> Result<output.Output, pb.CliError> {
   let record = records.fetch_issue_record(ctx, key)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(pb.failed(f"decoding issue: {e}")) }
-  print_issue_json(record, fetch_claim(ctx, full.id)?)
+  issue_document(record, fetch_claim(ctx, full.id)?)
 }
 
 fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, pb.CliError> {
@@ -340,61 +338,57 @@ fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, pb.CliEr
 /// The '## Related findings' block of `lll issue view --raw` — same list
 /// findings_for_issue serves the rendered view, as plain markdown so an
 /// agent's piped brief carries the findings too.
-fn print_findings_raw(findings: Slice<models.Doc>) -> Result<(), pb.CliError> {
-  if findings.is_empty() { return Ok(()) }
-  fmt.Println("")
-  fmt.Println("## Related findings")
-  fmt.Println("")
+fn findings_raw(findings: Slice<models.Doc>) -> output.Output {
+  if findings.is_empty() { return output.none() }
+  let mut out = output.line("")
+  out = out.line("## Related findings")
+  out = out.line("")
   for f in findings {
     let mut area = f.area
     if area == "" { area = "-" }
-    fmt.Println(f"- {f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
+    out = out.line(f"- {f.slug} ({area}): {f.title}{display.confidence_suffix(f.confidence, f.confidence_note)}")
   }
-  Ok(())
+  out
 }
 
-fn url_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn url_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue url [KEY-123]"
   let id = input.parsed.first()
   let resolved = resolve_id(ctx, id, usage)?
   let target = issue_url(ctx, records.fetch_issue(ctx, resolved)?)?
-  fmt.Println(target)
-  Ok(())
+  Ok(output.line(target))
 }
 
-fn id_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn id_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue id [KEY-123]"
   let id = input.parsed.first()
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
-  fmt.Println(f"{issue.expand.team.key}-{issue.number}")
-  Ok(())
+  Ok(output.line(f"{issue.expand.team.key}-{issue.number}"))
 }
 
-fn title_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn title_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue title [KEY-123]"
   let id = input.parsed.first()
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
-  fmt.Println(issue.title)
-  Ok(())
+  Ok(output.line(issue.title))
 }
 
-fn branch_name_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn branch_name_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue branch-name [KEY-123]"
   let p = input.parsed
   let resolved = resolve_id(ctx, p.first(), usage)?
   let issue = records.fetch_issue(ctx, resolved)?
-  fmt.Println(gitctx.branch_name(
+  Ok(output.line(gitctx.branch_name(
     issue.expand.team.key,
     issue.number,
     issue.title,
-  ))
-  Ok(())
+  )))
 }
 
 /// Web page URL for an issue: <web_url>/issue/KEY-123.

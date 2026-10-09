@@ -6,6 +6,7 @@ import "models"
 import "pb"
 import "query"
 import "flags"
+import "config"
 
 /// A team key as it is stored: uppercase, trimmed (LLL-235).
 ///
@@ -83,18 +84,20 @@ pub fn configured_team(ctx: pb.Client) -> Result<Option<models.Team>, pb.CliErro
 /// and got "no team with key 'LLL'" - true, and useless, because it had never
 /// typed LLL and did not know which file had. `config list` knows; so does
 /// this message now.
-pub fn unknown_configured_team(ctx: pb.Client, key: string, origin: string) -> pb.CliError {
+pub fn unknown_configured_team(ctx: pb.Client, key: string, origin: Option<config.Source>) -> pb.CliError {
   if let Some(scoped) = unknown_team_scoped(ctx, key) { return scoped }
-  let from = if origin == "flag:--team" {
-    " (from --team)"
-  } else if strings.HasPrefix(origin, "env:") {
-    f" (from {strings.TrimPrefix(origin, "env:")})"
-  } else if strings.HasPrefix(origin, "file:") {
-    f" (from {strings.TrimPrefix(origin, "file:")})"
-  } else {
-    ""
-  }
+  let from = team_named(origin)
   pb.fail(pb.ErrorKind.NotFound, f"no team with key '{key}'{from} on the server. 'lll team list' shows the keys; 'lll attach --key KEY' points this directory at one, 'lll config list' shows every value and the file it came from, or create it with 'lll team create {key} -n \"Name\"'")
+}
+
+/// Where a configured team key came from, as unknown_configured_team says it.
+fn team_named(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Flag(spelling)) => f" (from {spelling})",
+    Some(config.Source.Env(name)) => f" (from {name})",
+    Some(config.Source.RepoFile(path)) | Some(config.Source.HomeFile(path)) => f" (from {path})",
+    Some(config.Source.Default) | None => "",
+  }
 }
 
 /// Missing-team message naming the fix. Shared by every command that needs a

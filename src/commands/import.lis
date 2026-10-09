@@ -1,13 +1,14 @@
+import "go:fmt"
 import "records"
 import "go:bytes"
 import "go:encoding/json"
-import "go:fmt"
 import "go:os"
 import "go:os/exec"
 import "go:strings"
 
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "provenance"
@@ -16,7 +17,7 @@ import "writes"
 /// Dispatch `lll import <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll import --help` and shell completions all read it, so none
 /// can drift.
-pub fn import_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn import_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "import", "bring an external backlog in", import_intro(), import_commands(), args)
 }
 
@@ -57,7 +58,7 @@ fn github_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn import_github(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let repo = input.parsed.first()
@@ -115,14 +116,20 @@ fn import_github(input: flags.CommandInput) -> Result<(), pb.CliError> {
       return Err(e.with_message(f"{key} created from {reference}, but the ref was not saved: {e.message}\nRetry only the reference save: lll issue ref {key} {reference}"))
     }
     created += 1
-    fmt.Println(f"Created {key}: {g.title} ({reference}, {state})")
+    progress(f"Created {key}: {g.title} ({reference}, {state})")
   }
   let mut labels_note = ""
   if created_labels.length() > 0 {
     labels_note = f"; created labels: {strings.Join(created_labels, ", ")}"
   }
-  fmt.Println(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}")
-  Ok(())
+  Ok(output.line(f"Imported {created} of {issues.length()} issues from {repo} into {team.key} (skipped {skipped} already carrying gh#N refs){labels_note}"))
+}
+
+/// One line per issue as it is created, written at once: an import of a
+/// thousand issues shows its progress, and a failure partway leaves the
+/// list of what it did create above the error.
+fn progress(line: string) {
+  fmt.Println(line)
 }
 
 /// OWNER/REPO with both halves present. gh's --repo would also take

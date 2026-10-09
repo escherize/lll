@@ -8,6 +8,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- `issue comments KEY` is a hidden alias of `issue comment`: it lists the
+  comments. A final-replay agent's poll loop never saw the old hint.
 - `read` is a permanent hidden alias of `view` on `issue`, `doc` and
   `finding`: it dispatches, but has no help row and no completion. Five of
   twenty agents in the 1.0 fleet typed `lll issue read KEY`. This reverses
@@ -49,6 +51,26 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- `issue update --priority` confirms the name it set (`priority=high`), not
+  the wire number.
+- Recovery hints from the final 1.0 fleet replay name the next command:
+  - a read verb a noun lacks (`view`, `show`, `read`, `ls`) points at
+    `lll <noun> list` (`config view`);
+  - `member read/get` and `bot show/read` point at `lll member access`;
+  - a second issue key on a one-key verb says "one key per call";
+  - a title typed where the key goes points at `lll search "<title>"`;
+  - after a key typed as the command, the next word picks the verb:
+    `review`/`--status`/`mark` name `issue update KEY --state in-review`,
+    `comment`/`note` name `issue comment KEY "text"`;
+  - `issue set`, `mark` and any word containing `review` name the state
+    change; a stray `status` after `issue update KEY` names `--state`;
+  - a redirected `comment` or `update` shows its full form.
+- `issue next` says why it has nothing to offer when the reason is not an
+  empty board (LLL-685): ready issues all claimed by someone else are named
+  as claimed, and open issues all waiting on blockers are named as blocked,
+  pointing at `lll issue list --blocked` ("no other ready issues" when
+  you hold a ready one yourself). Both used to read "the agenda is
+  empty". The all-assigned and own-claims wordings are unchanged.
 - Breaking, toward less surprise: one rule for finishing a claimed issue.
   When the holder moves it to done or cancelled by any path (`issue close`,
   `issue update --state done|cancelled`, the board's state picker, a native
@@ -140,6 +162,57 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   also takes it as `-b`.
 - `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
   instead of the update usage.
+- Every secret flag reads `-` the same way (LLL-686): `--password`,
+  `--old-password`, `--admin-password`, `--token` and `webhook add
+  --secret`. On a terminal it prompts with echo off; otherwise it reads one
+  line from stdin, and an empty one exits 2 naming the flag. `member create
+  --password -` and `webhook add --secret -` took `-` as the value.
+  `login --token -` printed `Token: ` into a pipe and, on empty stdin, said
+  the token was missing.
+- Ctrl-C at a hidden password or token prompt restores terminal echo and
+  exits 130; it left the shell with echo off. `member create --password -`
+  on a terminal asks twice and refuses a mismatch. `--admin-password -`
+  followed by a prompt (`member set-password` without `--password`, `login
+  --create` without `--password`) reads the prompt's answer from the same
+  stdin; the answer was lost and the command said there was no password.
+
+### Security
+
+- `member invite` printed the temporary password twice: on its own line
+  and inside the set-password hint, so redacting the first line still
+  leaked it. The hint now says `--old-password -`, which prompts with echo
+  off, and the password appears once.
+- A token goes only to the server it was saved for (LLL-688). The config
+  layers combine key by key, so a `.lll.toml` naming only `url = B`, or
+  `LLL_URL=B`, paired B with the home config's token for A: every command
+  run there, and the team check after `lll login --url A`, sent A's token
+  to B. A cloned repo could collect tokens that way. Now:
+  - the home config's token is sent only when the effective url is the
+    home config's url (a trailing slash aside; `localhost` and `127.0.0.1`
+    differ), or the default when it names none. Otherwise a command that
+    needs it exits 6, names the file, variable or flag that chose the url,
+    and leads with removing it; logging in there is offered last, with what
+    it sends and replaces. A token from `LLL_TOKEN` or a repo file still
+    goes to the url configured with it;
+  - `lll login` sends every request after it holds a token to the server it
+    logged in to, and says when a repo file or `LLL_URL` will send later
+    commands elsewhere. `lll up` says the same after it saves its CLI login;
+  - `lll login` without `--url` exits 2 when a repo file or `LLL_URL` chose
+    the url, instead of sending the password or token there;
+  - `lll member invite` sends the superuser token to, and prints, only a
+    `web_url` saved in the home config for this server, or given by flag;
+  - `lll board` (and `--team`, `-w`) no longer puts the board token in a
+    link to a repo file's `web_url`: that `web_url` counts as none;
+  - `lll up` no longer adopts a server already running at a url a repo file
+    chose, which received the administrator pair (including the generated
+    one in `./pb/pb_data`), unless the home config names the same url. It
+    exits 4, leads with removing the repo's url line, and offers
+    `LLL_URL=<url> lll up` only for a server that is yours, saying it sends
+    the admin credentials. With nothing running there it starts its own
+    server, as before;
+  - requests no longer follow redirects. Go's default client kept the
+    `Authorization` header for the same host on another port and re-sent a
+    login POST body on 307. A redirect is now an error naming its target.
 
 ### Fixed
 
@@ -159,6 +232,16 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   name with a comma; `lll api METHOD` without a PATH (it printed help and
   exited 0).
 - `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
+- An expired or rejected token from a repo `.lll.toml`, and the notice
+  after a password change, say to remove that file's token line. They said
+  to run `lll login`, which saves to the home config the repo file
+  outranks (LLL-687).
+- A refused superuser login names where the url came from (`LLL_URL`, the
+  config file, or `--url`). It said `--url` whatever set the url (LLL-687).
+- `lll config list` and the hints attribute a key to the repo `.lll.toml`
+  whenever it names that key. When it repeated the home config's value,
+  the key was attributed to the home config, whose edits the repo file
+  overrides (LLL-687).
 
 ## [1.0.0] - 2026-10-08
 

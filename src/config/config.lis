@@ -14,18 +14,51 @@ pub struct Config {
   pub token: string,
 }
 
-/// Where each field's winning value came from: "flag:--team", "flag:--url",
-/// "file:<path>", "env:LLL_X", "default", or "" when nothing set it. Filled
-/// in lockstep with the Config it explains and printed by `lll config list`.
-/// The failure it exists for is silent — a repo pointed at the wrong team
-/// lists the wrong issues and reports no error — so "which file won?" has to
-/// be a question you can ask.
+/// Where each field's winning value came from, None when nothing set it.
+/// Filled in lockstep with the Config it explains and printed by `lll config
+/// list`. The failure it exists for is silent — a repo pointed at the wrong
+/// team lists the wrong issues and reports no error — so "which file won?"
+/// has to be a question you can ask.
 pub struct Sources {
-  pub url: string,
-  pub team: string,
-  pub sort: string,
-  pub web_url: string,
-  pub token: string,
+  pub url: Option<Source>,
+  pub team: Option<Source>,
+  pub sort: Option<Source>,
+  pub web_url: Option<Source>,
+  pub token: Option<Source>,
+}
+
+/// One layer of the precedence `resolve` applies (LLL-687). Every message
+/// that says how to change a setting matches on this, with no wildcard arm,
+/// so a new layer cannot ship until each of those messages says what fixes a
+/// value that came from it. It replaced origin strings ("env:LLL_URL",
+/// "file:<path>") that the messages took apart by prefix and suffix.
+pub enum Source {
+  /// A command-line flag, by its spelling ("--team"). `lll up` choosing its
+  /// own API url counts as --url.
+  Flag(string),
+  /// An environment variable, by name ("LLL_URL").
+  Env(string),
+  /// A `.lll.toml` found from the working directory: a repo's, or a plain
+  /// directory's. It outranks the machine's file, so 'lll config set' and
+  /// 'lll login' cannot override what it says.
+  RepoFile(string),
+  /// The machine's config file, the one 'lll config set' and 'lll login'
+  /// write.
+  HomeFile(string),
+  /// The built-in url, chosen by nobody.
+  Default,
+}
+
+/// A source as `lll config list` prints it: "flag:--team", "env:LLL_X",
+/// "file:<path>", "default", or "" when nothing set the value.
+pub fn origin(source: Option<Source>) -> string {
+  match source {
+    None => "",
+    Some(Source.Flag(spelling)) => f"flag:{spelling}",
+    Some(Source.Env(name)) => f"env:{name}",
+    Some(Source.RepoFile(path)) | Some(Source.HomeFile(path)) => f"file:{path}",
+    Some(Source.Default) => "default",
+  }
 }
 
 /// The environment this process was handed, read once (LLL-486). Every
@@ -109,18 +142,33 @@ pub struct Settings {
   pub env: Env,
   pub overrides: Overrides,
   loaded: Result<(Config, Sources), string>,
+  /// The url the home config names, "" for none: the server its token was
+  /// saved for (LLL-688).
+  home_url: string,
 }
 
 impl Settings {
-  /// The effective configuration and the origin of every field.
+  /// The effective configuration and the origin of every field. A home
+  /// config token is absent when the effective url is not the one it was
+  /// saved with (`withheld`), so nothing that reads it can send it there.
   pub fn traced(self) -> Result<(Config, Sources), string> {
-    self.loaded
+    let (cfg, src) = self.loaded?
+    if withheld_token(cfg, src, self.home_url).is_some() {
+      return Ok((Config { token: "", ..cfg }, Sources { token: None, ..src }))
+    }
+    Ok((cfg, src))
   }
 
   /// The effective configuration.
   pub fn config(self) -> Result<Config, string> {
-    let (cfg, _) = self.loaded?
+    let (cfg, _) = self.traced()?
     Ok(cfg)
+  }
+
+  /// The home config's token held back from this url, or None (LLL-688).
+  pub fn withheld(self) -> Option<Withheld> {
+    let Ok((cfg, src)) = self.loaded else { return None }
+    withheld_token(cfg, src, self.home_url)
   }
 
   /// These settings with the API url chosen by a flag (or by `lll up`).
@@ -253,13 +301,52 @@ pub fn no_overrides() -> Overrides {
 /// carry `team` alone and still inherit `url` and `token` from the machine.
 pub fn resolve(env: Env, overrides: Overrides) -> Settings {
   let loaded = apply_overrides(layered(env), overrides)
-  Settings { env, overrides, loaded }
+  let home_url = home_file(env).map_or("", |path| read_config(path, Config { .. }).map_or("", |c| c.url))
+  Settings { env, overrides, loaded, home_url }
 }
 
 /// Settings from known values, reading no file and no environment: for
 /// tests, which hand a command exactly the configuration it should see.
 pub fn given(cfg: Config, src: Sources, env: Env) -> Settings {
-  Settings { env, overrides: no_overrides(), loaded: Ok((cfg, src)) }
+  Settings { env, overrides: no_overrides(), loaded: Ok((cfg, src)), home_url: "" }
+}
+
+/// A home config token not sent to the effective url (LLL-688), and why.
+pub struct Withheld {
+  /// The url the home config names: the server the token was saved for.
+  pub home_url: string,
+  /// The url this command would have sent it to.
+  pub url: string,
+  /// Where that url came from: a repo file, an environment variable or a flag.
+  pub url_source: Option<Source>,
+}
+
+/// Pure. The same url once a trailing slash is dropped, as 'lll login'
+/// drops it before saving. Nothing else is normalised: localhost and
+/// 127.0.0.1 stay different servers, so a near miss withholds a token
+/// rather than sending it somewhere new.
+pub fn same_url(a: string, b: string) -> bool {
+  strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
+/// Pure. A token is bound to the url it was saved with. The home config's
+/// token goes only to the url that file names (a trailing slash aside), or to the
+/// default when it names none. The layers combine key by key, so a repo
+/// file naming only `url` would otherwise send the machine's login to
+/// whatever server it chose. A token from LLL_TOKEN or a repo file stays
+/// with the url configured beside it: whoever set it chose both.
+pub fn withheld_token(cfg: Config, src: Sources, home_url: string) -> Option<Withheld> {
+  if cfg.token == "" { return None }
+  match src.token {
+    Some(Source.HomeFile(_)) => (),
+    Some(Source.Env(_)) | Some(Source.RepoFile(_)) | Some(Source.Flag(_)) | Some(Source.Default) | None => return None,
+  }
+  let bound = match src.url {
+    Some(Source.HomeFile(_)) | Some(Source.Default) => true,
+    Some(Source.Env(_)) | Some(Source.RepoFile(_)) | Some(Source.Flag(_)) | None => same_url(cfg.url, home_url),
+  }
+  if bound { return None }
+  Some(Withheld { home_url, url: cfg.url, url_source: src.url })
 }
 
 /// The config files, then the environment, then the default url.
@@ -267,42 +354,58 @@ fn layered(env: Env) -> Result<(Config, Sources), string> {
   let mut cfg = Config { .. }
   let mut src = Sources { .. }
 
-  for path in config_files(env) {
+  for (path, file) in config_files(env) {
     let was = cfg
-    cfg = read_config(path, cfg)?
-    let from = f"file:{path}"
-    if cfg.url != was.url { src.url = from }
-    if cfg.team != was.team { src.team = from }
-    if cfg.sort != was.sort { src.sort = from }
-    if cfg.web_url != was.web_url { src.web_url = from }
-    if cfg.token != was.token { src.token = from }
+    let (next, named) = read_layer(path, cfg)?
+    cfg = next
+    let from = Some(file)
+    if sets(named, "url", cfg.url, was.url) { src.url = from }
+    if sets(named, "team", cfg.team, was.team) { src.team = from }
+    if sets(named, "sort", cfg.sort, was.sort) { src.sort = from }
+    if sets(named, "web_url", cfg.web_url, was.web_url) { src.web_url = from }
+    if sets(named, "token", cfg.token, was.token) { src.token = from }
   }
 
   if env.url != "" {
     cfg.url = env.url
-    src.url = "env:LLL_URL"
+    src.url = Some(Source.Env("LLL_URL"))
   }
   if env.team != "" {
     cfg.team = env.team
-    src.team = "env:LLL_TEAM"
+    src.team = Some(Source.Env("LLL_TEAM"))
   }
   if env.sort != "" {
     cfg.sort = env.sort
-    src.sort = "env:LLL_SORT"
+    src.sort = Some(Source.Env("LLL_SORT"))
   }
   if env.web_url != "" {
     cfg.web_url = env.web_url
-    src.web_url = "env:LLL_WEB_URL"
+    src.web_url = Some(Source.Env("LLL_WEB_URL"))
   }
   if env.token != "" {
     cfg.token = env.token
-    src.token = "env:LLL_TOKEN"
+    src.token = Some(Source.Env("LLL_TOKEN"))
   }
   if cfg.url == "" {
     cfg.url = "http://127.0.0.1:8090"
-    src.url = "default"
+    src.url = Some(Source.Default)
   }
+  // Every request is base + "/api/...", and a server answers "//api" with a
+  // redirect lll does not follow (LLL-688): a url written with a trailing
+  // slash is the same url, as 'lll login' saves it.
+  cfg.url = strings.TrimRight(cfg.url, "/")
   Ok((cfg, src))
+}
+
+/// Whether a file that names the keys `named` is the source of `key`, now
+/// `value` and `was` before it. A file is the source of every key it names
+/// with a value, even one that matches the layer below: it is the one that
+/// wins, so it is the one to edit (LLL-687). `key = ""` names nothing: the
+/// commented template line `# token = ""` uncommented must leave the key
+/// unset, as it was before the file named keys. A changed value counts
+/// too, so a file that clears a lower layer's value still owns the result.
+fn sets(named: Slice<string>, key: string, value: string, was: string) -> bool {
+  (named.contains(key) && value != "") || value != was
 }
 
 /// Flags over the environment and files. A failed load stays failed.
@@ -315,25 +418,25 @@ fn apply_overrides(
   let mut src = src
   if let Some(team) = overrides.team {
     cfg.team = team
-    src.team = "flag:--team"
+    src.team = Some(Source.Flag("--team"))
   }
   if let Some(url) = overrides.url {
-    cfg.url = url
-    src.url = "flag:--url"
+    cfg.url = strings.TrimRight(url, "/")
+    src.url = Some(Source.Flag("--url"))
   }
   if let Some(web_url) = overrides.web_url {
     cfg.web_url = web_url
-    src.web_url = "flag:--web-url"
+    src.web_url = Some(Source.Flag("--web-url"))
   }
   Ok((cfg, src))
 }
 
 /// The files to layer, lowest precedence first: the machine's config, then
 /// the repo's. Either may be absent.
-fn config_files(env: Env) -> Slice<string> {
-  let mut files: Slice<string> = []
-  if let Some(home) = home_file(env) { files = files.append(home) }
-  if let Some(repo) = repo_file(env) { files = files.append(repo) }
+fn config_files(env: Env) -> Slice<(string, Source)> {
+  let mut files: Slice<(string, Source)> = []
+  if let Some(home) = home_file(env) { files = files.append((home, Source.HomeFile(home))) }
+  if let Some(repo) = repo_file(env) { files = files.append((repo, Source.RepoFile(repo))) }
   files
 }
 
@@ -483,14 +586,24 @@ fn exists(path: string) -> bool {
 }
 
 fn read_config(path: string, initial: Config) -> Result<Config, string> {
+  let (cfg, _) = read_layer(path, initial)?
+  Ok(cfg)
+}
+
+/// The file at `path` over `initial`, and the keys it names, lowercased.
+fn read_layer(path: string, initial: Config) -> Result<(Config, Slice<string>), string> {
   let data = match os.ReadFile(path) {
     Ok(data) => data,
     Err(e) => return Err(f"reading {path}: {e}"),
   }
   // TOML overwrites only present fields; this is also the layering policy.
   let mut cfg = initial
-  if let Err(e) = toml.Unmarshal(data, &cfg) {
-    return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'")
+  let meta = match toml.Decode(data as string, &cfg) {
+    Ok(meta) => meta,
+    Err(e) => return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll config init'"),
   }
-  Ok(cfg)
+  // Lowercased because the decoder matches keys without regard to case,
+  // so `URL = ...` sets url.
+  let named = meta.Keys().map(|key| strings.ToLower(key.String()))
+  Ok((cfg, named))
 }

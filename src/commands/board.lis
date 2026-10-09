@@ -1,9 +1,9 @@
-import "go:fmt"
 import "go:os/exec"
 import "go:strings"
 import "config"
 import "flags"
 import "records"
+import "output"
 import "pb"
 
 /// `lll board` — print the web board URL; `-w` opens it in the browser.
@@ -15,12 +15,11 @@ pub fn board_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn board(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn board(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = board_spec()
   let p = flags.parse(spec, args, 2, false, "lll board [-w] [--team KEY] (prints the URL; no subcommand is needed)")?
   if p.given("--help") {
-    print_board_usage()
-    return Ok(())
+    return Ok(output.line(board_usage()))
   }
   let open = p.given("-w")
   let mut base = web_base(ctx)?
@@ -34,16 +33,14 @@ pub fn board(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     if let Some(tok) = known_board_token(ctx, base) { base = f"{base}/?board_token={tok}" }
   }
   if open {
-    fmt.Println(f"Opening {base}")
-    return open_url(base)
+    open_url(base)?
+    return Ok(output.line(f"Opening {base}"))
   }
-  fmt.Println(base)
-  Ok(())
+  Ok(output.line(base))
 }
 
-fn print_board_usage() {
-  fmt.Println(
-    "lll board - the web board URL
+fn board_usage() -> string {
+  "lll board - the web board URL
 
 Usage:
   lll board              print the board URL
@@ -64,19 +61,40 @@ changes; it does not expire on its own. To give someone their own login
 instead, use 'lll member invite NAME --email E --team KEY --read-only'.
 
 Set the board endpoint with 'lll config set web_url URL'. LLL_WEB_URL
-and repo configuration override the machine setting. 'lll up' saves its
+overrides the machine setting. A repo's .lll.toml web_url is not used here:
+the link carries the board token, and a cloned repo could name any host. 'lll up' saves its
 actual local endpoint, unless the home config's url names another server.
-The API URL alone does not identify a board URL.",
-  )
+The API URL alone does not identify a board URL."
 }
 
 /// Web board base URL (env > config > default), without a trailing slash.
+/// A repo file's web_url counts as none (LLL-688): the link carries the
+/// board token, and a cloned repo could name any host.
 fn web_base(ctx: pb.Client) -> Result<string, pb.CliError> {
-  let cfg = ctx.settings.config().map_err(pb.failed)?
-  if cfg.web_url == "" {
+  let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
+  let home = ctx.settings.load_home().map_err(pb.failed)?
+  let web_url = board_web_url(cfg.web_url, src.web_url, home.web_url)
+  if web_url == "" && cfg.web_url != "" {
+    let who = match src.web_url {
+      Some(config.Source.RepoFile(path)) | Some(config.Source.HomeFile(path)) => path,
+      Some(config.Source.Env(name)) | Some(config.Source.Flag(name)) => name,
+      Some(config.Source.Default) | None => "the configuration",
+    }
+    return Err(pb.failed(f"{who} sets web_url = {cfg.web_url}, which 'lll board' does not use: the link carries the board token, and a repo file can name any host
+run 'lll config set web_url URL' with the board address supplied by your deployer (or set LLL_WEB_URL)"))
+  }
+  if web_url == "" {
     return Err(pb.failed("board URL is not configured; run 'lll config set web_url URL' with the board address supplied by your deployer (or set LLL_WEB_URL)"))
   }
-  Ok(strings.TrimRight(cfg.web_url, "/"))
+  Ok(strings.TrimRight(web_url, "/"))
+}
+
+/// Pure. The web_url `lll board` links to: the effective one unless a repo
+/// file chose it, in which case the home config's, as if the repo file
+/// named none.
+fn board_web_url(web_url: string, source: Option<config.Source>, home_web_url: string) -> string {
+  let allowed = board_for_link(web_url, source)
+  if allowed == "" { home_web_url } else { allowed }
 }
 
 /// Open a URL in the default browser (macOS `open`, else `xdg-open`).

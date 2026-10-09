@@ -1,59 +1,15 @@
 import "go:encoding/json"
-import "go:fmt"
-import "go:os"
 import "go:strings"
 
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
-
-/// Print a value as JSON, the end of every `--json` command that prints one
-/// record. Timestamps come out in RFC3339 (contract_json).
-///
-/// `what` names the value in the encoding error, the only thing that varied
-/// between the commands that used to repeat these lines.
-fn print_json(value: Unknown, what: string) -> Result<(), pb.CliError> {
-  let raw = encode_json(value, what)?
-  fmt.Println(contract_json(raw, 0) as string)
-  Ok(())
-}
-
-/// A write verb's --json (1.0 fleet: 'finding confirm SLUG --json' was an
-/// unknown flag): the record as it now is, read back by id, in the shape its
-/// create --json prints.
-fn print_record_after(ctx: pb.Client, collection: string, id: string) -> Result<(), pb.CliError> {
-  let record = ctx.get(f"/api/collections/{collection}/records/{id}")?
-  fmt.Println(contract_json(record.bytes() as json.RawMessage, 0) as string)
-  Ok(())
-}
 
 /// The --json flag of a write verb that prints `what` afterwards.
 fn json_after_flag(what: string) -> flags.Flag {
   flags.Flag { name: "--json", help: f"print {what} afterwards as JSON", .. }
-}
-
-/// The ending of a write verb that has one confirmation line: --json prints
-/// the issue as it now is instead.
-fn issue_done(ctx: pb.Client, p: flags.Parsed, key: string, line: string) -> Result<(), pb.CliError> {
-  if p.given("--json") { return print_issue_after(ctx, key) }
-  fmt.Println(line)
-  Ok(())
-}
-
-/// The same for a doc: --json prints the doc record instead of `line`.
-fn doc_done(ctx: pb.Client, p: flags.Parsed, id: string, line: string) -> Result<(), pb.CliError> {
-  if p.given("--json") { return print_doc_after(ctx, id) }
-  fmt.Println(line)
-  Ok(())
-}
-
-/// The empty-state line every list prints when it has nothing to show
-/// (LLL-645): "no labels" on stderr, so stdout stays empty for pipes and
-/// `| wc -l`, and a person can tell an empty list from a broken read.
-fn say_empty(what: string) -> Result<(), pb.CliError> {
-  let _ = fmt.Fprintln(os.Stderr, f"no {what}")
-  Ok(())
 }
 
 /// Where a list's items sit in the whole result, for the list envelope.
@@ -87,23 +43,6 @@ struct ListEnvelope {
   total_items: int,
   #[json("totalPages")]
   total_pages: int,
-}
-
-/// Print a list in the one envelope every `list --json` uses (LLL-645, D2):
-/// {items, page, perPage, totalItems, totalPages}, whatever the flags.
-/// `items` is always an array, never null.
-fn print_list_json(items: Unknown, at: ListPage, what: string) -> Result<(), pb.CliError> {
-  let mut encoded = encode_json(items, what)?
-  if encoded as string == "null" { encoded = "[]".bytes() as json.RawMessage }
-  let envelope = ListEnvelope {
-    items: contract_json(encoded, 0),
-    page: at.page,
-    per_page: at.per_page,
-    total_items: at.total_items,
-    total_pages: at.total_pages,
-  }
-  fmt.Println(encode_json(envelope, what)? as string)
-  Ok(())
 }
 
 fn encode_json(value: Unknown, what: string) -> Result<json.RawMessage, pb.CliError> {
@@ -218,15 +157,79 @@ fn docs_json(docs: Slice<models.Doc>) -> Result<Slice<Map<string, json.RawMessag
   Ok(out)
 }
 
-/// A doc write verb's --json: the doc as it now is, named as doc_json names it.
-fn print_doc_after(ctx: pb.Client, id: string) -> Result<(), pb.CliError> {
-  let record = ctx.get(f"/api/collections/docs/records/{id}?expand=issues.team,author.owner,last_editor.owner")?
-  print_json(doc_json(record.bytes() as json.RawMessage)?, "doc")
+/// A value as a --json document, the end of every `--json` command that
+/// prints one record. Timestamps come out in RFC3339 (contract_json).
+///
+/// `what` names the value in the encoding error.
+fn json_value(value: Unknown, what: string) -> Result<output.Output, pb.CliError> {
+  let raw = encode_json(value, what)?
+  Ok(output.json(contract_json(raw, 0) as string))
 }
 
-/// issue_json, printed.
-fn print_issue_json(record: string, claim: Option<models.Claim>) -> Result<(), pb.CliError> {
+/// A server response body as a --json document, timestamps in RFC3339.
+fn json_body(body: string) -> output.Output {
+  output.json(contract_json(body.bytes() as json.RawMessage, 0) as string)
+}
+
+/// A write verb's --json (1.0 fleet: 'finding confirm SLUG --json' was an
+/// unknown flag): the record as it now is, read back by id, in the shape its
+/// create --json prints.
+fn record_after(ctx: pb.Client, collection: string, id: string) -> Result<output.Output, pb.CliError> {
+  let record = ctx.get(f"/api/collections/{collection}/records/{id}")?
+  Ok(json_body(record))
+}
+
+/// The ending of a write verb that has one confirmation line: --json prints
+/// the issue as it now is instead.
+fn issue_ending(ctx: pb.Client, p: flags.Parsed, key: string, line: string) -> Result<output.Output, pb.CliError> {
+  if p.given("--json") { return issue_after(ctx, key) }
+  Ok(output.line(line))
+}
+
+/// The same for a doc: --json prints the doc record instead of `line`.
+fn doc_ending(ctx: pb.Client, p: flags.Parsed, id: string, line: string) -> Result<output.Output, pb.CliError> {
+  if p.given("--json") { return doc_after(ctx, id) }
+  Ok(output.line(line))
+}
+
+/// The empty-state notice every list gives when it has nothing to show
+/// (LLL-645): "no labels" on stderr, so stdout stays empty for pipes and
+/// `| wc -l`, and a person can tell an empty list from a broken read.
+fn empty_list(what: string) -> output.Output {
+  output.notice(f"no {what}")
+}
+
+/// A list in the one envelope every `list --json` uses (LLL-645, D2):
+/// {items, page, perPage, totalItems, totalPages}, whatever the flags.
+/// `items` is always an array, never null.
+fn list_json(items: Unknown, at: ListPage, what: string) -> Result<output.Output, pb.CliError> {
+  let mut encoded = encode_json(items, what)?
+  if encoded as string == "null" { encoded = "[]".bytes() as json.RawMessage }
+  let envelope = ListEnvelope {
+    items: contract_json(encoded, 0),
+    page: at.page,
+    per_page: at.per_page,
+    total_items: at.total_items,
+    total_pages: at.total_pages,
+  }
+  Ok(output.json(encode_json(envelope, what)? as string))
+}
+
+/// A doc write verb's --json: the doc as it now is, named as doc_json names it.
+fn doc_after(ctx: pb.Client, id: string) -> Result<output.Output, pb.CliError> {
+  let record = ctx.get(f"/api/collections/docs/records/{id}?expand=issues.team,author.owner,last_editor.owner")?
+  json_value(doc_json(record.bytes() as json.RawMessage)?, "doc")
+}
+
+/// issue_json as a --json document.
+fn issue_document(record: string, claim: Option<models.Claim>) -> Result<output.Output, pb.CliError> {
   let fields = issue_json(record.bytes() as json.RawMessage, claim)?
-  fmt.Println(encode_json(fields, "issue")? as string)
-  Ok(())
+  Ok(output.json(encode_json(fields, "issue")? as string))
+}
+
+/// A streaming command's result: it wrote each line as it happened, which a
+/// stream must (scripts/test_command_output.py allowlists the writers), so
+/// nothing is left for the renderer but an error.
+fn streamed(r: Result<(), pb.CliError>) -> Result<output.Output, pb.CliError> {
+  r.map(|_| output.none())
 }

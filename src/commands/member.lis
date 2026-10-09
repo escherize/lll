@@ -1,6 +1,6 @@
+import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
-import "go:fmt"
 import "go:os"
 import "go:strings"
 
@@ -8,17 +8,20 @@ import "config"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "records"
+import "secret"
 import "tokens"
 import "writes"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   // 1.0 fleet: one member's details live under access.
-  if args.get(2) == Some("view") || args.get(2) == Some("show") {
+  // `read` and `get` too: two final-replay agents (case 15) looked for one.
+  if ["view", "show", "read", "get"].contains(args.get(2).unwrap_or("")) {
     return Err(flags.usage_error(
       f"unknown member command: '{args.get(2).unwrap_or("")}'; did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)",
     ))
@@ -133,7 +136,7 @@ member can tell that wider access exists; it cannot tell which other teams
 exist ('lll team --help')."
 }
 
-fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let mut members = models.MemberList { items: records.fetch_members(ctx)? }
@@ -168,9 +171,10 @@ fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
         .map(|id| keys.get(id).unwrap_or(""))
       items = items.append(withkeys)
     }
-    return print_list_json(items, whole_list(items.length()), "member list")
+    return list_json(items, whole_list(items.length()), "member list")
   }
-  if members.items.is_empty() { return say_empty("members") }
+  if members.items.is_empty() { return Ok(empty_list("members")) }
+  let mut out = output.none()
   for listed in members.items {
     // A bot shows what it can do now: within its owner's access (LLL-543).
     let (effective, cap) = records.effective_access_in(listed, members.items)
@@ -179,16 +183,16 @@ fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let access = member_access(effective, keys)
     let access = if access == "" { access } else { access + capped }
     if access == "" {
-      fmt.Println(
+      out = out.line(
         f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}",
       )
     } else {
-      fmt.Println(
+      out = out.line(
         f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}\t{access}",
       )
     }
   }
-  Ok(())
+  Ok(out)
 }
 
 /// A member's email as the caller may read it. Every member has one, so an
@@ -270,7 +274,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
       name: "--password",
       value: true,
       hint: "pw",
-      help: "set a usable login password with a real --email; otherwise creates a record only",
+      help: "set a usable login password with a real --email ('-' reads it from stdin);\notherwise creates a record only",
       ..,
     },
   ]
@@ -287,7 +291,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
 /// Superuser-gated like set-password, because it is destructive and because
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
-fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_remove(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -301,7 +305,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Env credentials count only when no token is configured (D7): otherwise
   // superuser_auth would use the member token and the server would answer a
   // bare 403.
-  let login = given_admin_login(ctx.settings, p)?
+  let login = given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?
   let usable = match login {
     AdminLogin.Explicit(_) => true,
     AdminLogin.Env(_) => ctx.settings.config().map_err(pb.failed)?.token == "",
@@ -338,13 +342,13 @@ or use --force to clear assignments, comment authorship and issue creator refere
     return Err(aborted())
   }
   writes.delete_member(ctx, pb.Caller.Member(su), member.id)?
-  fmt.Println(f"removed member {member.name}")
+  let mut out = output.line(f"removed member {member.name}")
   if assigned > 0 || authored > 0 || created > 0 {
-    fmt.Println(
+    out = out.line(
       f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s), plus {created} issue creator reference(s); issue and comment bodies kept",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {
@@ -445,7 +449,7 @@ paths forward: 'lll login --create' makes a first member login with the admin cr
   e
 }
 
-fn member_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_add(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let args = input.args
   let spec = member_add_spec()
@@ -481,14 +485,20 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
       f"a member named '{name}' already exists <{existing.email}>; pick another name",
     ))
   }
-  let password = p.one("--password")
-  if p.given("--password") && (password == "" || !real_email(email)) {
+  let password = if p.given("--password") {
+    let mut input = bufio.NewReader(os.Stdin)
+    let typed = secret.Secret.read(p, "--password", f"Password for {name}: ", input)?
+    Some(typed.confirmed(p, "--password", input)?)
+  } else {
+    None
+  }
+  if password.map_or(false, |pw| pw.is_empty() || !real_email(email)) {
     return Err(flags.usage_error(
       "--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff",
     ))
   }
-  let created = if p.given("--password") {
-    match create_member_as(ctx, ctx.token(), name, email, password, [], None) {
+  let created = if let Some(pw) = password {
+    match create_member_as(ctx, ctx.token(), name, email, pw.reveal(), [], None) {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
@@ -498,17 +508,17 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
       Err(e) => return Err(member_create_error(e)),
     }
   }
-  fmt.Println(f"Added member {created.name}")
+  let mut out = output.line(f"Added member {created.name}")
   if p.given("--password") {
-    fmt.Println(
+    out = out.line(
       f"login enabled: lll login --email {email} --url {(ctx.settings.config().map_err(pb.failed)?).url} (use the supplied password)",
     )
   } else {
-    fmt.Println(
+    out = out.line(
       f"record only: no known login password. An administrator can enable login with 'lll member set-password {name} --email EMAIL --password PASSWORD'. For a new colleague, use 'lll member invite NAME --email EMAIL' instead.",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
 /// Create a member. Names are unique server-side, so callers that may race
@@ -682,7 +692,7 @@ and everything they wrote; 'lll member delete' deletes the member instead.
 /// not make a member read-only with any lll command, and 7 patched the
 /// record through 'lll api' instead. Cases 06-08 (narrow, widen, revoke)
 /// need the same verb.
-fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let name = p.first()
@@ -709,10 +719,10 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   p.given("--no-teams")
   let edit_teams = p.given("--add-team") || p.given("--remove-team")
   let set_mode = p.given("--read-only") || p.given("--read-write")
+  let mut out = output.none()
   if !set_teams && !edit_teams && !set_mode {
-    fmt.Println(f"{m.name}: {before}")
-    print_owner_cap(ctx, m, key_of)?
-    return Ok(())
+    out = out.line(f"{m.name}: {before}")
+    return Ok(out.then(owner_cap(ctx, m, key_of)?))
   }
   let given = [
       p.given("--team"),
@@ -740,7 +750,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Administrator credentials only: the members rules refuse every member
   // and bot token, so an agent on someone's token cannot widen a guest or
   // narrow its owner.
-  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   // The record as the administrator reads it: a team-scoped configured token
   // reads a member without the teams it cannot see (LLL-551), and editing
   // that copy would drop them.
@@ -801,11 +811,11 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let after = describe_access(wanted, wanted.team_ids().map(key_of))
   if after == before {
-    fmt.Println(f"{m.name}: {after} (unchanged)")
+    out = out.line(f"{m.name}: {after} (unchanged)")
   } else {
-    fmt.Println(f"{m.name}: {after} (was {before})")
+    out = out.line(f"{m.name}: {after} (was {before})")
   }
-  print_owner_cap(ctx, m.with_access(wanted), key_of)
+  Ok(out.then(owner_cap(ctx, m.with_access(wanted), key_of)?))
 }
 
 /// A member's recorded access. A record from a server before scoped
@@ -826,30 +836,24 @@ fn recorded_access(m: models.Member) -> models.Access {
 /// actually has and why (LLL-543). Prints nothing otherwise.
 /// A team-scoped caller may see a bot but not its owner (LLL-551): the owner
 /// then reads as missing, and the cap is not this caller's to know.
-fn print_owner_cap(
+fn owner_cap(
   ctx: pb.Client,
   m: models.Member,
   key_of: fn(models.TeamId) -> string,
-) -> Result<(), pb.CliError> {
+) -> Result<output.Output, pb.CliError> {
   let (eff, cap) = match records.effective_access(ctx, m) {
     Ok(found) => found,
     Err(e) => {
-      if e.status == 404 { return Ok(()) }
+      if e.status == 404 { return Ok(output.none()) }
       return Err(e)
     },
   }
+  let mut out = output.none()
   if let (Some(owner), Some(e)) = (cap, eff) {
-    fmt.Println(
+    out = out.line(
       f"  effective: {describe_access(e, e.team_ids().map(key_of))} (capped by its owner, {owner.name})",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
-/// A line for the inviter, not the colleague: stderr, so that
-/// 'lll member invite ... > handoff.txt' captures exactly what to send
-/// (fleet case 11: 8 of 10 agents retyped the handoff, password included,
-/// because the status lines were mixed into it).
-fn status(line: string) {
-  let _ = fmt.Fprintln(os.Stderr, line)
-}

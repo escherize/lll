@@ -2,6 +2,7 @@ import "go:regexp"
 import "go:strings"
 
 import "config"
+import "output"
 import "pb"
 
 /// One source of truth for a CLI flag (TASK-127). The verb's parser loop,
@@ -119,7 +120,7 @@ pub fn parse_n(
   while i < args.length() {
     let arg = args[i]
     if options_ended {
-      if pos.length() >= max_positional { return Err(usage_error(f"unexpected argument: '{arg}'")) }
+      if pos.length() >= max_positional { return Err(usage_error(extra_argument(arg, pos))) }
       pos = pos.append(arg)
       i += 1
       continue
@@ -158,7 +159,7 @@ pub fn parse_n(
         return Err(usage_error(unknown_flag(arg, usage, spec)))
       }
       if pos.length() >= max_positional {
-        return Err(usage_error(f"unexpected argument: '{arg}'"))
+        return Err(usage_error(extra_argument(arg, pos)))
       }
       pos = pos.append(arg)
       i += 1
@@ -236,19 +237,32 @@ fn url_scope_error(arg: string, url: string, usage: string) -> string {
   // Where the url comes from decides what changes it (the round-2 rule the
   // unreachable hint follows): 'config set url' writes the home file, which
   // LLL_URL and a repo .lll.toml both outrank.
-  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or("", |t| t.1.url)
+  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or(None, |t| t.1.url)
   unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {url_default_hint(origin)}."
 }
 
 /// How to change the default url, given where it came from.
-fn url_default_hint(origin: string) -> string {
-  if origin == "env:LLL_URL" {
-    "the default comes from LLL_URL in the environment; correct or unset it"
-  } else if strings.HasSuffix(origin, ".lll.toml") {
-    f"the default comes from {strings.TrimPrefix(origin, "file:")}; edit its url line"
-  } else {
-    "to change the default, run 'lll config set url URL'"
+fn url_default_hint(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Env(name)) => f"the default comes from {name} in the environment; correct or unset it",
+    Some(config.Source.RepoFile(path)) => f"the default comes from {path}; edit its url line",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
   }
+}
+
+/// One positional too many. A second issue key after a first is the guess
+/// `issue view FLEET-4 FLEET-5` (1.0 fleet, cases 13 and 09): say each verb
+/// takes one key.
+fn extra_argument(arg: string, pos: Slice<string>) -> string {
+  // `issue update KEY status review`: a field typed as a word (final replay, case 20).
+  if arg == "status" || arg == "state" {
+    return f"unexpected argument: '{arg}'; to change the state use --state <name> (states: backlog, todo, in-progress, in-review, done, cancelled)"
+  }
+  let key = regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$")
+  if key.MatchString(arg) && pos.any(|p| key.MatchString(p)) {
+    return f"unexpected argument: '{arg}'; this takes one issue key: run it once per key, or 'lll issue list --json' to read several"
+  }
+  f"unexpected argument: '{arg}'"
 }
 
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own
@@ -471,7 +485,7 @@ pub struct Command {
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
-  pub run: fn(CommandInput) -> Result<(), pb.CliError>,
+  pub run: fn(CommandInput) -> Result<output.Output, pb.CliError>,
 }
 
 /// Route `lll <noun> <verb> ...` through a noun's Command table.
@@ -493,7 +507,7 @@ pub fn dispatch(
   intro: string,
   cmds: Slice<Command>,
   args: Slice<string>,
-) -> Result<(), pb.CliError> {
+) -> Result<output.Output, pb.CliError> {
   let Some(verb) = args.get(2) else {
     return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
@@ -503,6 +517,11 @@ pub fn dispatch(
   let Some(c) = resolve_command(cmds, verb) else {
     if !verb.starts_with("-") && top_level_commands().contains(verb) {
       return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {verb}'? (see 'lll {noun} --help')"))
+    }
+    // A read verb this noun lacks, beside a list it has: two final-replay
+    // agents guessed `config view` (1.0 fleet case 04).
+    if ["view", "show", "read", "ls"].contains(verb) && cmds.any(|c| c.name == "list") {
+      return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {noun} list'? (see 'lll {noun} --help')"))
     }
     return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
   }

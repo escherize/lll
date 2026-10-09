@@ -245,10 +245,53 @@ fn load_traced_names_the_file_each_value_came_from() {
   let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\n")
   let assert Ok((cfg, src)) = traced_from(root, home)
   assert cfg.team == "REPO"
-  assert src.team.contains(".lll.toml")
-  assert src.url.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
+  // The repo's file and the machine's are told apart by the type, not by
+  // the file name (LLL-687).
+  let assert Some(Source.RepoFile(team_file)) = src.team
+  assert team_file.contains(".lll.toml")
+  let assert Some(Source.HomeFile(url_file)) = src.url
+  assert url_file.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
   // Nothing named web_url, so `--list` must attribute it to the default.
-  assert src.web_url == ""
+  assert src.web_url == None
+}
+
+// LLL-687 review: a repo file naming the same url as the home config is
+// still the one that wins, so it is the source the hints name: editing the
+// home file would change nothing.
+#[test]
+fn a_repo_file_repeating_the_home_value_is_still_its_source() {
+  let assert Ok((root, home)) = fixture(
+    "url = \"http://same:1\"\ntoken = \"tok\"\n",
+    "url = \"http://same:1\"\ntoken = \"tok\"\nteam = \"HOME\"\n",
+  )
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == "http://same:1"
+  let assert Some(Source.RepoFile(_)) = src.url
+  let assert Some(Source.RepoFile(_)) = src.token
+  // A key the repo file does not name stays the home file's.
+  let assert Some(Source.HomeFile(_)) = src.team
+}
+
+// LLL-687 review: `key = ""` names nothing. Uncommenting the template's
+// `# token = ""` must not make the repo file a token's source, or `config
+// list` warns about a committed token that does not exist.
+#[test]
+fn an_empty_value_does_not_make_a_file_the_source() {
+  let assert Ok((root, home)) = fixture("sort = \"\"\ntoken = \"\"\n", "")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.sort == ""
+  assert cfg.token == ""
+  assert src.sort == None
+  assert src.token == None
+}
+
+// The decoder takes `URL` for url, so the source must too.
+#[test]
+fn a_key_spelled_in_another_case_still_names_its_file() {
+  let assert Ok((root, home)) = fixture("URL = \"http://same:1\"\n", "url = \"http://same:1\"\n")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == "http://same:1"
+  let assert Some(Source.RepoFile(_)) = src.url
 }
 
 // ------------------------------------------------------------- web_url
@@ -259,7 +302,7 @@ fn an_api_url_does_not_invent_a_board_endpoint() {
     let assert Ok((root, home)) = fixture("team = \"REPO\"\n", f"url = \"{base}\"\n")
     let assert Ok((cfg, src)) = traced_from(root, home)
     assert cfg.web_url == ""
-    assert src.web_url == ""
+    assert src.web_url == None
   }
 }
 
@@ -275,7 +318,8 @@ fn a_repo_file_without_token_keeps_the_home_one() {
   )
   let assert Ok((cfg, src)) = traced_from(root, home)
   assert cfg.token == "home-token"
-  assert src.token.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
+  let assert Some(Source.HomeFile(token_file)) = src.token
+  assert token_file.contains(filepath.Join("home", ".config", "lll", "lll.toml"))
 }
 
 #[test]
@@ -296,7 +340,7 @@ fn lll_token_beats_both_files_and_is_traced_to_the_env() {
   )
   let assert Ok((cfg, src)) = traced_with(root, Env { home, token: "env-token", .. })
   assert cfg.token == "env-token"
-  assert src.token == "env:LLL_TOKEN"
+  assert src.token == Some(Source.Env("LLL_TOKEN"))
 }
 
 // ------------------------------------------------- precedence (LLL-486)
@@ -325,10 +369,10 @@ fn every_env_var_overrides_its_file_key_and_is_traced_to_the_env() {
   assert cfg.team == "ENVTEAM"
   assert cfg.sort == "priority"
   assert cfg.web_url == "http://env:2222"
-  assert src.url == "env:LLL_URL"
-  assert src.team == "env:LLL_TEAM"
-  assert src.sort == "env:LLL_SORT"
-  assert src.web_url == "env:LLL_WEB_URL"
+  assert src.url == Some(Source.Env("LLL_URL"))
+  assert src.team == Some(Source.Env("LLL_TEAM"))
+  assert src.sort == Some(Source.Env("LLL_SORT"))
+  assert src.web_url == Some(Source.Env("LLL_WEB_URL"))
 }
 
 #[test]
@@ -343,9 +387,9 @@ fn an_empty_env_var_cannot_clear_a_file_value() {
   assert cfg.token == "home-token"
   assert cfg.url == "http://home:9999"
   assert cfg.team == "REPO"
-  assert src.token != "env:LLL_TOKEN"
-  assert src.url != "env:LLL_URL"
-  assert src.team != "env:LLL_TEAM"
+  assert src.token != Some(Source.Env("LLL_TOKEN"))
+  assert src.url != Some(Source.Env("LLL_URL"))
+  assert src.team != Some(Source.Env("LLL_TEAM"))
 }
 
 #[test]
@@ -353,11 +397,11 @@ fn the_default_url_applies_only_when_nothing_supplied_one() {
   let assert Ok((root, home)) = fixture("team = \"REPO\"\n", "")
   let assert Ok((cfg, src)) = traced_from(root, home)
   assert cfg.url == "http://127.0.0.1:8090"
-  assert src.url == "default"
+  assert src.url == Some(Source.Default)
   let assert Ok((root2, home2)) = fixture("team = \"REPO\"\n", "url = \"http://home:9999\"\n")
   let assert Ok((cfg2, src2)) = traced_from(root2, home2)
   assert cfg2.url == "http://home:9999"
-  assert src2.url != "default"
+  assert src2.url != Some(Source.Default)
 }
 
 #[test]
@@ -370,11 +414,11 @@ fn a_team_flag_beats_lll_team_and_is_attributed_to_the_flag() {
   let assert Ok(s) = settings_in(root, env, flagged)
   let assert Ok((cfg, src)) = s.traced()
   assert cfg.team == "FLAG"
-  assert src.team == "flag:--team"
+  assert src.team == Some(Source.Flag("--team"))
   // Without the flag, the same environment is attributed to LLL_TEAM.
   let assert Ok((cfg2, src2)) = traced_with(root, env)
   assert cfg2.team == "ENVTEAM"
-  assert src2.team == "env:LLL_TEAM"
+  assert src2.team == Some(Source.Env("LLL_TEAM"))
 }
 
 #[test]
@@ -384,7 +428,7 @@ fn a_url_flag_beats_lll_url() {
   let assert Ok(s) = settings_in(root, env, no_overrides())
   let assert Ok((cfg, src)) = s.with_url("http://flag:3333").traced()
   assert cfg.url == "http://flag:3333"
-  assert src.url == "flag:--url"
+  assert src.url == Some(Source.Flag("--url"))
   // The token and the other keys are untouched by the url override.
   let assert Ok((plain, _)) = s.traced()
   assert plain.url == "http://env:1111"
@@ -416,7 +460,7 @@ fn lll_config_home_reaches_a_config_outside_home() {
   let assert Ok((cfg, src)) = traced_with(root, Env { home, config_home: elsewhere, .. })
   assert cfg.url == "http://elsewhere:1"
   assert cfg.token == "elsewhere-token"
-  assert src.url.contains(elsewhere)
+  assert src.url == Some(Source.HomeFile(filepath.Join(elsewhere, "lll", "lll.toml")))
   assert cfg.team == "REPO"
 }
 
@@ -476,14 +520,14 @@ fn bind_and_board_token_default_from_the_environment() {
 #[test]
 fn given_settings_read_no_file_and_no_environment() {
   // What command tests build: exactly the configuration they name.
-  let s = given(Config { url: "http://t:1", team: "T", .. }, Sources { url: "test", .. }, Env { .. })
+  let s = given(Config { url: "http://t:1", team: "T", .. }, Sources { url: Some(Source.Env("TEST")), .. }, Env { .. })
   let assert Ok((cfg, src)) = s.traced()
   assert cfg.url == "http://t:1"
   assert cfg.team == "T"
-  assert src.url == "test"
+  assert src.url == Some(Source.Env("TEST"))
   let assert Ok((cfg2, src2)) = s.with_team("OTHER").traced()
   assert cfg2.team == "OTHER"
-  assert src2.team == "flag:--team"
+  assert src2.team == Some(Source.Flag("--team"))
 }
 
 #[test]
@@ -495,4 +539,85 @@ fn repeated_resolution_from_one_directory_agrees() {
   assert a.team == b.team && b.team == c.team
   assert a.url == b.url && b.url == c.url
   assert a.token == b.token && b.token == c.token
+}
+
+// LLL-687: what `lll config list` prints for each source. These are the
+// strings the origins were before they were typed; the column and its JSON
+// field keep them.
+#[test]
+fn each_source_prints_as_it_always_has() {
+  let rows: Slice<(Option<Source>, string)> = [
+    (Some(Source.Flag("--team")), "flag:--team"),
+    (Some(Source.Env("LLL_URL")), "env:LLL_URL"),
+    (Some(Source.RepoFile(".lll.toml")), "file:.lll.toml"),
+    (Some(Source.HomeFile("/h/.config/lll/lll.toml")), "file:/h/.config/lll/lll.toml"),
+    (Some(Source.Default), "default"),
+    (None, ""),
+  ]
+  for (source, shown) in rows {
+    assert origin(source) == shown
+  }
+}
+
+// LLL-688: the home config's token is bound to the url saved beside it. A
+// repo file naming only `url` used to inherit the machine's login and send
+// it to the server the file chose.
+#[test]
+fn the_home_token_goes_only_to_the_home_url() {
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let repo = Some(Source.RepoFile("/r/.lll.toml"))
+  let a = "http://127.0.0.1:8100"
+  let b = "http://127.0.0.1:9999"
+  let cfg = |url| Config { url, token: "tok", .. }
+  // The home file supplies both, or the url is the default: sent.
+  assert withheld_token(cfg(a), Sources { url: home, token: home, .. }, a).is_none()
+  assert withheld_token(cfg("http://127.0.0.1:8090"), Sources { url: Some(Source.Default), token: home, .. }, "").is_none()
+  // Another layer names the same url byte for byte (LLL-653): sent.
+  assert withheld_token(cfg(a), Sources { url: Some(Source.Env("LLL_URL")), token: home, .. }, a).is_none()
+  // Another layer names another url: withheld, naming that layer.
+  let Some(held) = withheld_token(cfg(b), Sources { url: repo, token: home, .. }, a) else { panic("expected withheld") };
+  assert held.url == b
+  assert held.home_url == a
+  assert withheld_token(cfg(b), Sources { url: Some(Source.Env("LLL_URL")), token: home, .. }, a).is_some()
+  assert withheld_token(cfg(b), Sources { url: Some(Source.Flag("--url")), token: home, .. }, a).is_some()
+  assert withheld_token(cfg("http://localhost:8100"), Sources { url: repo, token: home, .. }, a).is_some()
+  // A token whoever chose the url also set stays with it.
+  assert withheld_token(cfg(b), Sources { url: repo, token: repo, .. }, a).is_none()
+  assert withheld_token(cfg(b), Sources { url: repo, token: Some(Source.Env("LLL_TOKEN")), .. }, a).is_none()
+}
+
+#[test]
+fn settings_hide_a_withheld_token_from_every_reader() {
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let s = given(
+    Config { url: "http://127.0.0.1:9999", token: "tok", .. },
+    Sources { url: Some(Source.RepoFile("/r/.lll.toml")), token: home, .. },
+    Env { .. },
+  )
+  let Ok((cfg, src)) = s.traced() else { panic("expected settings") };
+  assert cfg.token == ""
+  assert src.token.is_none()
+  assert s.withheld().is_some()
+}
+
+// LLL-688 re-review: login saves a url without its trailing slash, so a repo
+// file writing the same url with one must not lock the saved login out. The
+// host is not normalised: localhost is not 127.0.0.1.
+#[test]
+fn a_trailing_slash_does_not_unbind_the_home_token() {
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let repo = Some(Source.RepoFile("/r/.lll.toml"))
+  let a = "http://127.0.0.1:28611"
+  let cfg = |url| Config { url, token: "tok", .. }
+  assert withheld_token(cfg(a + "/"), Sources { url: repo, token: home, .. }, a).is_none()
+  assert withheld_token(cfg(a), Sources { url: repo, token: home, .. }, a + "/").is_none()
+  assert withheld_token(cfg("http://localhost:28611/"), Sources { url: repo, token: home, .. }, a).is_some()
+  assert withheld_token(cfg(a + "/x"), Sources { url: repo, token: home, .. }, a).is_some()
+}
+
+#[test]
+fn a_url_flag_drops_its_trailing_slash() {
+  let s = given(Config { url: "http://127.0.0.1:8090", .. }, Sources { .. }, Env { .. }).with_url("http://127.0.0.1:28611/")
+  let Ok(cfg) = s.config() else { panic("expected settings") };
+  assert cfg.url == "http://127.0.0.1:28611"
 }

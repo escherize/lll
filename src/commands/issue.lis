@@ -9,6 +9,7 @@ import "display"
 import "flags"
 import "gitctx"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "records"
@@ -477,7 +478,7 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
 /// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll issue --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let cmds = issue_commands()
   if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
     return Err(flags.usage_error(hint))
@@ -552,16 +553,20 @@ fn field_values(field: string) -> string {
 /// The right spelling for a word that is no issue verb; main's top-level
 /// unknown command asks the same table ('lll send KEY', case 20).
 pub fn issue_verb_hint(verb: string) -> Option<string> {
+  // `send-review`, `to-review`, `request-review`: any word about review
+  // (final replay, case 20).
+  if verb != "review" && strings.Contains(verb, "review") {
+    return Some("'lll issue update KEY-123 --state in-review' sends it to review")
+  }
   let hint = match verb {
     "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
     "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",
-    "move" | "transition" | "send" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)",
+    "move" | "transition" | "send" | "set" | "mark" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)",
     "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
     "get" => "'lll issue view KEY-123'",
     "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
     "ls" => "'lll issue list'",
     "rm" | "remove" => "'lll issue delete KEY-123'",
-    "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
     "note" | "reply" => "'lll issue comment KEY-123 \"body\"' adds one",
     "review" => "'lll issue update KEY-123 --state in-review' sends it to review",
     "depends" | "dep" | "blocked-by" | "blockedby" => "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start",
@@ -689,6 +694,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "comment",
+      // `issue comments KEY` reads them (final replay, case 18: a poll loop
+      // never saw the hint and missed its window).
+      hidden_alias: "comments",
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
@@ -700,7 +708,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "stream live events for the issue and its comments until interrupted",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
-      run: issue_watch,
+      run: |i| streamed(issue_watch(i)),
       ..,
     },
     flags.Command {

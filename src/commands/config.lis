@@ -1,4 +1,3 @@
-import "go:fmt"
 import "go:encoding/json"
 import "go:net/url"
 import "go:os"
@@ -7,6 +6,7 @@ import "go:strings"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 import "query"
 
@@ -14,7 +14,7 @@ import "query"
 /// Dispatch parses args against the verb's spec BEFORE calling it, which is
 /// what stops `lll config check -h` from RUNNING the check - a network call -
 /// the way the old `match verb` did when it handed a zero-arg fn nothing.
-pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "config", "manage configuration", config_intro(), config_commands(), args)
 }
 
@@ -81,42 +81,47 @@ Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
 each supplies the keys it names, so the committed repo file carries 'team' and
 nothing else while 'url' and 'token' stay per-machine. 'lll attach' writes the
-repo file.
+repo file. The saved token is sent only to the url saved beside it: when
+the repo file or LLL_URL names another server, commands there refuse
+rather than send it.
 
-Save or replace the token with {token_save_hint()}."
+Save or replace the token with {token_save_hint("lll login")}."
 }
 
 /// How to save a token you already hold; named by `config --help` and by
 /// `config set token`.
-fn token_save_hint() -> string {
-  "'lll login --token -' (reads it from stdin)"
+fn token_save_hint(login: string) -> string {
+  f"'{login} --token -' (reads it from stdin)"
 }
 
 /// Set a machine-level endpoint, without changing repo config.
-fn config_set(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_set(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "usage: lll config set <url|web_url> VALUE"
   // 1.0 fleet: three agents concluded LLL_TOKEN or a hand edit were the only
   // ways to save a token.
   if input.parsed.first() == "token" {
-    return Err(flags.usage_error(f"the token is saved by logging in: {token_save_hint()}"))
+    let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
+    let login = pb.login_command(cfg.url, src.url)
+    return Err(flags.usage_error(f"the token is saved by logging in: {token_save_hint(login)}"))
   }
   if input.parsed.positional_count() != 2 { return Err(flags.usage_error(usage)) }
   let key = input.parsed.first()
   let value = strings.TrimSpace(input.parsed.nth(1))
   if value == "" { return Err(flags.usage_error(usage)) }
+  let mut out = output.none()
   if key == "url" || key == "web_url" {
     let endpoint = checked_endpoint(key, value)?
     let path = set_home_key(ctx.settings, key, endpoint)?
-    fmt.Println(f"{key} = {endpoint} in {path}")
+    out = out.line(f"{key} = {endpoint} in {path}")
     // Re-read: the file just changed, and the note is about what wins now.
     let (cfg, src) = ctx.settings.reload().traced().map_err(pb.failed)?
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
-      fmt.Println(f"note: {origin} overrides this setting; 'lll config list' shows the effective configuration")
+      out = out.notice(f"note: {config.origin(origin)} overrides this setting; 'lll config list' shows the effective configuration")
     }
-    return Ok(())
+    return Ok(out)
   }
   Err(flags.usage_error(f"cannot set '{key}'; supported keys: url, web_url"))
 }
@@ -249,34 +254,34 @@ fn write_home_config(link: string, out: string) -> Result<(), pb.CliError> {
 /// `git config --list --show-origin`. The failure this answers is silent: a
 /// repo reading the wrong team lists the wrong issues and reports nothing, so
 /// being able to ask which file won is the whole debugging affordance.
-fn config_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   if input.parsed.given("--json") {
     // The token's value is a secret here too: only whether it is set.
     let tok = if cfg.token == "" { "" } else { "set" }
     let values = [
-      ConfigValue { key: "url", value: cfg.url, source: src.url },
-      ConfigValue { key: "team", value: cfg.team, source: src.team },
-      ConfigValue { key: "sort", value: cfg.sort, source: src.sort },
-      ConfigValue { key: "web_url", value: cfg.web_url, source: src.web_url },
-      ConfigValue { key: "token", value: tok, source: src.token },
+      ConfigValue { key: "url", value: cfg.url, source: config.origin(src.url) },
+      ConfigValue { key: "team", value: cfg.team, source: config.origin(src.team) },
+      ConfigValue { key: "sort", value: cfg.sort, source: config.origin(src.sort) },
+      ConfigValue { key: "web_url", value: cfg.web_url, source: config.origin(src.web_url) },
+      ConfigValue { key: "token", value: tok, source: config.origin(src.token) },
     ]
-    return print_list_json(values, whole_list(values.length()), "config")
+    return list_json(values, whole_list(values.length()), "config")
   }
-  print_origin(src.url, "url", cfg.url)
-  print_origin(src.team, "team", cfg.team)
-  print_origin(src.sort, "sort", cfg.sort)
-  print_origin(src.web_url, "web_url", cfg.web_url)
+  let mut out = output.line(origin_line(src.url, "url", cfg.url))
+    .line(origin_line(src.team, "team", cfg.team))
+    .line(origin_line(src.sort, "sort", cfg.sort))
+    .line(origin_line(src.web_url, "web_url", cfg.web_url))
   // The token is a secret, so --list answers where it came from, never what
   // it is. The origin column is the debugging affordance; the value would
   // only leak into terminals and scrollback.
   let tok = if cfg.token == "" { "" } else { "••••" }
-  print_origin(src.token, "token", tok)
+  out = out.line(origin_line(src.token, "token", tok))
   if let Some(warning) = committed_token_warning(ctx, src.token) {
-    fmt.Println(warning)
+    out = out.notice(warning)
   }
-  Ok(())
+  Ok(out)
 }
 
 /// One `config list --json` item. `source` is "" when the key is unset.
@@ -285,7 +290,7 @@ struct ConfigValue { key: string, value: string, source: string }
 
 /// `lll config get KEY` — the effective value alone, for a script to read.
 /// The token is a secret, so it is refused here as in `config list`.
-fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_get(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" { return Err(flags.usage_error(f"usage: {input.usage}")) }
@@ -302,9 +307,8 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
       flags.usage_error(f"unknown config key '{other}'; keys: url, web_url, team, sort"),
     ),
   }
-  if origin == "" { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
-  fmt.Println(value)
-  Ok(())
+  if origin.is_none() { return Err(pb.failed(f"{key} is not set (see 'lll config list')")) }
+  Ok(output.line(value))
 }
 
 /// `lll config check` — one line saying whether the configured url answers as
@@ -314,45 +318,48 @@ fn config_get(input: flags.CommandInput) -> Result<(), pb.CliError> {
 /// /api/health is the endpoint because it needs no auth and no collection, so
 /// a failure here is about reachability alone.
 /// `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_check(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_check(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
+  let mut out = output.none()
   match ctx.get("/api/health") {
-    Ok(_) => fmt.Println(f"ok\t{cfg.url} answers as an lll server"),
+    Ok(_) => out = out.line(f"ok\t{cfg.url} answers as an lll server"),
     // The error already names the url, the status, and (for a board-shaped
     // 404) the port hint from pb.read_body. Prefixing it is all that is left.
     Err(e) => return Err(e.with_message(f"{cfg.url} is not a reachable lll server API: {e.message}")),
   }
   if let Some(warning) = committed_token_warning(ctx, src.token) {
-    fmt.Println(warning)
+    out = out.notice(warning)
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The warning for a token that came from a repo `.lll.toml`, else None.
 /// That file is committed, so a token in it is a secret in everyone's clone
 /// and in every future checkout of the history. Naming the home config makes
 /// the warning actionable rather than a scold.
-fn committed_token_warning(ctx: pb.Client, source: string) -> Option<string> {
-  if !strings.HasPrefix(source, "file:") { return None }
-  let path = strings.TrimPrefix(source, "file:")
+fn committed_token_warning(ctx: pb.Client, source: Option<config.Source>) -> Option<string> {
+  let path = match source {
+    Some(config.Source.RepoFile(path)) => path,
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => return None,
+  }
   let Ok(home) = ctx.settings.home_path() else {
     return None
   }
-  if path == home { return None }
   Some(
     f"warning: the token comes from {path}, which is committed - move it to {home} (or LLL_TOKEN) and mint a fresh one, since this one is in the repo's history",
   )
 }
 
-fn print_origin(source: string, key: string, value: string) {
-  let from = if source == "" { "unset" } else { source }
+fn origin_line(source: Option<config.Source>, key: string, value: string) -> string {
+  let from = if source.is_none() { "unset" } else { config.origin(source) }
   let role = match key {
     "url" => "\tAPI base (reads and writes)",
     "web_url" => "\tboard base (browser links)",
     _ => "",
   }
-  fmt.Println(f"{from}\t{key}={value}{role}")
+  f"{from}\t{key}={value}{role}"
 }
 
 /// True for an uncommented `key = ...` line. The commented keys the template
@@ -364,7 +371,7 @@ fn assigns(line: string, key: string) -> bool {
 }
 
 /// `lll config init`. `_args` is unread: dispatch already parsed it (TASK-307).
-fn config_init(_input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn config_init(_input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if os.Stat(".lll.toml").is_ok() {
     return Err(pb.failed(".lll.toml already exists; not overwriting"))
   }
@@ -400,8 +407,7 @@ fn config_init(_input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = os.WriteFile(".lll.toml", template.bytes(), 0o644) {
     return Err(pb.failed(f"writing .lll.toml: {e}"))
   }
-  fmt.Println("Wrote .lll.toml")
-  Ok(())
+  Ok(output.line("Wrote .lll.toml"))
 }
 
 /// API and board base URLs must be explicit HTTP(S) endpoints, with no credentials.
