@@ -134,9 +134,19 @@ def publish_audit(binary, worker):
     return supplied.exists()
 
 
+def conn_file(worker):
+    """Where a worker's connection facts live. Only case 14, whose task is to
+    repair a config by hand, keeps them in the worker's own directory; every
+    other case keeps them beside it, so a worker cannot read its token by
+    opening a file it sees (cases 01-05 run 1: 1-2 of 10 workers per case
+    opened conn.txt despite the rule)."""
+    inside = worker / 'conn.txt'
+    return inside if inside.exists() else worker.parent / '.conn' / f'{worker.name}.txt'
+
+
 def wrapper_env(worker, mode, inherited):
     """The child environment for one wrapped call, and the secrets to redact."""
-    url, token, team = connection(worker / 'conn.txt')
+    url, token, team = connection(conn_file(worker))
     env = clean_env(worker / 'home')
     if mode in ('env', 'noteam', 'override'):
         env.update(LLL_URL=url, LLL_TOKEN=token)
@@ -167,7 +177,7 @@ def wrapper_main():
     env, hidden = wrapper_env(worker, mode, os.environ)
     args = sys.argv[5:]
     hidden += [value for flag, value in zip(args, args[1:]) if flag in ('--password', '--old-password', '--admin-password')]
-    if foreign_url(args, connection(worker / 'conn.txt')[0]):
+    if foreign_url(args, connection(conn_file(worker))[0]):
         raise SystemExit('fleet wrapper: this board is the only server; --url and `config set url` must name conn.txt line 1')
     # Only a minted credential on stdout reaches the worker unredacted, in override
     # mode: `bot create|rotate --env > helper.env` (case 15) and the temporary
@@ -325,8 +335,13 @@ class Board:
         audit = audit_path(self.binary, seat.worker)
         private_dir(audit.parent)
         private_write(audit, '')
-        private_write(seat.worker / 'conn.txt', f'{self.api}\n{seat.token}\nFLEET\n')
-        assert connection(seat.worker / 'conn.txt')[0] == self.api
+        if self.case == '14':
+            target = seat.worker / 'conn.txt'
+        else:
+            private_dir(seat.worker.parent / '.conn')
+            target = seat.worker.parent / '.conn' / f'{seat.worker.name}.txt'
+        private_write(target, f'{self.api}\n{seat.token}\nFLEET\n')
+        assert connection(conn_file(seat.worker))[0] == self.api
         script = self.binary.parent / 'harness' / 'agent_dx_fleet.py'
         mode = CASES[self.case]['mode']
         wrapper = (f'#!/usr/bin/env python3\nimport os\nos.execv({sys.executable!r}, [{sys.executable!r}, '
@@ -339,6 +354,7 @@ class Board:
             stop(self.child)
         for seat in self.seats:
             (seat.worker / 'conn.txt').unlink(missing_ok=True)
+            (seat.worker.parent / '.conn' / f'{seat.worker.name}.txt').unlink(missing_ok=True)
 
     # REST
 

@@ -21,7 +21,7 @@ import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
-from agent_dx_fleet import (CASES, audit_path, connection, private_dir, private_write, public_snapshot,
+from agent_dx_fleet import (CASES, audit_path, conn_file, connection, private_dir, private_write, public_snapshot,
                             publish_audit, serve, stop, wrapper_env)
 
 HERE = Path(__file__).resolve().parent
@@ -290,7 +290,7 @@ def w12(w, right):
 
 def w13(w, right):
     script = w.dir / f'fleet-13-{w.number}.sh'
-    auth = '' if right else f'export LLL_TOKEN={connection(w.dir / "conn.txt")[1]}\n'
+    auth = '' if right else f'export LLL_TOKEN={connection(conn_file(w.dir))[1]}\n'
     script.write_text(f'#!/bin/sh\n{auth}cd "$(dirname "$0")"\nwhile true; do\n'
                       '  key=$(./lll issue next --label sweep --claim); code=$?\n'
                       '  [ "$code" -eq 5 ] && exit 0\n  [ "$code" -ne 0 ] && exit "$code"\n'
@@ -303,7 +303,7 @@ def w13(w, right):
 
 def w14(w, right):
     assert w.run('whoami', check=False).returncode != 0
-    url, token, _ = connection(w.dir / 'conn.txt')
+    url, token, _ = connection(conn_file(w.dir))
     w.run('config', 'set', 'url', url)
     assert w.run('whoami', check=False).returncode == 6
     if right:
