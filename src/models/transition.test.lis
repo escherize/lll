@@ -169,3 +169,11 @@ fn a_hold_is_read_from_the_callers_side() {
   // A superuser has no member: every hold is someone else's.
   assert hold_of(Some(claim_by("m1", "")), None, "") == Hold.OtherMember
 }
+
+#[test]
+fn a_refusal_reads_as_the_servers() {
+  // gopb releaseAuthority and closeIssue, as PocketBase sentences them.
+  assert Refusal.NeedsForce.message(Hold.OtherMember, "bryan") == "The claim is held by bryan; releasing another member's claim needs force."
+  assert Refusal.NeedsForce.message(Hold.OtherSession, "bryan (agent a1)") == "The claim is held by bryan (agent a1); releasing another session's claim needs force."
+  assert Refusal.KeepNotHolder.message(Hold.OtherMember, "bryan") == "The claim is held by bryan; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it."
+}
