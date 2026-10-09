@@ -6,21 +6,116 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-08
+
+1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,
+the `--json` fields it names, the list envelope, and command, verb and flag
+spellings with their permanent aliases. A change that breaks a script built
+on them needs 2.0. Message wording and help text are not covered.
+
+The surface is the 0.9 surface with the changes listed below. The internals
+have been restructured: PocketBase's rules are the one owner of access, one
+write layer makes every record write, values are parsed into types where
+they arrive, and no credential or scope travels through the environment.
+
+### Upgrading from 0.9
+
+Read this list before you upgrade a server, a script or an agent prompt.
+Details are in the sections below.
+
+**Deploy the server before the clients.** The server runs five migrations
+on its first boot: per-team issue counters, the board's link viewers,
+identity-field rules, self-only member rename, and the doc `last_editor`
+field. Back up the server's data directory first. A 1.0 CLI against a 0.9
+server reports a bot-owner refusal as an administrator-credentials refusal,
+and refuses a description edit combined with `--assignee` ("invalid
+assignment update fields").
+
+Exit codes.
+
+- `lll issue update KEY --assignee NAME` (or `--assignee none`) on an issue
+  that another session's claim holds, refused for needing `--force`, exits 4
+  (refused). It exited 1.
+- `lll member access` recognizes the bot-owner refusal (a bot wider than
+  its owner) by its stable code `bot_exceeds_owner` and relays the server's
+  message (exit 1), as before. A 0.9 server sends no code, so against it a
+  1.0 CLI reports that refusal as needing administrator credentials (exit 4).
+
+Command line.
+
+- An issue key with a signed number (`ENG-+3`) is refused as not an issue ID
+  (exit 2). The CLI used to read it as `ENG-3`.
+- `--team` given twice on one command is refused (exit 2). It used to keep
+  the last value.
+- `lll login` without `--url` refuses when `LLL_URL` or a repo file names a
+  server other than the one in the home config. Pass `--url` to switch the
+  home config.
+
+Issue numbers.
+
+- An issue key is never reused. Deleting a team's highest-numbered issue no
+  longer hands its number to the next issue, so after such a delete the next
+  key is one higher than it would have been in 0.9.
+- **Breaking for member restores:** `lll import dir` keeps a mirror's issue
+  numbers only with a superuser token. Run as a member, it imports under new
+  numbers and prints which keys changed (`ENG-5 -> ENG-9`).
+- A member cannot choose or change an issue's number. Moving an issue to
+  another team gives it a fresh number there.
+
+Who may change what.
+
+- Only a superuser or the member itself renames a member. A bot is renamed
+  by a superuser only.
+- An issue's `creator` and `origin`, a member's owner, and a favorite's or
+  saved view's member are set when the record is created and cannot be
+  changed by a member. A comment's issue cannot be changed by anyone.
+
+Output and the board.
+
+- `lll doc view` and `lll finding view` print `Edited by:` when the last
+  editor is not the author; `doc view --json` has `last_editor`.
+- Board form posts refuse an unknown or out-of-team label, project or member
+  id by name, instead of passing the raw id to the server.
+
 ### Added
 
 - Docs record who last edited them. `last_editor` is set by the server from
   the caller: the author on create, then the member whose update changes the
   doc's content (slug, title, kind, body, area or paths). Linking an issue
   and confirming or refuting a finding do not count. A member cannot send
-  it. When it is not the author, `lll doc view` and
-  `lll finding view` print `Edited by:`, and the board's doc page and docs
-  index show it, with a bot's owner and "hidden member" as for the author.
-  `doc view --json` has a `last_editor` field. Existing docs get their
-  author as last editor. Docs stay shared team pages. The docs index's
-  `?raw` author column reads `alice, edited by bob` for such a doc. (LLL-682)
+  it. When it is not the author, `lll doc view` and `lll finding view` print
+  `Edited by:`, and the board's doc page and docs index show it, with a
+  bot's owner and "hidden member" as for the author. `doc view --json` has a
+  `last_editor` field. Existing docs get their author as last editor. The
+  docs index's `?raw` author column reads `alice, edited by bob` for such a
+  doc. (LLL-682)
+- A per-team issue counter that only increases (`issue_counters`, in
+  `lll api --schema`). A superuser repairs one with
+  `POST /api/lll/teams/{team}/issue-counter` (`{"last": N, "reason": "..."}`);
+  the server logs who changed it, from what, and why, and refuses a value
+  below the team's highest live issue. Issue numbers are capped at
+  999,999,999; a team that reaches the cap is told which issue holds the
+  highest number. (LLL-678)
 
 ### Changed
 
+- Issue numbers are never reused. Deleting a team's highest-numbered issue
+  used to hand its number, and so its key, to the next issue created; a key
+  in a commit message or PR then named a different issue. An upgrade starts
+  each team's counter at its highest existing number, so a number deleted
+  before the upgrade can still come back once. (LLL-678)
+- The server chooses issue numbers. A member's create that names a
+  `number` gets the next number instead, and a member cannot change an
+  issue's number. Moving an issue to another team gives it a fresh number
+  there. A superuser may still name a number. (LLL-678)
+- **Breaking for member restores:** `lll import dir` keeps a mirror's issue
+  numbers only when it runs with a superuser token (`LLL_TOKEN` from
+  `lll token create` is a member's; use the administrator's). Run as a
+  member, it imports the issues in mirror order under new numbers, links
+  blockers and docs to the right issues anyway, and prints which keys
+  changed (`Numbered by the server, ...: ENG-5 -> ENG-9`). Before this, any
+  member could create an issue under any number, including a deleted one.
+  (LLL-678)
 - Only a superuser or the member itself renames a member. A full member can
   no longer rename another member, which let it rename someone and take the
   freed name. A bot is renamed by a superuser only, not by its owner or with
@@ -34,113 +129,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   it at a server other than the one the home config's url names. It used to
   save that server's token, and the board endpoint it discovered, beside the
   other server's url. Pass `--url` to switch the home config. (LLL-680)
-- The web board moved out of the CLI's `commands` module into its own
-  module, `src/serve`; the helpers both sides use moved to the modules that
-  own them (records, writes, tokens, display, realtime, buildinfo).
-  `scripts/test_module_deps.py` fails if the board imports `commands`. No
-  command, flag, page or output changed. (LLL-659)
-- Internals are typed (LLL-675). Errors are `pb.CliError` values with a
-  kind, status and server code instead of strings with a hidden tag; record
-  ids are one type per collection; "every team" is
-  `query.TeamScope.Every` instead of an empty team id; issue state and
-  priority, member access and kind, and realtime events are enums parsed
-  once where text arrives. `scripts/test_typed_boundaries.py` holds it. No
-  command, flag, page or output changed except as listed under Fixed.
-
-### Fixed
-
-- `lll issue update KEY --assignee NAME` on an issue another session's
-  claim holds, refused for needing force, exits 4 (refused) like every
-  other claim refusal. It exited 1: the refusal's kind was lost when the
-  message was reworded. (LLL-675)
-- The server's refusal of a bot wider than its owner carries the stable
-  code `bot_exceeds_owner`, and `lll member access` relays it by that code;
-  a wrong `--old-password` is read from PocketBase's `oldPassword` field.
-  Both used to be found by matching the message text. Upgrade the server
-  with the CLI: an older server's bot-owner refusal has no code, and the
-  new CLI reports it as an administrator-credentials refusal. (LLL-675)
-- Board forms refuse a label, project or member id outside what the viewer
-  may pick for the issue's team (create, and the settings rows' label and
-  project updates, included), naming it, instead of handing the raw id to
-  the server. (LLL-675)
-- The board's live stream ignores an event on a topic it did not subscribe
-  to by name. It used to read any unknown topic as an issue. (LLL-675)
-- An issue key with a signed number (`lll issue view ENG-+3`, the board's
-  `/issue/ENG-+3`) is refused as not an issue ID (exit 2; 404 on the board).
-  The CLI used to read it as ENG-3 while the board's gate said it belonged
-  to no team: the two now share one parser. (LLL-659)
 - `lll up` saves its board address as `web_url` only into a home config
   whose url names that board's server, or names no server (`localhost`,
   `127.0.0.1` and `[::1]` count as one host). A boot run beside a hosted
   login replaced that login's `web_url` with the local board's address. Such
-  a boot now leaves `web_url` alone and says so. `lll up --scratch` also refuses to start if its config path is
-  outside its own directory. (LLL-680)
-- The e2e suites, the doc-examples check and the agent-dx fleet wrapper
-  refuse to run when the environment they give lll reaches the developer's
-  real config. The real home comes from the password database, not from
-  `HOME`. (LLL-680)
-
-- Issue numbers are never reused. Deleting a team's highest-numbered issue
-  used to hand its number, and so its key, to the next issue created; a key
-  in a commit message or PR then named a different issue. The server now
-  keeps a per-team counter that only increases (`issue_counters`, in
-  `lll api --schema`). An upgrade starts each team's counter at its highest
-  existing number, so a number deleted before the upgrade can still come
-  back once.
-- The server chooses issue numbers. A member's create that names a
-  `number` gets the next number instead, and a member cannot change an
-  issue's number. Moving an issue to another team gives it a fresh number
-  there. A superuser may still name a number.
-- **Breaking for member restores:** `lll import dir` keeps a mirror's issue
-  numbers only when it runs with a superuser token (`LLL_TOKEN` from
-  `lll token create` is a member's; use the administrator's). Run as a
-  member, it imports the issues in mirror order under new numbers, links
-  blockers and docs to the right issues anyway, and prints which keys
-  changed (`Numbered by the server, ...: ENG-5 -> ENG-9`). Before this, any
-  member could create an issue under any number, including a deleted one.
-  Issue numbers are capped at 999,999,999; a
-  team that reaches the cap is told which issue holds the highest number.
-  A superuser repairs a counter with
-  `POST /api/lll/teams/{team}/issue-counter` (`{"last": N, "reason": "..."}`);
-  the server logs who changed it, from what, and why, and refuses a value
-  below the team's highest live issue. (LLL-678)
-- A comment's issue cannot be changed after it is created. A PATCH that
-  moves a comment to another issue answers 400, for every caller including a
-  superuser. (LLL-678)
-- `lll project view` and `lll webhook list` read every page; they stopped
-  at the first 200 items. The board's saved-view name check reads every page
-  too. (LLL-659)
-
-### Fixed
-
-- `lll issue update --description-append` and `--description-replace` no
-  longer lose a concurrent edit. Both derive the new description from the
-  issue they read, and the write now lands only if the issue is still that
-  version; when it changed in between, the update reads it again and
-  re-applies the edit. Two agents appending at once both keep their text.
-  With `--assignee` as well, the edit goes through the claim route, which now
-  checks the same condition; a server older than this release refuses that
-  combination ("invalid assignment update fields") instead of risking a lost
-  edit. (LLL-665)
-
-### Internal
-
-- One write layer, `src/writes/`, makes every create, update and delete of a
-  lll record, for the CLI and the board alike. Bodies are typed values
-  encoded with encoding/json; no write builds JSON from strings. An issue
-  edit is an `IssuePatch`, where "not given" is `None` or `Keep` and the
-  contradictory combinations have no constructor.
-  `scripts/test_write_layer.py` fails on a record write outside the layer.
-  (LLL-659)
-- Migrations: `scripts/fixtures/collection_rules.json` pins every
-  collection's final rules, and the gate fails when the migrations build
-  anything else, so a rule migration that drops an earlier clause no longer
-  passes unseen. `pb/pb_migrations/lib/rules.js` adds or removes one rule
-  clause, so a new migration need not restate the whole rule.
-  `scripts/test_migration_names.py` refuses a new shared timestamp and a
-  renamed shipped migration; the three existing shared timestamps keep their
-  names, because PocketBase tracks applied migrations by file name.
-  `pb/README.md` describes the current layout. (LLL-657)
+  a boot now leaves `web_url` alone and says so. `lll up --scratch` also
+  refuses to start if its config path is outside its own directory.
+  (LLL-680)
 
 ### Security
 
@@ -180,11 +175,76 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
     member edits one that has a member. A full member could star an issue
     or save a view in another member's name, move one between members, or
     rewrite another member's. A full member still deletes anyone's.
+- A comment's issue cannot be changed after it is created. A PATCH that
+  moves a comment to another issue answers 400, for every caller including a
+  superuser. (LLL-678)
+- The e2e suites, the doc-examples check and the agent-dx fleet wrapper
+  refuse to run when the environment they give lll reaches the developer's
+  real config. The real home comes from the password database, not from
+  `HOME`. (LLL-680)
+
+### Fixed
+
+- `lll issue update KEY --assignee NAME` (or `--assignee none`) on an issue
+  another session's claim holds, refused for needing force, exits 4
+  (refused) like every other claim refusal. It exited 1: the refusal's kind
+  was lost when the message was reworded. (LLL-675)
+- The server's refusal of a bot wider than its owner carries the stable
+  code `bot_exceeds_owner`, and `lll member access` relays it by that code;
+  a wrong `--old-password` is read from PocketBase's `oldPassword` field.
+  Both used to be found by matching the message text. Upgrade the server
+  with the CLI: an older server's bot-owner refusal has no code, and the
+  new CLI reports it as an administrator-credentials refusal. (LLL-675)
+- An issue key with a signed number (`lll issue view ENG-+3`, the board's
+  `/issue/ENG-+3`) is refused as not an issue ID (exit 2; 404 on the board).
+  The CLI used to read it as ENG-3 while the board's gate said it belonged
+  to no team: the two now share one parser. (LLL-659)
+- `lll issue update --description-append` and `--description-replace` no
+  longer lose a concurrent edit. Both derive the new description from the
+  issue they read, and the write now lands only if the issue is still that
+  version; when it changed in between, the update reads it again and
+  re-applies the edit. Two agents appending at once both keep their text.
+  With `--assignee` as well, the edit goes through the claim route, which now
+  checks the same condition; a server older than this release refuses that
+  combination ("invalid assignment update fields") instead of risking a lost
+  edit. (LLL-665)
+- Board forms refuse a label, project or member id outside what the viewer
+  may pick for the issue's team (create, and the settings rows' label and
+  project updates, included), naming it, instead of handing the raw id to
+  the server. (LLL-675)
+- The board's live stream ignores an event on a topic it did not subscribe
+  to by name. It used to read any unknown topic as an issue. (LLL-675)
+- `lll project view` and `lll webhook list` read every page; they stopped
+  at the first 200 items. The board's saved-view name check reads every page
+  too. (LLL-659)
 - `pb/pb_migrations/lib/rules.js` read a collection's rule as one opaque
   clause, because PocketBase hands a rule to a migration as a Go string
   pointer. Removing a clause failed, and adding one skipped the duplicate
   and top-level `||` checks. No shipped migration was affected: this is the
   first to call it. (LLL-681)
+
+### Internal
+
+No command, flag, page or output changed by these, except as listed above.
+
+- One write layer, `src/writes/`, makes every create, update and delete of a
+  lll record, for the CLI and the board alike. Bodies are typed values
+  encoded with encoding/json. An issue edit is an `IssuePatch`, where "not
+  given" is `None` or `Keep` and the contradictory combinations have no
+  constructor. `scripts/test_write_layer.py` holds it. (LLL-659)
+- The web board is its own module, `src/serve`, and never imports
+  `commands`; shared helpers moved to the modules that own them.
+  `scripts/test_module_deps.py` holds it. (LLL-659)
+- Typed internals: errors are `pb.CliError` values with a kind, status and
+  server code; record ids are one type per collection; "every team" is
+  `query.TeamScope.Every`; issue state and priority, member access and kind,
+  and realtime events are enums parsed once where text arrives.
+  `scripts/test_typed_boundaries.py` holds it. (LLL-675)
+- Migrations: `scripts/fixtures/collection_rules.json` pins every
+  collection's final rules, and the gate fails when the migrations build
+  anything else. `pb/pb_migrations/lib/rules.js` adds or removes one rule
+  clause. `scripts/test_migration_names.py` refuses a new shared timestamp
+  and a renamed shipped migration. (LLL-657)
 
 ## [0.9.0] - 2026-10-08
 
