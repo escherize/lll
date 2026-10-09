@@ -328,7 +328,8 @@ fn issue_next_page() -> string {
   f"usage: {flags.usage("lll issue next", spec, "")}{flags.section(spec)}
 
 stdout: the key (or, with --json, one JSON object) and nothing else.
-stderr: notices. Exit 5 when nothing is ready.
+stderr: notices. Exit 5 when nothing can be offered: no ready issue, or
+every ready one assigned or claimed.
 Capture stdout only: key=$(lll issue next --claim)"
 }
 
@@ -416,7 +417,9 @@ fn empty_agenda_message(unclaimed: Slice<models.Issue>) -> string {
   let shown = unclaimed[..count]
   let mut named = shown.map(|i| f"{i.expand.team.key}-{i.number} to {i.expand.assignee.name}")
   if unclaimed.length() > 3 { named = named.append("...") }
-  f"no unassigned, unclaimed ready issues; {unclaimed.length()} ready match but are assigned ({strings.Join(named, ", ")}): 'lll issue update KEY --assignee none' offers one"
+  let n = unclaimed.length()
+  let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
+  f"no unassigned, unclaimed ready issues; {n} {are} assigned ({strings.Join(named, ", ")}): 'lll issue update KEY --assignee none' offers one"
 }
 
 /// The `list --ready` candidate set (LLL-175), reused as the `issue next`

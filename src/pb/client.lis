@@ -477,13 +477,15 @@ is the lll server running? start everything with 'lll up', or point LLL_URL (or 
 /// said which file held it.
 fn unreachable_hint(base: string, url_origin: string, e: error) -> CliError {
   let err = unreachable(base, e)
-  let fix = "fix with 'lll config set url URL' or 'lll login --url URL'"
   let line = if url_origin == "default" {
     "no url is configured on this machine; connect with: lll login --url https://your-server"
   } else if url_origin == "env:LLL_URL" {
-    f"this url comes from LLL_URL in the environment; correct or unset it ({fix} once it is unset)"
+    "this url comes from LLL_URL in the environment; correct or unset it"
+  } else if strings.HasSuffix(url_origin, ".lll.toml") {
+    // A repo file outranks the machine's, so 'config set url' would not win.
+    f"this url comes from {strings.TrimPrefix(url_origin, "file:")}; edit its url line, or remove it to use the machine's"
   } else if strings.HasPrefix(url_origin, "file:") {
-    f"this url comes from {strings.TrimPrefix(url_origin, "file:")}; {fix}"
+    f"this url comes from {strings.TrimPrefix(url_origin, "file:")}; fix with 'lll config set url URL' or 'lll login --url URL'"
   } else if url_origin == "flag:--url" {
     "this url comes from --url"
   } else {
@@ -785,7 +787,17 @@ fn expired_token(tok: string, origin: string) -> CliError {
   let exp = token_expiry(tok).unwrap_or(0)
   let when = time.Unix(exp as int64, 0).UTC().Format("2006-01-02 15:04:05 UTC")
   let ago = time.Now().Unix() as int - exp
-  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: 'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify")
+  fail(ErrorKind.Auth, f"{from} expired at {when} ({ago}s ago). Every read comes back empty and every write is refused until it is replaced: {token_fix(origin)}")
+}
+
+/// How to replace a token that no longer works (1.0 fleet: four of ten were
+/// sent down the superuser and password paths first). LLL_TOKEN outranks the
+/// saved token, so a login would not take effect while it is set.
+fn token_fix(origin: string) -> string {
+  if origin == "env:LLL_TOKEN" {
+    return "LLL_TOKEN outranks the saved token: set it to a valid token, or unset it and use the saved one. Then 'lll config check' to verify"
+  }
+  "'lll token create <member>' (an agent's, minted by a superuser) or 'lll login --email <your email>' (a person); or, if you hold a valid token: 'lll login --token -' (reads it from stdin). Then 'lll config check' to verify"
 }
 
 fn stale_token(base: string, origin: string) -> CliError {
@@ -803,9 +815,7 @@ likelihood:
   2. the password behind it was reset, which retires earlier tokens
   3. the member was removed, or its token revoked - ask whoever invited you
   4. it expired
-a fresh one: 'lll login --email <your email>' (a person) or 'lll token create'
-(an agent's, minted by a superuser); or, if you hold a valid token: 'lll login
---token -' (reads it from stdin). Then 'lll config check' to verify")
+a fresh one: {token_fix(origin)}")
 }
 
 /// Refusal for a collection request with no token anywhere in the layering.

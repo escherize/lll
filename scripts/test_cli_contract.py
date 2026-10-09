@@ -173,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         # An assigned ready issue is not offered, and the refusal says so.
         code(0, 'issue', 'update', 'CON-3', '--assignee', 'contract-owner')
         empty = code(5, 'issue', 'next')
-        assert '1 ready match but are assigned (CON-3 to contract-owner)' in empty.stderr, empty.stderr
+        assert '1 ready issue matches but is assigned (CON-3 to contract-owner)' in empty.stderr, empty.stderr
         unheld = code(4, 'issue', 'release', 'CON-3')
         assert "'lll issue update CON-3 --assignee none' offers it" in unheld.stderr, unheld.stderr
         code(0, 'issue', 'update', 'CON-3', '--assignee', '')

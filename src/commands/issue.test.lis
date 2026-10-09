@@ -624,7 +624,8 @@ fn assigned(number: int, to: string) -> models.Issue {
 fn an_agenda_of_assigned_issues_says_so() {
   assert empty_agenda_message([]).contains("the agenda is empty")
   let msg = empty_agenda_message([assigned(4, "alice"), assigned(5, "bob"), assigned(6, "cy"), assigned(7, "dee")])
-  assert msg.contains("4 ready match but are assigned (ENG-4 to alice, ENG-5 to bob, ENG-6 to cy, ...)")
+  assert msg.contains("4 ready issues match but are assigned (ENG-4 to alice, ENG-5 to bob, ENG-6 to cy, ...)")
+  assert empty_agenda_message([assigned(4, "alice")]).contains("1 ready issue matches but is assigned (ENG-4 to alice)")
   assert msg.contains("'lll issue update KEY --assignee none' offers one")
 }
 

@@ -72,6 +72,10 @@ fn a_refused_saved_url_names_its_file_and_the_fix() {
   assert msg.message.contains("lll config set url URL")
   let env = unreachable_hint("http://old.example.com", "env:LLL_URL", e)
   assert env.message.contains("LLL_URL in the environment")
+  assert !env.message.contains("lll login --url")
+  let repo = unreachable_hint("http://old.example.com", "file:/r/.lll.toml", e)
+  assert repo.message.contains("edit its url line")
+  assert !repo.message.contains("config set url")
 }
 
 // The third pure seam (TASK-213): which 404s get told about the port. The
@@ -338,7 +342,11 @@ fn another_servers_token_in_the_file_is_never_sent_here() {
 /// password paths; the holder of a valid token has one too.
 #[test]
 fn an_expired_token_names_login_token_and_config_check() {
-  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "env:LLL_TOKEN")
+  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "file:/home/a/.config/lll/lll.toml")
   assert msg.message.contains("lll login --token -")
   assert msg.message.contains("lll config check")
+  // LLL_TOKEN outranks a login, so the message says to fix the variable.
+  let env = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "env:LLL_TOKEN")
+  assert env.message.contains("LLL_TOKEN outranks the saved token")
+  assert !env.message.contains("lll login --token -")
 }

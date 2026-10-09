@@ -52,8 +52,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - An expired or rejected token's message adds `lll login --token -` for a
   caller who holds a valid token, then `lll config check`. `whoami` with an
   expired token also reports a server that does not answer.
-- A refused connection names where the url came from (the file, LLL_URL or
-  --url) and the fix: `lll config set url URL` or `lll login --url URL`.
+- A refused connection names where the url came from and the fix for that
+  source: `lll config set url URL` or `lll login --url URL` for the machine
+  file, the url line for a repo `.lll.toml`, the variable for LLL_URL. A
+  token from LLL_TOKEN is told to fix the variable, since a login would not
+  outrank it.
 - `lll config --help` names `lll login --token -` for saving a token, and
   `lll config set token` refuses with that pointer (exit 2).
 - `lll bot WORD`, where WORD is another noun's verb (`list`, `read`), is an

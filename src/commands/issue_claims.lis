@@ -204,7 +204,8 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let Some(held) = claims.fetch(ctx, issue.id)? else {
     // An assignee without a claim keeps the issue out of 'issue next'; name
     // the way to offer it (1.0 fleet).
-    let hint = if issue.assignee == "" { "" } else { f"; it is assigned to {issue.expand.assignee.name}: 'lll issue update {key} --assignee none' offers it to 'issue next'" }
+    let open = !issue.state().map_or(false, |s| s.is_terminal())
+    let hint = if issue.assignee == "" || !open { "" } else { f"; it is assigned to {issue.expand.assignee.name}: 'lll issue update {key} --assignee none' offers it to 'issue next'" }
     return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed{hint}"))
   };
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
