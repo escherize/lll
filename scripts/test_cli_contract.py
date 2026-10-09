@@ -180,7 +180,8 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         assert as_json('issue', 'view', 'CON-3', '--json')['assignee'] == ''
         # A token is saved by logging in; config says how (case 14).
         refused = code(2, 'config', 'set', 'token', 'x')
-        assert "lll login --token -" in refused.stderr, refused.stderr
+        # LLL_URL chose the url here, so the hint names it (LLL-688).
+        assert "'lll login --url http://" in refused.stderr and " --token -'" in refused.stderr, refused.stderr
         assert "lll login --token -" in code(0, 'config', '--help').stdout
 
         made = as_json('issue', 'comment', 'CON-3', '-b', 'json comment', '--json')

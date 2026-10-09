@@ -233,3 +233,11 @@ fn an_invite_trusts_only_a_board_saved_for_its_server() {
   assert board_for_server(board, Some(config.Source.Env("LLL_WEB_URL")), a, a) == ""
   assert invite_base("", a, board_for_server(board, Some(config.Source.RepoFile("/r/.lll.toml")), a, a)) == a
 }
+
+#[test]
+fn a_scoped_board_link_never_names_a_repo_files_host() {
+  let board = "http://127.0.0.1:8100"
+  assert board_for_link(board, Some(config.Source.RepoFile("/r/.lll.toml"))) == ""
+  assert board_for_link(board, Some(config.Source.Env("LLL_WEB_URL"))) == board
+  assert board_for_link(board, Some(config.Source.HomeFile("/h/lll.toml"))) == board
+}

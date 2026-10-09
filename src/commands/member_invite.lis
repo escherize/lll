@@ -190,7 +190,7 @@ fn member_invite(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   fmt.Println("")
   for key in keys {
-    match scoped_board_link(ctx, own_board, key) {
+    match scoped_board_link(ctx, board_for_link(cfg.web_url, src.web_url), key) {
       Some(link) => fmt.Println(f"  view-only web board for {key} (separate from their CLI access; stops working when the server's LLL_BOARD_TOKEN changes): {link}"),
       None => status(f"no web board link for {key}: run this invite on the machine running 'lll up' to print one"),
     }
@@ -452,6 +452,18 @@ fn board_for_server(web_url: string, web_source: Option<config.Source>, api_url:
     Some(config.Source.HomeFile(_)) => if api_url == home_url { web_url } else { "" },
     Some(config.Source.Flag(_)) => web_url,
     Some(config.Source.RepoFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => "",
+  }
+}
+
+/// Pure. The web_url a scoped board link may name, or "". The link carries a
+/// token derived from the board token, which LLL_BOARD_TOKEN or the saved
+/// login link (only for its own board url) supplies; a repo file must not
+/// choose the host it is printed for (LLL-688).
+fn board_for_link(web_url: string, web_source: Option<config.Source>) -> string {
+  match web_source {
+    Some(config.Source.RepoFile(_)) => "",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => web_url,
   }
 }
 
