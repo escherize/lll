@@ -14,17 +14,11 @@ import "query"
 import "provenance"
 import "writes"
 
-/// Dispatch `lll import <verb>` through the noun's Command table (TASK-307):
-/// dispatch, `lll import --help` and shell completions all read it, so none
-/// can drift.
-pub fn import_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx, "import", "bring an external backlog in", import_intro(), import_commands(), args)
-}
-
 pub fn import_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "github",
+      access: flags.Access.Write,
       summary: "import a GitHub repo's issues into the configured team via gh; title, body and labels come along, open becomes todo and closed done, every import refs gh#N; re-import skips already-imported issues",
       spec: github_spec(),
       positional: "OWNER/REPO",
@@ -33,6 +27,7 @@ pub fn import_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "dir",
+      access: flags.Access.Write,
       summary: "rebuild the configured team from a directory 'lll export' wrote; refuses a team that already has issues unless --replace deletes them first",
       spec: flags.with_team(dir_spec()),
       positional: "DIR",

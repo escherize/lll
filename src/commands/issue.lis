@@ -3,13 +3,10 @@ import "go:os"
 import "go:strconv"
 import "go:strings"
 
-import "claims"
-import "config"
 import "display"
 import "flags"
 import "gitctx"
 import "models"
-import "output"
 import "pb"
 import "query"
 import "records"
@@ -114,13 +111,6 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       flags.Flag {
         name: "--json",
         help: "the created issue as JSON: the record with key and claim\n(docs/cli-contract.md)",
-        ..,
-      },
-      flags.Flag {
-        name: "--help",
-        alias: "-h",
-        hidden: true,
-        help: "show this help",
         ..,
       },
     ]...))
@@ -289,14 +279,6 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--json",
       help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item",
-      ..,
-    },
-    // Hidden: declared only so update can refuse it with the verb that
-    // claims (1.0 fleet: claiming by update was guessed three times).
-    flags.Flag {
-      name: "--claim",
-      hidden: true,
-      help: "refused: 'lll issue claim KEY' claims",
       ..,
     },
   ]...))
@@ -475,103 +457,6 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
   ])
 }
 
-/// Dispatch `lll issue <verb>` through the noun's Command table (TASK-307).
-/// The table is the one place a verb is declared: dispatch, `lll issue --help`
-/// and shell completions all read it, so none of the three can drift.
-pub fn issue(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  let cmds = issue_commands()
-  if let Some(hint) = issue_synonym(args.get(2).unwrap_or("")) {
-    return Err(flags.usage_error(hint))
-  }
-  if args.get(2) == Some("comment") && ["edit", "delete"].contains(args
-    .get(3)
-    .unwrap_or("")) {
-    let subargs = args[..2].append(args[3..]...)
-    return flags.dispatch(
-      ctx,
-      "issue comment",
-      "change a comment",
-      "",
-      comment_commands(),
-      subargs,
-    )
-  }
-  if args.get(2) == Some("comment") {
-    if let Some(hint) = comment_verb_hint(args.get(3).unwrap_or("")) {
-      return Err(flags.usage_error(hint))
-    }
-  }
-  flags.dispatch(ctx, "issue", "work with issues", issue_intro(), cmds, args)
-}
-
-/// `lll issue comment list KEY` and its kin: the only sub-verbs are edit and
-/// delete, so name what each guessed word is spelled as instead of letting
-/// the word fail as an issue ID.
-fn comment_verb_hint(word: string) -> Option<string> {
-  let hint = match word {
-    "list" | "ls" | "view" | "show" => "'lll issue comment KEY-123' lists the comments, numbered",
-    "add" | "create" | "new" => "'lll issue comment KEY-123 \"body\"' adds one (or -b \"body\")",
-    "update" | "rm" | "remove" => "'lll issue comment edit KEY-123 N -b \"body\"' and 'lll issue comment delete KEY-123 N' change one",
-    _ => "",
-  }
-  if hint == "" { return None }
-  Some(
-    f"unknown issue comment command: '{word}' - {hint}; the sub-verbs are edit and delete (see 'lll issue comment -h')",
-  )
-}
-
-/// Verbs agents reach for that are not verbs here, each pointed at the
-/// one that is. Counts are from the fleet replay: 'assign' five times in
-/// thirty-shard runs, the rest once or twice.
-fn issue_synonym(verb: string) -> Option<string> {
-  // An update field typed as a verb (1.0 fleet, case 18). 'title' is a verb
-  // of its own, so it never reaches here.
-  if ["priority", "state", "assignee", "label", "project"].contains(verb) {
-    return Some(
-      f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'{field_values(verb)}",
-    )
-  }
-  // 'lll issue FLEET-4 review': the key where the verb goes (case 20).
-  if records.split_issue_key(verb).is_ok() {
-    return Some(
-      f"unknown issue command: '{verb}' is an issue ID; put the verb first: 'lll issue view {verb}' or 'lll issue update {verb} --state in-review'",
-    )
-  }
-  let Some(hint) = issue_verb_hint(verb) else { return None }
-  Some(f"unknown issue command: '{verb}'; {hint} (see 'lll issue -h')")
-}
-
-/// The closed set an update field takes, when it has one: two 1.0 fleet
-/// agents (case 20) followed the 'issue state' hint with --state review.
-fn field_values(field: string) -> string {
-  match field {
-    "state" => f" (states: {strings.Join(query.states(), ", ")})",
-    _ => "",
-  }
-}
-
-/// The right spelling for a word that is no issue verb; main's top-level
-/// unknown command asks the same table ('lll send KEY', case 20).
-pub fn issue_verb_hint(verb: string) -> Option<string> {
-  let hint = match verb {
-    "assign" => "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'",
-    "unassign" => "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee",
-    "move" | "transition" | "send" => "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)",
-    "status" => "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it",
-    "get" => "'lll issue view KEY-123'",
-    "find" | "search" => "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles",
-    "ls" => "'lll issue list'",
-    "rm" | "remove" => "'lll issue delete KEY-123'",
-    "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
-    "note" | "reply" => "'lll issue comment KEY-123 \"body\"' adds one",
-    "review" => "'lll issue update KEY-123 --state in-review' sends it to review",
-    "depends" | "dep" | "blocked-by" | "blockedby" => "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start",
-    _ => "",
-  }
-  if hint == "" { return None }
-  Some(hint)
-}
-
 /// Every issue verb, as a value. `page` is the hand-written help `issue
 /// create` already had; its former pre-parse `--help` check is gone because
 /// dispatch answers it now, and parses args against `spec` before `run` so a
@@ -581,6 +466,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "attach",
+      access: flags.Access.Write,
       summary: "upload a file to an issue; appends without replacing existing attachments",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 FILE",
@@ -589,6 +475,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "detach",
+      access: flags.Access.Write,
       summary: "remove an attachment by its stored filename (see issue view)",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 FILENAME",
@@ -597,6 +484,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "download",
+      access: flags.Access.Read,
       summary: "write attachment bytes to stdout; redirect to a file",
       spec: flags.with_team([]),
       positional: "KEY-123 FILENAME",
@@ -605,6 +493,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create",
+      access: flags.Access.Write,
       alias: "new",
       summary: "create an issue in the configured team; -b - reads the description from stdin; without --state it starts in todo",
       page: issue_create_page(),
@@ -615,6 +504,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "list issues; scoped to the configured team",
       spec: issue_list_spec(),
       run: list,
@@ -622,6 +512,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "next",
+      access: flags.Access.Write,
       summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (key alone on stdout, notices on stderr; exit 5 when nothing is ready)",
       spec: issue_next_spec(),
       page: issue_next_page(),
@@ -630,6 +521,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "view",
+      access: flags.Access.Read,
       alias: "show",
       hidden_alias: "read",
       summary: "show one issue in full, with comments; --raw prints it as plain markdown; -w opens its web page instead",
@@ -640,6 +532,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "update",
+      access: flags.Access.Write,
       alias: "edit",
       summary: "change fields (at least one flag)",
       spec: issue_update_spec(),
@@ -649,6 +542,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "close",
+      access: flags.Access.Write,
       summary: "set state done and release your claim (--keep-claim keeps it); another member's claimed issue needs --force, which comments why",
       spec: issue_close_spec(),
       positional: "[KEY-123]",
@@ -657,6 +551,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "start",
+      access: flags.Access.Write,
       summary: "set state in-progress; --branch also git-switches to key-number-slug and records the work site",
       spec: issue_start_spec(),
       positional: "[KEY-123]",
@@ -665,6 +560,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "claim",
+      access: flags.Access.Write,
       summary: "take it exclusively for the authenticated member and assign it; exits non-zero, changing nothing, when someone already holds it; --renew restarts your hold's 24h expiry; 'lll issue release KEY' gives it back without closing",
       spec: issue_claim_spec(),
       page: issue_claim_page(),
@@ -674,6 +570,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "release",
+      access: flags.Access.Write,
       summary: "remove your claim; clear assignee if it still matches the holder; --force takes another member's or another agent label's and comments why",
       spec: issue_release_spec(),
       positional: "[KEY-123]",
@@ -682,6 +579,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
+      access: flags.Access.Write,
       summary: "delete; asks [y/N] unless --yes; a claimed issue needs --force, which releases the claim first",
       spec: issue_delete_spec(),
       positional: "KEY-123",
@@ -690,7 +588,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "comment",
+      access: flags.Access.Write,
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
+      verbs: comment_commands(),
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
       run: comment,
@@ -698,6 +598,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "watch",
+      access: flags.Access.Read,
       summary: "stream live events for the issue and its comments until interrupted",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
@@ -706,6 +607,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "url",
+      access: flags.Access.Read,
       summary: "print the issue's web page URL",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -714,6 +616,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "id",
+      access: flags.Access.Read,
       summary: "print the issue's KEY-123 identifier",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -722,6 +625,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "title",
+      access: flags.Access.Read,
       summary: "print the issue's title",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -730,6 +634,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "branch-name",
+      access: flags.Access.Read,
       summary: "print a suggested Git branch name; read-only",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -738,6 +643,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "pr",
+      access: flags.Access.Write,
       summary: "open a GitHub PR via 'gh pr create' and record gh#N; body links the issue and includes its description when it fits",
       spec: flags.with_team([]),
       positional: "[KEY-123]",
@@ -746,6 +652,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "ref",
+      access: flags.Access.Write,
       summary: "append an external reference once (gh#42, linear:ENG-118)",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 REF",
@@ -754,6 +661,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "link",
+      access: flags.Access.Write,
       summary: "link the issue to a doc (see 'lll doc --help')",
       spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
@@ -762,6 +670,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "unlink",
+      access: flags.Access.Write,
       summary: "remove that link",
       spec: flags.with_team([json_after_flag("the doc")]),
       positional: "KEY-123 SLUG",
@@ -770,6 +679,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "block",
+      access: flags.Access.Write,
       summary: "record that KEY-123 cannot start until BLOCKER is done; view shows it, list --ready honours it",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",
@@ -778,6 +688,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "unblock",
+      access: flags.Access.Write,
       summary: "remove BLOCKER from KEY-123's blockers",
       spec: flags.with_team([json_after_flag("the issue")]),
       positional: "KEY-123 BLOCKER",

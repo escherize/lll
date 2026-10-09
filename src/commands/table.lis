@@ -1,0 +1,61 @@
+import "buildinfo"
+import "flags"
+import "output"
+
+/// The command table (LLL-684): every noun lll answers to, in the order
+/// completions offer them. main parses argv against it before anything runs;
+/// help, completions, the did-you-mean rule and `lll help contract` read it.
+pub fn nouns() -> Slice<flags.Noun> {
+  [
+    flags.Noun { name: "issue", tagline: "work with issues", intro: issue_intro(), shape: flags.Shape.Verbs(issue_commands()), server: true, scoped: true, .. },
+    flags.Noun { name: "search", shape: flags.Shape.Single(search_command()), server: true, scoped: true, .. },
+    flags.Noun { name: "bot", page: bot_page(false), shape: flags.Shape.VerbsOr(bot_commands(), "create"), server: true, .. },
+    flags.Noun { name: "team", tagline: "work with teams", intro: team_intro(), shape: flags.Shape.Verbs(team_commands()), server: true, .. },
+    flags.Noun { name: "member", tagline: "work with members", intro: member_intro(), shape: flags.Shape.Verbs(member_commands()), server: true, .. },
+    flags.Noun { name: "invite", tagline: "single-use join links", intro: invite_intro(), shape: flags.Shape.Verbs(invite_commands()), server: true, .. },
+    flags.Noun { name: "project", tagline: "work with projects", intro: project_intro(), shape: flags.Shape.Verbs(project_commands()), server: true, scoped: true, .. },
+    flags.Noun { name: "label", tagline: "work with labels", shape: flags.Shape.Verbs(label_commands()), server: true, scoped: true, .. },
+    flags.Noun { name: "api", shape: flags.Shape.Single(api_command()), server: true, .. },
+    flags.Noun { name: "doc", tagline: "work with docs (wiki pages, findings, decisions, PRDs)", intro: doc_intro(), shape: flags.Shape.Verbs(doc_commands()), server: true, scoped: true, .. },
+    // `lll finding` (TASK-103) is the retrieval side of docs: a finding is a
+    // doc with kind=finding, and these verbs answer "what do we know about
+    // THIS file / area", by area and path, never full-text luck.
+    flags.Noun { name: "finding", tagline: "retrieve findings near a path", intro: finding_intro(), shape: flags.Shape.Verbs(finding_commands()), server: true, scoped: true, .. },
+    flags.Noun { name: "config", tagline: "manage configuration", intro: config_intro(), shape: flags.Shape.Verbs(config_commands()), .. },
+    flags.Noun { name: "import", tagline: "bring an external backlog in", intro: import_intro(), shape: flags.Shape.Verbs(import_commands()), server: true, scoped: true, .. },
+    flags.Noun { name: "export", shape: flags.Shape.Single(export_command()), server: true, .. },
+    flags.Noun { name: "attach", shape: flags.Shape.Single(attach_command()), .. },
+    flags.Noun { name: "watch", shape: flags.Shape.Single(watch_command()), scoped: true, .. },
+    flags.Noun { name: "up", shape: flags.Shape.Single(up_command()), .. },
+    flags.Noun { name: "board", shape: flags.Shape.Single(board_command()), .. },
+    flags.Noun { name: "login", shape: flags.Shape.Single(login_command()), .. },
+    flags.Noun { name: "logout", shape: flags.Shape.Single(logout_command()), .. },
+    flags.Noun { name: "token", tagline: "work with agent tokens", intro: token_intro(), shape: flags.Shape.Verbs(token_commands()), server: true, .. },
+    flags.Noun { name: "webhook", tagline: "outbound webhooks for issue events", intro: webhook_intro(), shape: flags.Shape.Verbs(webhook_commands()), server: true, .. },
+    flags.Noun { name: "skill", page: skill_usage(), shape: flags.Shape.Verbs(skill_commands()), .. },
+    flags.Noun { name: "completions", page: completions_usage(), shape: flags.Shape.Verbs(completions_commands()), .. },
+    flags.Noun { name: "upgrade", shape: flags.Shape.Single(upgrade_command()), .. },
+    flags.Noun { name: "whoami", shape: flags.Shape.Single(whoami_command()), server: true, .. },
+    flags.Noun { name: "help", shape: flags.Shape.Topics, .. },
+    flags.Noun { name: "version", alias: "--version -v", shape: flags.Shape.Single(version_command()), .. },
+  ]
+}
+
+/// `lll version`, `--version` and `-v`.
+fn version_command() -> flags.Command {
+  flags.Command {
+    name: "version",
+    access: flags.Access.Read,
+    summary: "print the version",
+    page: "lll version - print the version\n\nUsage:\n  lll version    (also: lll --version, lll -v)",
+    spec: [],
+    run: |_| Ok(output.line(f"lll {buildinfo.version()}")),
+    ..,
+  }
+}
+
+/// The noun spelled `word` in the table.
+pub fn noun_named(word: string) -> Option<flags.Noun> {
+  flags.find_noun(nouns(), word)
+}
+

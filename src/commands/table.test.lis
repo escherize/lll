@@ -1,0 +1,183 @@
+import "flags"
+import "pb"
+
+// The command table (LLL-684): one parser, and one rule for every wrong
+// guess. Pure functions of argv, so every branch is pinned without a board.
+
+/// The usage error a command line gets, "" when it parses.
+fn refusal(args: Slice<string>) -> string {
+  match flags.parse_command_line(nouns(), args) {
+    Err(e) => if pb.exit_code(e.kind) == 2 { e.message } else { f"exit {pb.exit_code(e.kind)}: {e.message}" },
+    Ok(_) => "",
+  }
+}
+
+/// The page a help request prints, "" when it is not one.
+fn help_page(args: Slice<string>) -> string {
+  match flags.parse_command_line(nouns(), args) {
+    Ok(flags.Invocation.Help(flags.Topic.Page(page))) => page,
+    _ => "",
+  }
+}
+
+fn runs(args: Slice<string>) -> bool {
+  match flags.parse_command_line(nouns(), args) {
+    Ok(flags.Invocation.Run(_)) => true,
+    _ => false,
+  }
+}
+
+#[test]
+fn unknown_command_names_the_typed_verb_for_issue_verbs() {
+  // 'lll comment create' is the most common misplaced command (three of
+  // thirty fleet agents); the pointer must carry the half the user had
+  // right (LLL-313), the way the plural branch does.
+  let msg = refusal(["lll", "comment", "create"])
+  assert msg.contains("'comment create'")
+  assert msg.contains("lll issue comment")
+  // A verb that is really a positional rides along too: 'lll comment
+  // ENG-1 "hi"' points at the same place with the key named.
+  assert refusal(["lll", "comment", "ENG-1"]).contains("'comment ENG-1'")
+  // A flag-like second word is not a verb; the message quotes the noun alone.
+  assert refusal(["lll", "comment", "-b"]).contains("'comment'")
+  assert refusal(["lll", "comment"]).contains("'comment'")
+}
+
+#[test]
+fn unknown_command_keeps_the_plural_and_generic_branches() {
+  assert refusal(["lll", "issues", "list"]).contains("'lll issue list'")
+  assert refusal(["lll", "webhooks"]).contains("did you mean 'lll webhook'?")
+  assert refusal(["lll", "wibble", "create"]) == "unknown command: 'wibble' (see 'lll --help')"
+}
+
+/// 1.0 fleet case 20: five of ten agents typed 'lll read KEY', one 'lll FLEET-4'.
+#[test]
+fn an_issue_alias_or_key_as_the_command_names_the_issue_verb() {
+  assert refusal(["lll", "read", "FLEET-4"]).contains("it is an issue verb: 'lll issue view FLEET-4'")
+  assert refusal(["lll", "show", "FLEET-4"]).contains("'lll issue view FLEET-4'")
+  assert refusal(["lll", "FLEET-4"]).contains("is an issue ID; to see it use 'lll issue view FLEET-4'")
+  assert refusal(["lll", "frobnicate"]) == "unknown command: 'frobnicate' (see 'lll --help')"
+}
+
+/// 1.0 fleet case 20, run 3: 'lll send KEY' and 'lll note KEY' ask the guess
+/// table too.
+#[test]
+fn an_issue_synonym_as_the_command_names_the_issue_form() {
+  assert refusal(["lll", "send", "FLEET-4"]).contains("--state in-review")
+  assert refusal(["lll", "note", "FLEET-4"]).contains("lll issue comment KEY-123")
+  assert refusal(["lll", "move", "FLEET-4"]).contains("--state in-review")
+}
+
+/// Case 20: 'lll comment add KEY' must not suggest the refused 'issue comment add'.
+#[test]
+fn a_non_key_second_word_is_not_carried_into_the_suggestion() {
+  assert refusal(["lll", "comment", "add"]).contains("'lll issue comment ...'")
+}
+
+/// Every noun's verbs are searched, not only the issue's: fleet case 11 was
+/// 'lll invite' when invite was a member verb.
+#[test]
+fn another_nouns_verb_as_the_command_names_its_noun() {
+  assert refusal(["lll", "access", "ada"]).contains("it is a member verb: 'lll member access ...'")
+  assert refusal(["lll", "rotate", "bot-x"]).contains("it is a bot verb: 'lll bot rotate ...'")
+}
+
+/// An update field typed as a verb names the update flag (1.0 fleet, case
+/// 18), with its values when it has a closed set (case 20).
+#[test]
+fn an_update_field_typed_as_a_verb_names_the_flag() {
+  assert refusal(["lll", "issue", "priority"]) == "unknown issue command 'priority'; to change it use 'lll issue update KEY-123 --priority <name>'"
+  assert refusal(["lll", "issue", "state", "FLEET-4"]).contains("--state <name>' (one of: backlog, todo, in-progress, in-review, done, cancelled)")
+  // 'title' is a verb of its own.
+  assert refusal(["lll", "issue", "title"]) == ""
+}
+
+/// 1.0 fleet case 20: 'issue note' and 'issue review' name the real verbs.
+#[test]
+fn note_and_review_point_at_comment_and_in_review() {
+  assert refusal(["lll", "issue", "note"]).contains("lll issue comment KEY-123")
+  assert refusal(["lll", "issue", "review"]).contains("--state in-review")
+  assert refusal(["lll", "issue", "assign"]).contains("lll issue claim KEY-123")
+}
+
+/// 1.0 fleet case 20, run 3: a key in the verb slot names the verb-first form.
+#[test]
+fn a_key_where_the_verb_goes_names_the_verb_first_form() {
+  assert refusal(["lll", "issue", "FLEET-4", "review"]).contains("put the verb first: 'lll issue view FLEET-4'")
+}
+
+/// 'lll issue comment list KEY': the sub-verbs are edit and delete.
+#[test]
+fn a_comment_sub_verb_guess_names_the_form_that_does_it() {
+  assert refusal(["lll", "issue", "comment", "list", "FLEET-4"]).contains("'lll issue comment KEY-123' lists the comments, numbered; the sub-verbs are edit and delete")
+  assert refusal(["lll", "issue", "comment", "add", "FLEET-4"]).contains("adds one")
+  assert runs(["lll", "issue", "comment", "FLEET-4", "hello"])
+  assert runs(["lll", "issue", "comment", "edit", "FLEET-4", "1", "-b", "x"])
+}
+
+/// 1.0 fleet: claiming by update was guessed three times; another verb typed
+/// as a flag names that verb.
+#[test]
+fn another_verb_typed_as_a_flag_names_the_verb() {
+  assert refusal(["lll", "issue", "update", "FLEET-4", "--claim"]) == "update does not claim; to claim, run: lll issue claim FLEET-4"
+  assert refusal(["lll", "issue", "update", "--claim"]) == "update does not claim; to claim, run: lll issue claim KEY"
+  // A declared flag is never refused: 'issue next --claim' claims.
+  assert runs(["lll", "issue", "next", "--claim"])
+}
+
+/// The 1.0 fleet: one member's details live under access; 'lll bot list'
+/// suggested creating a bot named "list".
+#[test]
+fn member_view_and_bot_list_name_where_the_answer_lives() {
+  assert refusal(["lll", "member", "view", "ada"]).contains("did you mean 'lll member access NAME'?")
+  for verb in ["list", "read"] {
+    let msg = refusal(["lll", "bot", verb, "bot-x"])
+    assert msg.contains(f"unknown bot command: '{verb}'; bot has create and rotate; list bots with 'lll member list'")
+    assert !msg.contains("bot create bot-")
+  }
+  // Any other word is the bot's name.
+  assert runs(["lll", "bot", "claude-main"])
+  assert runs(["lll", "bot", "bot-x", "--env"])
+}
+
+/// --help exits 0 everywhere, version --zz is a usage error (1.0 fleet).
+#[test]
+fn help_is_a_page_and_stray_arguments_are_usage_errors() {
+  assert help_page(["lll", "version", "--help"]).starts_with("lll version - print the version")
+  assert help_page(["lll", "-v", "-h"]).starts_with("lll version - print the version")
+  assert refusal(["lll", "version", "--zz"]).starts_with("unknown flag: '--zz'")
+  assert refusal(["lll", "--version", "extra"]).starts_with("unexpected argument: 'extra'")
+  assert help_page(["lll", "config", "show", "--help"]).starts_with("usage: lll config list")
+  assert help_page(["lll", "bot", "--help"]) == help_page(["lll", "bot", "create", "--help"])
+  assert help_page(["lll", "invite", "create", "--help"]) != ""
+}
+
+/// 'lll whoami --team X' (LLL-493, fleet case 05): the refusal teaches the
+/// one-command override.
+#[test]
+fn a_team_flag_on_an_unscoped_command_teaches_the_override() {
+  let msg = refusal(["lll", "whoami", "--team", "FLEET"])
+  assert msg.contains("unknown flag: '--team'")
+  assert msg.contains("LLL_TEAM=FLEET")
+  assert msg.contains("saved attachment unchanged")
+  assert refusal(["lll", "whoami", "--zz"]).starts_with("unknown flag: '--zz'")
+  assert runs(["lll", "whoami", "--json"])
+}
+
+/// Enum values are checked before any handler runs, and the usage line
+/// shows them.
+#[test]
+fn a_value_outside_a_closed_set_is_refused_with_the_set() {
+  assert refusal(["lll", "issue", "list", "--state", "review"]) == "unknown state 'review'; did you mean 'in-review'? (use one of: backlog, todo, in-progress, in-review, done, cancelled)"
+  assert refusal(["lll", "doc", "create", "--kind", "memo"]).starts_with("unknown kind 'memo' (use one of: wiki, finding, decision, prd)")
+  assert runs(["lll", "issue", "list", "--state", "In-Review"])
+  assert help_page(["lll", "project", "create", "-h"]).contains("[--status planned|started|paused|completed|cancelled]")
+}
+
+/// A missing required positional is a usage error before the handler runs.
+#[test]
+fn a_missing_argument_is_a_usage_error() {
+  assert refusal(["lll", "issue", "attach", "FLEET-4"]).starts_with("usage: lll issue attach KEY-123 FILE")
+  assert refusal(["lll", "skill", "get"]).contains("skills: ")
+  assert runs(["lll", "skill", "get", "lll"])
+}

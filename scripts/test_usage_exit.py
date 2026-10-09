@@ -20,18 +20,18 @@ PROBE = '--zz-usage-probe'
 # Spellings that dispatch but are never completed (flags.Command.hidden_alias
 # and hidden verbs); they must refuse a bad flag the same way.
 HIDDEN = [('issue', 'read'), ('doc', 'read'), ('finding', 'read'), ('finding', 'view'), ('config', 'show')]
-# dispatch arms that print the top-level usage whatever follows.
+# First words that print the top-level usage whatever follows.
 USAGE_PAGES = {'--help', '-h'}
 
 
 def dispatched_nouns():
-    """Every noun src/main.lis's dispatch match routes, as its arms spell
-    them: the real command table, which also holds the nouns completion does
-    not list (version, --version, -v)."""
-    source = (Path(__file__).resolve().parent.parent / 'src' / 'main.lis').read_text()
-    body = re.search(r'fn dispatch\(.*?\n}\n', source, re.S).group(0)
-    arms = re.findall(r'^\s+((?:"[^"]+"(?: \| )?)+) =>', body, re.M)
-    return [n for arm in arms for n in re.findall(r'"([^"]+)"', arm)]
+    """Every noun and noun spelling in the command table (LLL-684,
+    src/commands/table.lis), which also holds the nouns completion does not
+    list (version's --version and -v)."""
+    source = (Path(__file__).resolve().parent.parent / 'src' / 'commands' / 'table.lis').read_text()
+    body = re.search(r'pub fn nouns\(.*?\n}\n', source, re.S).group(0)
+    names = re.findall(r'flags\.Noun \{ name: "([^"]+)"(?:, alias: "([^"]*)")?', body)
+    return [w for name, alias in names for w in [name, *alias.split()]]
 
 
 def main():

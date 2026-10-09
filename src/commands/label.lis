@@ -9,13 +9,6 @@ import "pb"
 import "flags"
 import "writes"
 
-/// Dispatch `lll label <verb>` through the noun's Command table (TASK-307).
-/// The table is the one place a verb is declared: dispatch, `lll label --help`
-/// and shell completions all read it, so none of the three can drift.
-pub fn label(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx, "label", "work with labels", "", label_commands(), args)
-}
-
 /// Every label verb, as a value. Dispatch parses args against `spec` before
 /// `run`, so a trailing -h can never reach a verb body - the assertion that
 /// matters for `delete`, a write. The summaries are the rows the old
@@ -24,6 +17,7 @@ pub fn label_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "list labels (name, color, team); this team's, or every team's when none is configured",
       spec: label_list_spec(),
       run: label_list,
@@ -31,6 +25,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create",
+      access: flags.Access.Write,
       summary: "create a label (--team defaults to LLL_TEAM); check 'lll label list' first and reuse over near-duplicates (bug/bugs/defect)",
       page: label_create_page(),
       spec: label_create_spec(),
@@ -40,6 +35,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "edit",
+      access: flags.Access.Write,
       alias: "update",
       summary: "rename or recolor a label; the label keeps its issues",
       spec: label_edit_spec(),
@@ -49,6 +45,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "move",
+      access: flags.Access.Write,
       summary: "move a label to another team; refuses while issues outside it still carry the label",
       spec: label_move_spec(),
       positional: "NAME",
@@ -57,6 +54,7 @@ pub fn label_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
+      access: flags.Access.Write,
       summary: "delete a label; refuses while issues still carry it, and --force drops it off all of them",
       spec: label_delete_spec(),
       positional: "NAME",

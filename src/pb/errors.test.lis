@@ -9,7 +9,6 @@ fn every_kind_has_its_documented_exit_code() {
   assert exit_code(ErrorKind.Network) == 1
   assert exit_code(ErrorKind.Server) == 1
   assert exit_code(ErrorKind.Failed) == 1
-  assert exit_code(ErrorKind.Help) == 0
 }
 
 #[test]

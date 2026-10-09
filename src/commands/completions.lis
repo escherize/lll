@@ -2,32 +2,19 @@ import "go:strings"
 
 import "flags"
 import "output"
-import "pb"
 
 // `lll completions <shell>` — static completion scripts, all generated from
 // the one command table below (nouns, verbs per noun, flags per verb).
 
-pub fn completions(args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  let parsed = flags.parse([], args, 2, true, completions_usage())?
-  let shell = parsed.first()
-  if shell == "" {
-    return Ok(output.line(completions_usage()))
-  }
-  match shell {
-    "bash" => {
-      Ok(output.text(bash_script()))
-    },
-    "zsh" => {
-      Ok(output.text(zsh_script()))
-    },
-    "fish" => {
-      Ok(output.text(fish_script()))
-    },
-    other => Err(flags.usage_error(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
-  }
+pub fn completions_commands() -> Slice<flags.Command> {
+  [
+    flags.Command { name: "bash", access: flags.Access.Read, summary: "add to ~/.bashrc: eval \"$(lll completions bash)\"", spec: [], run: |_| Ok(output.text(bash_script())), .. },
+    flags.Command { name: "zsh", access: flags.Access.Read, summary: "add to ~/.zshrc (after compinit): eval \"$(lll completions zsh)\"", spec: [], run: |_| Ok(output.text(zsh_script())), .. },
+    flags.Command { name: "fish", access: flags.Access.Read, summary: "add to ~/.config/fish/config.fish: lll completions fish | source", spec: [], run: |_| Ok(output.text(fish_script())), .. },
+  ]
 }
 
-fn completions_usage() -> string {
+pub fn completions_usage() -> string {
   "lll completions - shell completion scripts
 
 Usage:
@@ -42,68 +29,39 @@ Completes nouns, verbs per noun, and flags per verb."
 
 // --- command table ---
 
-fn command_table(noun: string) -> Slice<flags.Command> {
-  match noun {
-    "issue" => issue_commands(),
-    "team" => team_commands(),
-    "member" => member_commands(),
-    "invite" => invite_commands(),
-    "project" => project_commands(),
-    "label" => label_commands(),
-    "doc" => doc_commands(),
-    "finding" => finding_commands(),
-    "config" => config_commands(),
-    "import" => import_commands(),
-    "token" => token_commands(),
-    "webhook" => webhook_commands(),
-    _ => [],
-  }
+/// Every first word: each noun, then its other spellings ('--version', '-v').
+fn top_level() -> Slice<string> {
+  let mut out: Slice<string> = []
+  for n in nouns() { out = out.append(n.name) }
+  for n in nouns() { out = out.append(strings.Fields(n.alias)...) }
+  out
 }
 
+/// The noun's verbs, every accepted spelling but a hidden verb's (TASK-307:
+/// read from the table, so a verb added there is completed with no edit here).
 fn verbs(noun: string) -> Slice<string> {
-  let table = command_table(noun)
-  if !table.is_empty() { return flags.command_names(table) }
-  // TASK-307: every noun with a Command table is read FROM it, so a verb
-  // added to a table is completed with no edit here. This was a fourth
-  // hand-kept list of the same verbs, and it drifted twice in one wave.
-  match noun {
-    "bot" => ["create", "rotate"],
-    "skill" => ["list", "get"],
-    "completions" => ["bash", "zsh", "fish"],
-    _ => [],
-  }
+  noun_named(noun).map_or([], |n| flags.command_names(flags.verbs_of(n)))
 }
 
-/// Flags for a noun-verb pair, read from the verb's OWN flag table (the
-/// `*_verb_spec` accessors) through flags.tokens() — the same table the
-/// parser, help and completions read, so the three cannot drift (TASK-127).
-/// Every spelling is offered: completions teach what the parser accepts.
+/// Flags for a noun-verb pair, from the verb's own flag table through
+/// flags.tokens() - the table the parser and help read, so the three cannot
+/// drift (TASK-127). Every spelling is offered: completions teach what the
+/// parser accepts.
 fn verb_flags(noun: string, verb: string) -> Slice<string> {
-  // A table noun's flags come off the same Command entry its verb name did,
-  // so the *_verb_spec accessors (one more hand-kept match per noun) retire.
-  // The verb-less nouns keep their single spec fn: they have no table.
-  let table = command_table(noun)
-  if !table.is_empty() {
-    let Some(c) = flags.resolve_command(table, verb) else { return [] }
-    return flags.tokens(c.spec)
-  }
-  match noun {
-    "search" => flags.tokens(search_spec()),
-    "bot" => flags.tokens(bot_spec()),
-    "watch" => flags.tokens(watch_spec()),
-    "up" => flags.tokens(up_spec()),
-    "attach" => flags.tokens(attach_spec()),
-    "board" => flags.tokens(board_spec()),
-    "login" => flags.tokens(login_spec()),
-    "api" => flags.tokens(api_spec()),
-    "upgrade" => flags.tokens(upgrade_spec()),
-    _ => [],
-  }
+  let Some(n) = noun_named(noun) else { return [] }
+  let Some(c) = flags.resolve_command(flags.verbs_of(n), verb) else { return [] }
+  flags.tokens(c.spec)
 }
 
-/// Flags for verb-less nouns: the noun itself is the verb.
+/// Flags the noun takes itself: a verb-less noun's, or the verb that runs
+/// when no verb is typed ('lll bot bot-NAME').
 fn noun_flags(noun: string) -> Slice<string> {
-  verb_flags(noun, "")
+  let Some(n) = noun_named(noun) else { return [] }
+  match n.shape {
+    flags.Shape.Single(c) => flags.tokens(c.spec),
+    flags.Shape.VerbsOr(cmds, fallback) => flags.tokens(flags.command_spec(cmds, fallback)),
+    flags.Shape.Verbs(_) | flags.Shape.Topics => [],
+  }
 }
 
 // --- emitters ---
@@ -113,7 +71,7 @@ fn noun_flags(noun: string) -> Slice<string> {
 fn shell_cases(assignment: fn(string) -> string) -> (string, string) {
   let mut verb_cases = ""
   let mut flag_cases = ""
-  for n in flags.top_level_commands() {
+  for n in nouns().map(|n| n.name) {
     let vs = verbs(n)
     let own = noun_flags(n)
     let candidates = vs.append(own...)
@@ -138,7 +96,7 @@ fn shell_cases(assignment: fn(string) -> string) -> (string, string) {
 
 fn bash_script() -> string {
   let (verb_cases, flag_cases) = shell_cases(|words| f"words='{words}'")
-  let all_nouns = strings.Join(flags.top_level_commands(), " ")
+  let all_nouns = strings.Join(top_level(), " ")
   "# lll bash completions
 # Add to ~/.bashrc:  eval \"$(lll completions bash)\"
 _lll() {
@@ -169,7 +127,7 @@ complete -F _lll lll
 
 fn zsh_script() -> string {
   let (verb_cases, flag_cases) = shell_cases(|words| f"comps=({words})")
-  let all_nouns = strings.Join(flags.top_level_commands(), " ")
+  let all_nouns = strings.Join(top_level(), " ")
   "# lll zsh completions
 # Add to ~/.zshrc (after compinit):  eval \"$(lll completions zsh)\"
 _lll() {
@@ -198,13 +156,13 @@ compdef _lll lll
 }
 
 fn fish_script() -> string {
-  let all_nouns = strings.Join(flags.top_level_commands(), " ")
+  let all_nouns = strings.Join(top_level(), " ")
   let mut out = "# lll fish completions
 # Add to ~/.config/fish/config.fish:  lll completions fish | source
 complete -c lll -f
 "
   out += f"complete -c lll -n '__fish_use_subcommand' -a '{all_nouns}'\n"
-  for n in flags.top_level_commands() {
+  for n in nouns().map(|n| n.name) {
     let vs = verbs(n)
     let own = noun_flags(n)
     if !vs.is_empty() {

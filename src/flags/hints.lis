@@ -1,0 +1,353 @@
+import "go:regexp"
+import "go:strings"
+
+import "config"
+
+// The one rule for a wrong guess (LLL-684). Every did-you-mean and recovery
+// hint lll prints for a command line it cannot parse is made here, from the
+// command table: nouns, verbs, aliases, hidden aliases and flag names, plus
+// the one table of words that are no verb anywhere but that agents type
+// (GUESSES below). Before this, the hints were six hand-kept tables in four
+// files, each patched for the case one fleet run hit.
+
+/// A word lll does not have, and what to type instead. `path` is where it
+/// was typed ("lll issue", "lll issue comment"). The hint is the text after
+/// "unknown ... command: 'WORD'; ", and ends with its own "(see ...)" when
+/// the help that answers it is not the noun's.
+struct Guess {
+  path: string,
+  words: Slice<string>,
+  hint: string,
+}
+
+/// Words agents reach for that are no verb here, each pointed at the one
+/// that is. Counts are from the fleet replays: 'assign' five times in
+/// thirty-shard runs, the rest once or twice; case numbers are the 1.0
+/// fleet's.
+fn guesses() -> Slice<Guess> {
+  [
+    Guess { path: "lll issue", words: ["assign"], hint: "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'" },
+    Guess { path: "lll issue", words: ["unassign"], hint: "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee" },
+    // 'lll send KEY' (case 20) asks this table from the noun slot too.
+    Guess { path: "lll issue", words: ["move", "transition", "send"], hint: "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)" },
+    Guess { path: "lll issue", words: ["status"], hint: "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it" },
+    Guess { path: "lll issue", words: ["get"], hint: "'lll issue view KEY-123'" },
+    Guess { path: "lll issue", words: ["find", "search"], hint: "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles" },
+    Guess { path: "lll issue", words: ["ls"], hint: "'lll issue list'" },
+    Guess { path: "lll issue", words: ["rm", "remove"], hint: "'lll issue delete KEY-123'" },
+    Guess { path: "lll issue", words: ["comments"], hint: "'lll issue comment KEY-123' lists them; add one with a body after the key" },
+    Guess { path: "lll issue", words: ["note", "reply"], hint: "'lll issue comment KEY-123 \"body\"' adds one" },
+    Guess { path: "lll issue", words: ["review"], hint: "'lll issue update KEY-123 --state in-review' sends it to review" },
+    Guess { path: "lll issue", words: ["depends", "dep", "blocked-by", "blockedby"], hint: "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start" },
+    // 'lll issue comment list KEY': the only sub-verbs are edit and delete,
+    // so name what each guessed word is spelled as instead of letting the
+    // word fail as an issue ID.
+    Guess { path: "lll issue comment", words: ["list", "ls", "view", "show"], hint: "'lll issue comment KEY-123' lists the comments, numbered" },
+    Guess { path: "lll issue comment", words: ["add", "create", "new"], hint: "'lll issue comment KEY-123 \"body\"' adds one (or -b \"body\")" },
+    Guess { path: "lll issue comment", words: ["update", "rm", "remove"], hint: "'lll issue comment edit KEY-123 N -b \"body\"' and 'lll issue comment delete KEY-123 N' change one" },
+    // 1.0 fleet: one member's details live under access.
+    Guess { path: "lll member", words: ["view", "show"], hint: "did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)" },
+    // Removed at 1.0 (D5): the link lives on the issue noun.
+    Guess { path: "lll doc", words: ["link"], hint: "did you mean 'lll issue link KEY-123 SLUG'? (see 'lll issue link --help')" },
+    Guess { path: "lll doc", words: ["unlink"], hint: "did you mean 'lll issue unlink KEY-123 SLUG'? (see 'lll issue unlink --help')" },
+    // 'lll bot list', 'lll bot read' (1.0 fleet): a verb guess, not a bot name.
+    Guess { path: "lll bot", words: ["list", "ls", "view", "show", "read", "get"], hint: "bot has create and rotate; list bots with 'lll member list'" },
+  ]
+}
+
+fn guess(path: string, word: string) -> Option<string> {
+  if word == "" { return None }
+  guesses().find(|g| g.path == path && g.words.contains(word)).map(|g| g.hint)
+}
+
+/// "(see 'lll issue -h')" unless the hint already names the page to read.
+fn see(hint: string, path: string) -> string {
+  if strings.Contains(hint, "(see ") { hint } else { f"{hint} (see '{path} -h')" }
+}
+
+fn is_issue_key(word: string) -> bool {
+  regexp.MustCompile("^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(word)
+}
+
+fn article(noun: string) -> string {
+  if ["a", "e", "i", "o", "u"].any(|v| noun.starts_with(v)) { "an" } else { "a" }
+}
+
+/// `lll WORD NEXT`, where WORD is no noun.
+pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string) -> string {
+  // The verb rides along: seven of thirty fleet agents rated the bare "did
+  // you mean 'lll issue'" the least helpful message, since it dropped the
+  // half they had right.
+  let rest = if next == "" || next.starts_with("-") { "" } else { f" {next}" }
+  // 'lll issues list' for 'lll issue list': the plural is the natural guess.
+  let singular = strings.TrimSuffix(word, "s")
+  if singular != word {
+    if let Some(n) = find_noun(nouns, singular) {
+      return f"unknown command: '{word}'; did you mean 'lll {n.name}{rest}'? (see 'lll {n.name} -h')"
+    }
+  }
+  // Only a key is carried into the suggestion: 'lll comment add' must not
+  // become 'lll issue comment add', which is refused too (case 20).
+  let carried = if is_issue_key(next) { f" {next}" } else { " ..." }
+  // An issue verb typed as a noun ('lll comment ...') is the most common
+  // unknown command (three of thirty fleet agents). An accepted alias counts
+  // too: 'lll read KEY' (five of ten 1.0 fleet agents, case 20) names 'issue
+  // view', which also takes 'read'.
+  let issue = match find_noun(nouns, "issue") {
+    Some(n) => verbs_of(n),
+    None => [],
+  }
+  if let Some(c) = resolve_command(issue, word) {
+    return f"unknown command: '{word}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}' (see 'lll issue {c.name} -h')"
+  }
+  // 'lll FLEET-4': a key where the noun goes (case 20).
+  if is_issue_key(word) {
+    return f"unknown command: '{word}' is an issue ID; to see it use 'lll issue view {word}'"
+  }
+  // 'lll send KEY', 'lll note KEY' (case 20, run 3).
+  if let Some(hint) = guess("lll issue", word) {
+    return f"unknown command: '{word}'; {see(hint, "lll issue")}"
+  }
+  // Any other noun's verb, the same mistake shape (fleet case 11 was 'lll
+  // invite', when it was a member verb).
+  for n in nouns {
+    if let Some(c) = verbs_of(n).filter(|c| !c.hidden).find(|c| c.name == word) {
+      return f"unknown command: '{word}{rest}'; it is {article(n.name)} {n.name} verb: 'lll {n.name} {c.name}{carried}' (see 'lll {n.name} {c.name} -h')"
+    }
+  }
+  f"unknown command: '{word}' (see 'lll --help')"
+}
+
+/// `lll NOUN WORD`, where WORD is none of the noun's verbs.
+pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word: string) -> string {
+  let path = f"lll {noun}"
+  // A field typed as a verb: 'lll issue priority' (1.0 fleet, case 18).
+  if let Some(update) = resolve_command(cmds, "update") {
+    if let Some(fl) = update.spec.find(|f| f.value && f.name == f"--{word}" && !["--team", "--agent", "--reason"].contains(f.name)) {
+      let target = strings.Trim(strings.Fields(update.positional).get(0).unwrap_or("KEY"), "[]<>")
+      // The closed set too: two 1.0 fleet agents (case 20) followed the
+      // 'issue state' hint with --state review.
+      let values = if fl.values.is_empty() { "" } else { f" (one of: {strings.Join(fl.values, ", ")})" }
+      return f"unknown {noun} command '{word}'; to change it use '{path} update {target} --{word} <name>'{values}"
+    }
+  }
+  // 'lll issue FLEET-4 review': the key where the verb goes (case 20).
+  if noun == "issue" && is_issue_key(word) {
+    return f"unknown issue command: '{word}' is an issue ID; put the verb first: 'lll issue view {word}' or 'lll issue update {word} --state in-review'"
+  }
+  if let Some(hint) = guess(path, word) {
+    return f"unknown {noun} command: '{word}'; {see(hint, path)}"
+  }
+  // 'lll member whoami' (1.0 fleet): a command typed as a verb.
+  if !word.starts_with("-") && find_noun(nouns, word).is_some() {
+    return f"unknown {noun} command: '{word}'; did you mean 'lll {word}'? (see '{path} --help')"
+  }
+  f"unknown {noun} command: '{word}' (see '{path} --help')"
+}
+
+/// A word a command with sub-verbs refuses: 'lll issue comment list KEY'.
+fn sub_verb_guess(path: string, c: Command, word: string) -> Option<string> {
+  if c.verbs.is_empty() { return None }
+  let Some(hint) = guess(path, word) else { return None }
+  let subs = strings.Join(c.verbs.map(|v| v.name), " and ")
+  let at = strings.TrimPrefix(path, "lll ")
+  Some(f"unknown {at} command: '{word}'; {hint}; the sub-verbs are {subs} (see '{path} -h')")
+}
+
+/// Another verb of the same noun typed as a flag: 'lll issue update KEY
+/// --claim' (1.0 fleet: claiming by update was guessed three times).
+fn verb_as_flag(noun: Noun, c: Command, args: Slice<string>, start: int) -> Option<string> {
+  let mut key = ""
+  let mut i = start
+  while let Some(arg) = args.get(i) {
+    if arg == "--" { break }
+    if arg.starts_with("--") {
+      let spelling = strings.SplitN(arg, "=", 2)[0]
+      if let Some(fl) = c.spec.find(|f| spells(f, spelling)) {
+        if fl.value && !arg.contains("=") { i += 1 }
+      } else if let Some(v) = resolve_command(verbs_of(noun), strings.TrimPrefix(spelling, "--")) {
+        if v.name != c.name {
+          let mut j = i + 1
+          while key == "" {
+            let Some(a) = args.get(j) else { break }
+            if !a.starts_with("-") { key = a }
+            j += 1
+          }
+          let target = if key == "" { "KEY" } else { key }
+          return Some(f"{c.name} does not {v.name}; to {v.name}, run: lll {noun.name} {v.name} {target}")
+        }
+      }
+    } else if !arg.starts_with("-") && key == "" {
+      key = arg
+    } else if let Some(fl) = c.spec.find(|f| spells(f, arg)) {
+      if fl.value { i += 1 }
+    }
+    i += 1
+  }
+  None
+}
+
+/// A value outside a flag's closed set: what to type instead, the way
+/// 'review' names 'in-review' (four 1.0 fleet agents, case 20). Either way
+/// round, against the value less its first dash-separated word
+/// ('reviewing').
+pub fn unknown_value(fl: Flag, value: string) -> string {
+  let typed = strings.ToLower(value)
+  let near = fl.values.filter(|w| {
+    let parts = strings.SplitN(w, "-", 2)
+    let stem = parts.get(1).unwrap_or(w)
+    typed.length() >= 3 && (strings.Contains(w, typed) || strings.Contains(typed, stem))
+  })
+  let guess = if near.length() == 1 { f"; did you mean '{near[0]}'?" } else { "" }
+  // Named by its long spelling: '-k' is 'kind'.
+  let long = [fl.name].append(strings.Fields(fl.alias)...).find(|n| n.starts_with("--")).unwrap_or(fl.name)
+  let label = strings.TrimLeft(long, "-")
+  f"unknown {label} '{value}'{guess} (use one of: {strings.Join(fl.values, ", ")})"
+}
+
+fn team_scope_error(arg: string, key: string, usage: string) -> string {
+  let head = unknown_flag(arg, usage, [])
+  // A server-wide command: LLL_TEAM would not filter it either, so the
+  // override hint would mislead (1.0 fleet: 'lll member list --team FLEET').
+  let words = strings.Fields(usage)
+  let noun = words.get(1).unwrap_or("")
+  // A verb is a lowercase word; 'lll api METHOD PATH' has none, so its
+  // METHOD placeholder must not be named as one.
+  let second = words.get(2).unwrap_or("")
+  let verb = if regexp.MustCompile(r"^[a-z][a-z-]*$").MatchString(second) { second } else { "" }
+  if ["member", "team", "token", "api", "skill", "upgrade", "logout"].contains(noun) {
+    let cmd = if verb == "" || verb.starts_with("[") || verb.starts_with("-") { f"lll {noun}" } else { f"lll {noun} {verb}" }
+    return head + f"\n'{cmd}' is server-wide: no team applies to it"
+  }
+  let value = shell_argument(key)
+  head + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
+}
+
+/// The same teaching for a guessed --url: a command that takes one declares
+/// it, so a refusal here means the endpoint is the configured one (LLL-501,
+/// fleet case B05). Name the one-command override and the way to change the
+/// default, in that order of commitment.
+fn url_scope_error(arg: string, url: string, usage: string) -> string {
+  let value = shell_argument(url)
+  // Where the url comes from decides what changes it (the round-2 rule the
+  // unreachable hint follows): 'config set url' writes the home file, which
+  // LLL_URL and a repo .lll.toml both outrank.
+  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or(None, |t| t.1.url)
+  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {url_default_hint(origin)}."
+}
+
+/// How to change the default url, given where it came from.
+fn url_default_hint(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Env(name)) => f"the default comes from {name} in the environment; correct or unset it",
+    Some(config.Source.RepoFile(path)) => f"the default comes from {path}; edit its url line",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
+  }
+}
+
+
+/// The flag table travels with the error: 26 of 30 fleet agents named the
+/// bare "unknown flag + usage line" the least helpful message lll has, since
+/// it says what was wrong and nothing about what would be right.
+fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
+  let kind = if arg.starts_with("-") { "unknown flag" } else { "unexpected argument" }
+  let mut head = f"{kind}: '{arg}'"
+  let near = match retired_flag(arg, spec) {
+    Some(new) => Some(new),
+    None => nearest_flag(arg, spec),
+  }
+  if let Some(near) = near { head = f"{head}; did you mean '{near}'?" }
+  if usage == "" { return head }
+  f"{head}\nusage: {usage}{section(spec)}"
+}
+
+/// Spellings lll no longer accepts, each with what replaced it (LLL-503,
+/// LLL-644; decisions D5 and D6 in doc v1-0-plan). One old spelling may have
+/// several replacements because it meant different things on different verbs:
+/// `-p` was a password, a path list and a priority. The refusal names the
+/// replacement the verb actually declares, so a script written for an older
+/// lll learns the new spelling from its first failure.
+fn retired_flags() -> Slice<(string, string)> {
+  [
+    ("--query", "--search"),
+    ("-m", "-b"),
+    ("--message", "-b"),
+    ("--assign", "--assignee"),
+    ("--for", "--until"),
+    ("--local", "--scratch"),
+    ("--description-replace-old", "--description-replace old=new"),
+    ("--description-replace-new", "--description-replace old=new"),
+    // D6: -t is title, -k kind, -p priority; the other meanings lost them.
+    ("-t", "--team"),
+    ("-k", "--key"),
+    ("-p", "--password"),
+    ("-p", "--paths"),
+    ("-p", "--path"),
+    // D6: --yes skips a confirmation; --force only overrides ownership or
+    // references, so a delete that had --force for the prompt now has --yes.
+    ("--force", "--yes"),
+    // -b is the body everywhere; -d stays only where the field is a description.
+    ("-d", "-b"),
+  ]
+}
+
+/// The replacement for a retired spelling, when this verb declares it.
+fn retired_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
+  let typed = arg.split("=")[0]
+  for (old, new) in retired_flags() {
+    if old != typed { continue }
+    let flag = strings.Fields(new)[0]
+    if spec.find(|f| !f.hidden && spells(f, flag)).is_some() {
+      return Some(new)
+    }
+  }
+  None
+}
+
+/// The declared spelling closest to an unknown flag, when it is close:
+/// '--teams' for '--team' (fleet: 3 of 10 agents typed the plural). Edit
+/// distance at most 2, so an unrelated flag is never suggested.
+fn nearest_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
+  // Long flags only: a bare '-' or a one-letter '-x' is one edit from
+  // every short alias, so any suggestion there would be noise.
+  if !arg.starts_with("--") { return None }
+  let typed = arg.split("=")[0]
+  let mut best = ""
+  let mut best_d = 3
+  for f in spec {
+    if f.hidden { continue }
+    for name in [f.name, f.alias] {
+      if !name.starts_with("--") { continue }
+      let d = edit_distance(typed, name)
+      if d < best_d {
+        best = name
+        best_d = d
+      }
+    }
+  }
+  if best == "" { None } else { Some(best) }
+}
+
+/// Levenshtein distance over bytes; flag names are ASCII.
+fn edit_distance(a: string, b: string) -> int {
+  let x = a.bytes()
+  let y = b.bytes()
+  let mut prev: Slice<int> = []
+  for j in 0..y.length() + 1 { prev = prev.append(j) }
+  for i in 1..x.length() + 1 {
+    let mut cur: Slice<int> = [i]
+    for j in 1..y.length() + 1 {
+      let cost = if x[i - 1] == y[j - 1] { 0 } else { 1 }
+      let del = prev[j] + 1
+      let ins = cur[j - 1] + 1
+      let sub = prev[j - 1] + cost
+      let mut m = del
+      if ins < m { m = ins }
+      if sub < m { m = sub }
+      cur = cur.append(m)
+    }
+    prev = cur
+  }
+  prev[y.length()]
+}
+

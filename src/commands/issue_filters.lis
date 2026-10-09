@@ -22,7 +22,7 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   // mutation the last set wins, on a filter they union.
   let label_hint = if use == FilterUse.Watch { "; repeatable, matching any of them" } else { "; repeatable\n(update replaces the set - --add-label/--remove-label edit it;\na filter matches any of them)" }
   [
-    flags.Flag { name: "--state", value: true, hint: strings.Join(query.states(), "|"), repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
+    flags.Flag { name: "--state", value: true, values: query.states(), repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
     flags.Flag { name: "--assignee", value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },
     flags.Flag { name: "--label", value: true, hint: "name", repeat: true, help: f"label name (see 'lll label list'){label_hint}", .. },
     flags.Flag { name: "--project", value: true, hint: "name", help: f"project name (see 'lll project list'){project_hint}", .. },

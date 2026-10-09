@@ -1,0 +1,224 @@
+import "go:strings"
+
+import "output"
+import "pb"
+
+/// The command table (LLL-684): every noun lll answers to, each verb under
+/// it, and each verb's flags, positional arguments and whether it writes.
+/// One parser reads it and turns argv into a help topic, a call or a usage
+/// error before any handler runs; help pages, usage lines, completions, the
+/// did-you-mean rule and `lll help contract` are all generated from it.
+pub struct Noun {
+  pub name: string,
+  /// Other spellings, space-separated ('--version -v'); never in help.
+  pub alias: string,
+  pub tagline: string,
+  /// Prose under the verb rows of the noun's generated page.
+  pub intro: string,
+  /// The noun's own hand-written page; "" generates one from its verbs.
+  pub page: string,
+  pub shape: Shape,
+  /// Talks to the server anyway, so a login renewal or the version-skew
+  /// probe costs nothing new (--help, version and completions never wait).
+  pub server: bool,
+  /// --team is taken off the command line before parsing and becomes the
+  /// invocation's team override (LLL_TEAM for one command).
+  pub scoped: bool,
+}
+
+/// What follows the noun.
+pub enum Shape {
+  Verbs(Slice<Command>),
+  /// Verbs, plus the verb that runs when the next word is not one: 'lll bot
+  /// bot-NAME' is 'lll bot create bot-NAME'.
+  VerbsOr(Slice<Command>, string),
+  /// The noun is its own verb: 'lll search TEXT', 'lll up'.
+  Single(Command),
+  /// `lll help [TOPIC]`.
+  Topics,
+}
+
+/// Whether a verb changes anything (the server, a file, the configuration)
+/// or only reads. `lll help contract` lists it per verb.
+pub enum Access { Read, Write }
+
+/// A help request. The top-level page needs the client for its setup hint,
+/// and the contract is the embedded document, so only main can render them.
+pub enum Topic {
+  Usage,
+  Contract,
+  Page(string),
+}
+
+/// A parsed command line, ready to run: the handler gets these values and
+/// the client main builds.
+pub struct Call {
+  pub command: Command,
+  pub args: Slice<string>,
+  pub parsed: Parsed,
+  pub usage: string,
+}
+
+pub enum Invocation {
+  Help(Topic),
+  Run(Call),
+}
+
+/// The handler's input: the parsed call and the client main built.
+pub fn input(ctx: pb.Client, call: Call) -> CommandInput {
+  CommandInput { ctx, args: call.args, parsed: call.parsed, usage: call.usage }
+}
+
+/// Run a parsed call.
+pub fn run_call(ctx: pb.Client, call: Call) -> Result<output.Output, pb.CliError> {
+  (call.command.run)(input(ctx, call))
+}
+
+/// The noun spelled `word`, by name or alias.
+pub fn find_noun(nouns: Slice<Noun>, word: string) -> Option<Noun> {
+  if word == "" { return None }
+  nouns.find(|n| n.name == word || strings.Fields(n.alias).contains(word))
+}
+
+/// The verbs a noun has; a verb-less noun has none.
+pub fn verbs_of(noun: Noun) -> Slice<Command> {
+  match noun.shape {
+    Shape.Verbs(cmds) => cmds,
+    Shape.VerbsOr(cmds, _) => cmds,
+    Shape.Single(_) | Shape.Topics => [],
+  }
+}
+
+/// Turn a whole command line (argv, program name first) into what to do.
+/// Every refusal here is a usage error, exit 2; help is never an error.
+pub fn parse_command_line(nouns: Slice<Noun>, args: Slice<string>) -> Result<Invocation, pb.CliError> {
+  let Some(word) = args.get(1) else { return Ok(Invocation.Help(Topic.Usage)) }
+  // 'lll --help anything' is still the top page, as it always was.
+  if word == "--help" || word == "-h" { return Ok(Invocation.Help(Topic.Usage)) }
+  let Some(noun) = find_noun(nouns, word) else {
+    return Err(usage_error(unknown_command(nouns, word, args.get(2).unwrap_or(""))))
+  }
+  let path = f"lll {noun.name}"
+  match noun.shape {
+    Shape.Topics => topic(args),
+    Shape.Single(c) => command(nouns, noun, path, c, args, 2),
+    Shape.Verbs(cmds) => verb(nouns, noun, cmds, None, args),
+    Shape.VerbsOr(cmds, fallback) => verb(nouns, noun, cmds, Some(fallback), args),
+  }
+}
+
+/// `lll help [contract]`. The contract is a help topic rather than a noun: it
+/// is reference text, like --help. It ships in the binary because installed
+/// users have no docs/ (1.0 fleet: a worker tried 'lll skill get
+/// cli-contract').
+fn topic(args: Slice<string>) -> Result<Invocation, pb.CliError> {
+  match (args.get(2), args.get(3)) {
+    (None, _) | (Some("--help"), None) | (Some("-h"), None) => Ok(Invocation.Help(Topic.Usage)),
+    (Some("contract"), None) => Ok(Invocation.Help(Topic.Contract)),
+    _ => Err(
+      usage_error(
+        f"unknown help topic: '{strings.Join(args[2..], " ")}'; 'lll help contract' prints the CLI contract, 'lll --help' the commands, 'lll NOUN --help' one noun",
+      ),
+    ),
+  }
+}
+
+fn verb(
+  nouns: Slice<Noun>,
+  noun: Noun,
+  cmds: Slice<Command>,
+  fallback: Option<string>,
+  args: Slice<string>,
+) -> Result<Invocation, pb.CliError> {
+  let path = f"lll {noun.name}"
+  let word = args.get(2).unwrap_or("")
+  if let Some(c) = resolve_command(cmds, word) {
+    return command(nouns, noun, f"{path} {c.name}", c, args, 3)
+  }
+  if let Some(name) = fallback {
+    // A verb of some other noun is a guess at a verb, not the fallback's
+    // argument: 'lll bot list' must not try to create a bot named list.
+    if word == "" || word.starts_with("-") || !is_any_verb(nouns, word) {
+      let Some(c) = resolve_command(cmds, name) else { return Err(usage_error(f"no {name} verb in {path}")) }
+      return command(nouns, noun, path, c, args, 2)
+    }
+  }
+  if word == "" || word == "--help" || word == "-h" {
+    return Ok(Invocation.Help(Topic.Page(noun_page(noun))))
+  }
+  Err(usage_error(unknown_verb(nouns, noun.name, cmds, word)))
+}
+
+/// Parse one command's flags and positionals from `start`.
+fn command(
+  nouns: Slice<Noun>,
+  noun: Noun,
+  path: string,
+  c: Command,
+  args: Slice<string>,
+  start: int,
+) -> Result<Invocation, pb.CliError> {
+  // A sub-verb: 'lll issue comment edit KEY N'.
+  let word = args.get(start).unwrap_or("")
+  if let Some(sub) = resolve_command(c.verbs, word) {
+    return command(nouns, noun, f"{path} {sub.name}", sub, args, start + 1)
+  }
+  if let Some(hint) = sub_verb_guess(path, c, word) { return Err(usage_error(hint)) }
+  let usage = usage(path, c.spec, c.positional)
+  // Help first: no flag error, missing argument or required flag may answer
+  // a request for help (TASK-237), and nothing runs.
+  if help_requested(c.spec, args, start) {
+    let page = if c.page != "" { c.page } else { usage_help(usage, c.spec) }
+    return Ok(Invocation.Help(Topic.Page(page)))
+  }
+  if let Some(hint) = verb_as_flag(noun, c, args, start) { return Err(usage_error(hint)) }
+  let (least, most) = arity(c.positional)
+  let parsed = parse_n(c.spec, args, start, most, usage)?
+  if parsed.positional_count() < least {
+    let more = if c.missing == "" { "" } else { f"\n{c.missing}" }
+    return Err(usage_error(f"usage: {usage}{more}"))
+  }
+  Ok(Invocation.Run(Call { command: c, args, parsed, usage }))
+}
+
+/// How many positionals a command takes, from its declared shape: a bare or
+/// <angled> word is required, a [bracketed] one (or every word of a
+/// [bracketed group]) optional, and a trailing "..." takes the rest
+/// ('TEXT...').
+pub fn arity(positional: string) -> (int, int) {
+  let mut least = 0
+  let mut most = 0
+  let mut optional = false
+  for w in strings.Fields(positional) {
+    if w.starts_with("[") { optional = true }
+    if !optional { least += 1 }
+    most = if w.ends_with("...") || w.ends_with("...]") { 64 } else { most + 1 }
+    if w.ends_with("]") { optional = false }
+  }
+  (least, most)
+}
+
+/// A noun's help page: its own when it has one, else every verb's usage line
+/// and summary, then its intro.
+pub fn noun_page(noun: Noun) -> string {
+  if noun.page != "" { return noun.page }
+  match noun.shape {
+    Shape.Single(c) => {
+      let usage = usage(f"lll {noun.name}", c.spec, c.positional)
+      if c.page != "" { c.page } else { usage_help(usage, c.spec) }
+    },
+    Shape.Verbs(cmds) => noun_help(noun.name, noun.tagline, noun.intro, cmds),
+    Shape.VerbsOr(cmds, _) => noun_help(noun.name, noun.tagline, noun.intro, cmds),
+    Shape.Topics => "",
+  }
+}
+
+/// True when some noun's table spells `word` as a verb.
+pub fn is_any_verb(nouns: Slice<Noun>, word: string) -> bool {
+  nouns.any(|n| resolve_command(verbs_of(n), word).is_some())
+}
+
+/// Whether the command prints --json.
+pub fn takes_json(c: Command) -> bool {
+  c.spec.find(|f| f.name == "--json").is_some()
+}

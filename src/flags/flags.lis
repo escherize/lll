@@ -1,7 +1,5 @@
-import "go:regexp"
 import "go:strings"
 
-import "config"
 import "output"
 import "pb"
 
@@ -23,6 +21,10 @@ pub struct Flag {
   pub repeat: bool,   // may be given more than once (values accumulate)
   pub hidden: bool,   // kept out of help and completions (--help itself)
   pub help: string,   // one help line; "\n" continues on an aligned line
+  /// The closed set a value flag takes, when it has one. The usage line
+  /// shows it (unless `hint` says it better), completions offer it, and the
+  /// parser refuses anything else; an empty value is left to the verb.
+  pub values: Slice<string>,
 }
 
 pub struct Parsed {
@@ -62,6 +64,14 @@ fn repeat_ok(fl: Flag, existing: Slice<string>) -> Result<(), pb.CliError> {
   )
 }
 
+/// A value outside the flag's closed set is a usage error. Compared without
+/// case or surrounding space, as the verbs' own parsers read them.
+fn in_values(fl: Flag, value: string) -> Result<(), pb.CliError> {
+  let typed = strings.ToLower(strings.TrimSpace(value))
+  if fl.values.is_empty() || typed == "" || fl.values.contains(typed) { return Ok(()) }
+  Err(usage_error(unknown_value(fl, value)))
+}
+
 pub fn parse(
   spec: Slice<Flag>,
   args: Slice<string>,
@@ -73,13 +83,15 @@ pub fn parse(
   parse_n(spec, args, start, limit, usage)
 }
 
-/// `parse`, with the positional limit as a COUNT. Three verbs take two bare
-/// words (`issue link KEY SLUG`, `team set-accent KEY #hex`, `config set url
-/// NAME`) and a bool cannot say so; each of them had grown a bypass around the
-/// dispatcher rather than a second positional. `dispatch` reads the count off
-/// the Command's `positional` string (its word count), so a table entry
-/// declares its arity in the same place it declares its usage line and the
-/// two cannot disagree.
+/// `parse`, with the positional limit as a COUNT. The table reads it off the
+/// Command's `positional` shape (flags.arity), so a table entry declares its
+/// arity in the same place it declares its usage line and the two cannot
+/// disagree.
+///
+/// Help is not answered here. The table's parser asks help_requested first
+/// (TASK-237): `--help` and `-h` work on every verb, before an unknown flag,
+/// a missing value or a missing required flag can refuse them, and a help
+/// request never reaches the verb body.
 pub fn parse_n(
   spec: Slice<Flag>,
   args: Slice<string>,
@@ -89,32 +101,6 @@ pub fn parse_n(
 ) -> Result<Parsed, pb.CliError> {
   let mut vals = Map.new<string, Slice<string>>()
   let mut pos: Slice<string> = []
-  // `--help` and `-h` on every verb, before anything else can refuse them
-  // (TASK-237). Only 10 of 37 specs declared the flag, so `lll issue list -h`
-  // answered `unknown flag: '-h'` - help denied by the machinery that would
-  // have printed it. Two orderings are load-bearing: this must sit BEFORE the
-  // unknown-flag error, and before the required-flag check at the end, or
-  // asking for help while missing a required flag reports the missing flag.
-  //
-  // It returns through the ERROR channel, which looks odd and is the point.
-  // Every caller already writes `flags.parse(...)?`, so a help request
-  // short-circuits the verb the same way a bad flag does - it cannot fall
-  // through into the command body. Recording it as a parsed value instead
-  // would make `lll label create -h` PARSE happily and then run, which is a
-  // write. It is an error of kind Help (pb.help), which main prints on stdout
-  // with exit 0.
-  // Only when the spec does NOT declare --help. A verb that declares it has
-  // its own richer help to print and checks `p.given("--help")` after parse
-  // (`lll board`, `lll issue create`); intercepting those would replace a
-  // hand-written page with a bare flags block, which the gate caught. So this
-  // fills the gap rather than overriding intent: declared means the caller
-  // handles it, undeclared means nobody did.
-  let declares_help = spec
-    .find(|f| spells(f, "--help") || spells(f, "-h"))
-    .is_some()
-  if !declares_help && help_requested(spec, args, start) {
-    return Err(pb.help(usage_help(usage, spec)))
-  }
   let mut i = start
   let mut options_ended = false
   while i < args.length() {
@@ -148,6 +134,7 @@ pub fn parse_n(
         return Err(usage_error(f"{spelling} takes no value"))
       }
       repeat_ok(fl, vals.get(fl.name).unwrap_or([]))?
+      in_values(fl, parts[1])?
       vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(parts[1])
       i += 1
       continue
@@ -170,6 +157,7 @@ pub fn parse_n(
         return Err(usage_error(f"{arg} requires a value"))
       }
       repeat_ok(fl, vals.get(fl.name).unwrap_or([]))?
+      in_values(fl, val)?
       vals[fl.name] = vals.get(fl.name).unwrap_or([]).append(val)
       i += 2
     } else {
@@ -177,10 +165,6 @@ pub fn parse_n(
       i += 1
     }
   }
-  // A verb that declares --help prints its own page after parse; a missing
-  // required flag must not answer that request (1.0 fleet: 'lll invite
-  // create --help' exited 2).
-  if declares_help && help_requested(spec, args, start) { return Ok(Parsed { spec, vals, pos }) }
   for fl in spec {
     if fl.required && vals.get(fl.name).is_none() {
       return Err(usage_error(f"usage: {usage}"))
@@ -210,46 +194,6 @@ pub fn shell_argument(value: string) -> string {
   f"'{escaped}'"
 }
 
-fn team_scope_error(arg: string, key: string, usage: string) -> string {
-  let head = unknown_flag(arg, usage, [])
-  // A server-wide command: LLL_TEAM would not filter it either, so the
-  // override hint would mislead (1.0 fleet: 'lll member list --team FLEET').
-  let words = strings.Fields(usage)
-  let noun = words.get(1).unwrap_or("")
-  // A verb is a lowercase word; 'lll api METHOD PATH' has none, so its
-  // METHOD placeholder must not be named as one.
-  let second = words.get(2).unwrap_or("")
-  let verb = if regexp.MustCompile(r"^[a-z][a-z-]*$").MatchString(second) { second } else { "" }
-  if ["member", "team", "token", "api", "skill", "upgrade", "logout"].contains(noun) {
-    let cmd = if verb == "" || verb.starts_with("[") || verb.starts_with("-") { f"lll {noun}" } else { f"lll {noun} {verb}" }
-    return head + f"\n'{cmd}' is server-wide: no team applies to it"
-  }
-  let value = shell_argument(key)
-  head + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
-}
-
-/// The same teaching for a guessed --url: a command that takes one declares
-/// it, so a refusal here means the endpoint is the configured one (LLL-501,
-/// fleet case B05). Name the one-command override and the way to change the
-/// default, in that order of commitment.
-fn url_scope_error(arg: string, url: string, usage: string) -> string {
-  let value = shell_argument(url)
-  // Where the url comes from decides what changes it (the round-2 rule the
-  // unreachable hint follows): 'config set url' writes the home file, which
-  // LLL_URL and a repo .lll.toml both outrank.
-  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or(None, |t| t.1.url)
-  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {url_default_hint(origin)}."
-}
-
-/// How to change the default url, given where it came from.
-fn url_default_hint(origin: Option<config.Source>) -> string {
-  match origin {
-    Some(config.Source.Env(name)) => f"the default comes from {name} in the environment; correct or unset it",
-    Some(config.Source.RepoFile(path)) => f"the default comes from {path}; edit its url line",
-    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
-  }
-}
-
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own
 /// arguments after parsing use it too.
 pub fn usage_error(message: string) -> pb.CliError {
@@ -273,111 +217,6 @@ fn usage_help(usage: string, spec: Slice<Flag>) -> string {
   // Without a usage line it would open on a blank, so trim it.
   if head == "" { return strings.TrimPrefix(flags_block, "\n") }
   f"{head}{flags_block}"
-}
-
-/// The flag table travels with the error: 26 of 30 fleet agents named the
-/// bare "unknown flag + usage line" the least helpful message lll has, since
-/// it says what was wrong and nothing about what would be right.
-fn unknown_flag(arg: string, usage: string, spec: Slice<Flag>) -> string {
-  let kind = if arg.starts_with("-") { "unknown flag" } else { "unexpected argument" }
-  let mut head = f"{kind}: '{arg}'"
-  let near = match retired_flag(arg, spec) {
-    Some(new) => Some(new),
-    None => nearest_flag(arg, spec),
-  }
-  if let Some(near) = near { head = f"{head}; did you mean '{near}'?" }
-  if usage == "" { return head }
-  f"{head}\nusage: {usage}{section(spec)}"
-}
-
-/// Spellings lll no longer accepts, each with what replaced it (LLL-503,
-/// LLL-644; decisions D5 and D6 in doc v1-0-plan). One old spelling may have
-/// several replacements because it meant different things on different verbs:
-/// `-p` was a password, a path list and a priority. The refusal names the
-/// replacement the verb actually declares, so a script written for an older
-/// lll learns the new spelling from its first failure.
-fn retired_flags() -> Slice<(string, string)> {
-  [
-    ("--query", "--search"),
-    ("-m", "-b"),
-    ("--message", "-b"),
-    ("--assign", "--assignee"),
-    ("--for", "--until"),
-    ("--local", "--scratch"),
-    ("--description-replace-old", "--description-replace old=new"),
-    ("--description-replace-new", "--description-replace old=new"),
-    // D6: -t is title, -k kind, -p priority; the other meanings lost them.
-    ("-t", "--team"),
-    ("-k", "--key"),
-    ("-p", "--password"),
-    ("-p", "--paths"),
-    ("-p", "--path"),
-    // D6: --yes skips a confirmation; --force only overrides ownership or
-    // references, so a delete that had --force for the prompt now has --yes.
-    ("--force", "--yes"),
-    // -b is the body everywhere; -d stays only where the field is a description.
-    ("-d", "-b"),
-  ]
-}
-
-/// The replacement for a retired spelling, when this verb declares it.
-fn retired_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
-  let typed = arg.split("=")[0]
-  for (old, new) in retired_flags() {
-    if old != typed { continue }
-    let flag = strings.Fields(new)[0]
-    if spec.find(|f| !f.hidden && spells(f, flag)).is_some() {
-      return Some(new)
-    }
-  }
-  None
-}
-
-/// The declared spelling closest to an unknown flag, when it is close:
-/// '--teams' for '--team' (fleet: 3 of 10 agents typed the plural). Edit
-/// distance at most 2, so an unrelated flag is never suggested.
-fn nearest_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
-  // Long flags only: a bare '-' or a one-letter '-x' is one edit from
-  // every short alias, so any suggestion there would be noise.
-  if !arg.starts_with("--") { return None }
-  let typed = arg.split("=")[0]
-  let mut best = ""
-  let mut best_d = 3
-  for f in spec {
-    if f.hidden { continue }
-    for name in [f.name, f.alias] {
-      if !name.starts_with("--") { continue }
-      let d = edit_distance(typed, name)
-      if d < best_d {
-        best = name
-        best_d = d
-      }
-    }
-  }
-  if best == "" { None } else { Some(best) }
-}
-
-/// Levenshtein distance over bytes; flag names are ASCII.
-fn edit_distance(a: string, b: string) -> int {
-  let x = a.bytes()
-  let y = b.bytes()
-  let mut prev: Slice<int> = []
-  for j in 0..y.length() + 1 { prev = prev.append(j) }
-  for i in 1..x.length() + 1 {
-    let mut cur: Slice<int> = [i]
-    for j in 1..y.length() + 1 {
-      let cost = if x[i - 1] == y[j - 1] { 0 } else { 1 }
-      let del = prev[j] + 1
-      let ins = cur[j - 1] + 1
-      let sub = prev[j - 1] + cost
-      let mut m = del
-      if ins < m { m = ins }
-      if sub < m { m = sub }
-      cur = cur.append(m)
-    }
-    prev = cur
-  }
-  prev[y.length()]
 }
 
 impl Parsed {
@@ -430,7 +269,7 @@ impl Parsed {
   }
 }
 
-/// One invocation parsed at dispatch. Handlers consume `parsed`; raw `args`
+/// One invocation parsed by the table (LLL-684). Handlers consume `parsed`; raw `args`
 /// remain available for diagnostic spelling, never as a second parser input.
 pub struct CommandInput {
   /// The client and settings main built (LLL-486): what the verb talks to.
@@ -470,90 +309,15 @@ pub struct Command {
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
+  /// What the missing-argument error adds under the usage line, when the
+  /// positional needs saying more about ("" adds nothing).
+  pub missing: string,
+  /// Whether the verb writes or only reads; no default, so every verb says.
+  pub access: Access,
+  /// Sub-verbs: 'lll issue comment edit KEY N'. A word that is none of them
+  /// is the command's own first positional.
+  pub verbs: Slice<Command>,
   pub run: fn(CommandInput) -> Result<output.Output, pb.CliError>,
-}
-
-/// Route `lll <noun> <verb> ...` through a noun's Command table.
-///
-/// The order is the point. Args are parsed against the entry's spec BEFORE
-/// `run` is called, so a trailing `-h` on any verb is answered by parse and
-/// never reaches the verb body. Thirty verb arms used to call a zero-arg
-/// function and discard argv; `lll config check -h` RAN the health check. No
-/// table entry can do that now, because the dispatcher does not let it.
-/// Its Parsed result is handed to the handler, so each invocation is parsed once.
-///
-/// `intro` is prose that belongs to the noun rather than to any verb - the
-/// rename collateral under `lll team --help`, the precedence paragraph under
-/// `lll config --help`. Printed after the verb table; "" prints nothing.
-pub fn dispatch(
-  ctx: pb.Client,
-  noun: string,
-  tagline: string,
-  intro: string,
-  cmds: Slice<Command>,
-  args: Slice<string>,
-) -> Result<output.Output, pb.CliError> {
-  let Some(verb) = args.get(2) else {
-    return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
-  }
-  if verb == "--help" || verb == "-h" {
-    return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
-  }
-  let Some(c) = resolve_command(cmds, verb) else {
-    if !verb.starts_with("-") && top_level_commands().contains(verb) {
-      return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {verb}'? (see 'lll {noun} --help')"))
-    }
-    return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
-  }
-  // A verb with its own page answers --help with it; the generic parse-time
-  // help would otherwise replace a written page with a bare flags block.
-  if c.page != "" && help_requested(c.spec, args, 3) {
-    return Err(pb.help(c.page))
-  }
-  let cmd = f"lll {noun} {c.name}"
-  // Arity is the positional string's word count: "KEY-123 SLUG" admits two.
-  let words = strings.Fields(c.positional)
-  let arity = words.length()
-  let usage = usage(cmd, c.spec, c.positional)
-  let parsed = parse_n(c.spec, args, 3, arity, usage)?
-  (c.run)(CommandInput { ctx, args, parsed, usage })
-}
-
-/// Every top-level command, the first word after `lll`. Completions offer
-/// them, and dispatch names one when it is typed as a noun's verb ('lll
-/// member whoami', 1.0 fleet).
-pub fn top_level_commands() -> Slice<string> {
-  [
-    "issue",
-    "search",
-    "bot",
-    "team",
-    "member",
-    "invite",
-    "project",
-    "label",
-    "api",
-    "doc",
-    "finding",
-    "config",
-    "import",
-    "export",
-    "attach",
-    "watch",
-    "up",
-    "board",
-    "login",
-    "logout",
-    "token",
-    "webhook",
-    "skill",
-    "completions",
-    "upgrade",
-    "whoami",
-    "help",
-    "--version",
-    "-v",
-  ]
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
@@ -590,16 +354,22 @@ pub fn usage(cmd: string, spec: Slice<Flag>, positional: string) -> string {
   if positional != "" { out += f" {positional}" }
   for fl in spec {
     if fl.hidden { continue }
+    let hint = shown_hint(fl)
     if fl.required {
-      out += f" {fl.name} {fl.hint}"
-    } else if fl.hint != "" {
-      out += f" [{fl.name} {fl.hint}]"
+      out += f" {fl.name} {hint}"
+    } else if hint != "" {
+      out += f" [{fl.name} {hint}]"
     } else {
       out += f" [{fl.name}]"
     }
     if fl.repeat { out += "..." }
   }
   out
+}
+
+/// The placeholder a usage line shows: the hint, else the closed set.
+fn shown_hint(fl: Flag) -> string {
+  if fl.hint != "" || fl.values.is_empty() { fl.hint } else { strings.Join(fl.values, "|") }
 }
 
 /// The "Flags:" block for --help, aligned from the spec. Empty when the

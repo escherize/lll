@@ -10,14 +10,6 @@ import "output"
 import "pb"
 import "query"
 
-/// Dispatch `lll config <verb>` through the noun's Command table (TASK-307).
-/// Dispatch parses args against the verb's spec BEFORE calling it, which is
-/// what stops `lll config check -h` from RUNNING the check - a network call -
-/// the way the old `match verb` did when it handed a zero-arg fn nothing.
-pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx, "config", "manage configuration", config_intro(), config_commands(), args)
-}
-
 /// Every config verb, as a value. `list` keeps `--list` as an alias: it was
 /// the verb before 1.0, after `git config --list`. No verb here has a
 /// hand-written page; each `page` is "" and help is the usage line plus
@@ -26,6 +18,7 @@ pub fn config_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       alias: "--list",
       // Fleet case 14: two workers guessed `config show`.
       hidden_alias: "show",
@@ -36,6 +29,7 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "get",
+      access: flags.Access.Read,
       summary: "print one effective value: url, web_url, team or sort",
       spec: [],
       positional: "KEY",
@@ -44,6 +38,7 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "check",
+      access: flags.Access.Read,
       summary: "check the configured lll server API",
       spec: [],
       run: config_check,
@@ -51,6 +46,7 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "init",
+      access: flags.Access.Write,
       summary: "write a commented .lll.toml template to the current directory",
       spec: [],
       run: config_init,
@@ -58,6 +54,7 @@ pub fn config_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set",
+      access: flags.Access.Write,
       summary: "save url or web_url in ~/.config/lll/lll.toml",
       spec: [],
       positional: "<url|web_url> VALUE",

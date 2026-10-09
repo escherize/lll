@@ -3,7 +3,6 @@ import "records"
 import "go:encoding/json"
 import "go:strings"
 
-import "config"
 import "flags"
 import "models"
 import "output"
@@ -11,13 +10,6 @@ import "pb"
 import "query"
 import "theme"
 import "writes"
-
-/// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
-/// The table is the one place a verb is declared: dispatch, `lll team --help`
-/// and shell completions all read it, so none of the three can drift.
-pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx, "team", "work with teams", team_intro(), team_commands(), args)
-}
 
 /// Every team verb, as a value. `page` is the hand-written help `team delete`
 /// already had; its former in-verb `--help` check is gone because dispatch
@@ -27,6 +19,7 @@ pub fn team_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "list teams (KEY, name); --archived includes archived ones",
       spec: team_list_spec(),
       run: team_list,
@@ -34,6 +27,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create",
+      access: flags.Access.Write,
       summary: "create a team; the key is the bare argument or --key",
       spec: team_create_spec(),
       positional: "[KEY]",
@@ -42,6 +36,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "view",
+      access: flags.Access.Read,
       summary: "show a team, its accent and its issue count",
       spec: [flags.Flag { name: "--json", help: "print the team record as JSON, with its issue count as issues", .. }],
       positional: "KEY",
@@ -50,6 +45,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "rename",
+      access: flags.Access.Write,
       summary: "change a team's key, its name, or both",
       spec: team_rename_spec(),
       positional: "KEY",
@@ -58,6 +54,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set-accent",
+      access: flags.Access.Write,
       summary: "set the board accent colour ('' clears it)",
       spec: [json_after_flag("the team record")],
       positional: "KEY #rrggbb",
@@ -66,6 +63,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "set-emoji",
+      access: flags.Access.Write,
       summary: "set the team's glyph, beside its key ('' clears it)",
       spec: [json_after_flag("the team record")],
       positional: "KEY EMOJI",
@@ -74,6 +72,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "archive",
+      access: flags.Access.Write,
       summary: "hide the team from lists and the board rail (data kept)",
       spec: [json_after_flag("the team record")],
       positional: "KEY",
@@ -82,6 +81,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "unarchive",
+      access: flags.Access.Write,
       summary: "bring an archived team back",
       spec: [json_after_flag("the team record")],
       positional: "KEY",
@@ -90,6 +90,7 @@ pub fn team_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "delete",
+      access: flags.Access.Write,
       summary: "delete a team that holds no issues",
       page: team_delete_page(),
       spec: team_delete_spec(),

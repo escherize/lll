@@ -14,18 +14,6 @@ import "query"
 import "secret"
 import "writes"
 
-/// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
-/// dispatch, `lll webhook --help` and shell completions all read the table.
-pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx,
-    "webhook",
-    "outbound webhooks for issue events",
-    webhook_intro(),
-    webhook_commands(),
-    args,
-  )
-}
-
 fn webhook_intro() -> string {
   "The server POSTs one JSON object per issue create/update/delete to every
 registered URL whose scope matches, shaped like an `lll watch --json` event
@@ -52,6 +40,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "add",
+      access: flags.Access.Write,
       summary: "register a URL that receives this team's issue events, or one project's with --project",
       spec: webhook_add_spec(),
       positional: "URL",
@@ -60,6 +49,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "list this team's registrations: scope, URL, whether a secret is set",
       spec: webhook_list_spec(),
       run: webhook_list,
@@ -67,6 +57,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "remove",
+      access: flags.Access.Write,
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
       spec: webhook_remove_spec(),
       positional: "URL",

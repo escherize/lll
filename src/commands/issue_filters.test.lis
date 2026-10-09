@@ -16,8 +16,9 @@ fn cli_and_web_filters_share_values_and_validation() {
   assert cli.assignee == web.assignee
   assert cli.one_label() == web.one_label()
   assert cli.project == web.project
-  let assert Ok(bad) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
-  let assert Err(cli_error) = filters_from(bad)
+  // The parser refuses a state outside the set (LLL-684) with the words the
+  // board's parser uses.
+  let assert Err(cli_error) = flags.parse(spec, ["lll", "issue", "list", "--state", "bogus"], 3, false, "")
   let assert Err(web_error) = query.Filters { state: ["bogus"], .. }.parse()
   assert cli_error == web_error
 }
@@ -72,12 +73,11 @@ fn repeated_filters_mean_the_union_and_undeclared_repeats_are_refused() {
   assert state_filters.states.get(1) == Some(models.IssueState.InReview)
 
   // A bad value anywhere in the repetition is still caught, not just the first.
-  let assert Ok(bad) = flags.parse(
+  assert flags.parse(
     filter_spec(FilterUse.List),
     ["--state", "todo", "--state", "bogus"],
     0, false, "",
-  )
-  assert filters_from(bad).is_err()
+  ).is_err()
 }
 
 /// The clause a repeated filter produces: an OR inside the AND, parenthesised

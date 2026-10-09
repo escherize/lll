@@ -70,25 +70,27 @@ pub fn up_spec() -> Slice<flags.Flag> {
       help: "start a shareable local board on this reachable address",
       ..,
     },
-    flags.Flag {
-      name: "--help",
-      alias: "-h",
-      hidden: true,
-      help: "show this help",
-      ..,
-    },
   ]
 }
 
 /// `lll up` writes its banner as it boots and then serves until stopped: a
 /// stream, so everything after --help prints directly (the banner has to be
 /// on screen while the server runs).
-pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  let spec = up_spec()
-  let p = flags.parse(spec, args, 2, false, flags.usage("lll up", spec, ""))?
-  if p.given("--help") {
-    return Ok(output.line(up_usage()))
+pub fn up_command() -> flags.Command {
+  flags.Command {
+    name: "up",
+    access: flags.Access.Write,
+    summary: "start the lll server and web board together",
+    page: up_usage(),
+    spec: up_spec(),
+    run: up,
+    ..,
   }
+}
+
+fn up(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let p = input.parsed
   let scratch = p.given("--scratch")
   let share_bind = p.one("--bind")
   if scratch && share_bind != "" {
