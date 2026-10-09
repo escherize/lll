@@ -20,8 +20,8 @@ Your saved lll configuration is broken in two ways. Plain `./lll whoami` fails.
    (and `lll config` commands) to work out what is wrong. Record each exit
    code you see.
 2. Repair the saved configuration so that plain `./lll whoami` works as your
-   existing bot `bot-fleet-worker-NN`. conn.txt holds the right server and a
-   valid token for that bot.
+   existing bot `bot-fleet-worker-NN`. `./fleet-url` prints the right server and
+   `./fleet-token` prints a valid token for that bot.
 3. Do not create members, bots or tokens, and do not use admin credentials:
    the fix must reuse your existing identity.
 4. Finish with a successful `./lll whoami`.
@@ -32,16 +32,15 @@ members.
 
 ## Environment
 
-Your instance is already running. `conn.txt` in your worker directory contains
-exactly three lines, and they are correct: API URL, a valid token for your
-existing bot `bot-fleet-worker-NN`, team key. Never type, paste, print or quote
-the token. In this case the wrapper does NOT pass conn.txt to lll. It clears
-inherited LLL/XDG settings and runs the pinned binary with your own saved
-configuration, under `home/config` in your worker directory, and that
-configuration is broken. Repair it with lll's own commands; do not edit the
-config file by hand. When a command needs the token, feed it from the file
-without displaying it, for example `sed -n 2p conn.txt | ./lll ...` where the
-command reads it from stdin. All CLI calls must use the wrapper: run it as
+Your instance is already running. Two helpers in your worker directory print
+the correct facts: `./fleet-url` prints the API URL and `./fleet-token` prints
+a valid token for your existing bot `bot-fleet-worker-NN`. Do not open any
+connection or credentials file. Never type, paste, print or quote the token:
+only pipe `./fleet-token` into a command that reads a token from stdin. In this
+case the wrapper passes no connection to lll. It clears inherited LLL/XDG
+settings and runs the pinned binary with your own saved configuration, under
+`home/config` in your worker directory, and that configuration is broken.
+Repair it with lll's own commands; do not edit the config file by hand. All CLI calls must use the wrapper: run it as
 `./lll` from your worker directory. Your sandbox may refuse `export VAR=$(...)`
 or `VAR=$(...) cmd` at the prompt; a tiny script that does the same is the way
 around that.

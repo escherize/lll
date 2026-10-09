@@ -348,6 +348,14 @@ class Board:
                    f'{str(script)!r}, "wrapper", {str(seat.worker)!r}, {str(self.binary)!r}, {mode!r}, *os.sys.argv[1:]])\n')
         (seat.worker / 'lll').write_text(wrapper)
         (seat.worker / 'lll').chmod(0o700)
+        if self.case == '14':
+            # Case 14 needs the right url and a valid token as inputs. Helpers
+            # print them so no worker opens a credentials file (run 1: the
+            # sandbox refused `sed -n 2p conn.txt` for one worker).
+            for name, line in (('fleet-url', 1), ('fleet-token', 2)):
+                helper = seat.worker / name
+                helper.write_text(f'#!/bin/sh\nsed -n {line}p {str(seat.worker / "conn.txt")!r}\n')
+                helper.chmod(0o700)
 
     def close(self):
         if self.child:
