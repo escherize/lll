@@ -1,4 +1,5 @@
 import "records"
+import "display"
 import "claims"
 import "go:io"
 import "go:os"
@@ -84,7 +85,7 @@ fn issue_create_spec() -> Slice<flags.Flag> {
       name: "--priority",
       alias: "-p",
       value: true,
-      hint: "name|0-4",
+      hint: priority_hint(),
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
@@ -131,7 +132,7 @@ fn issue_list_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--sort",
       value: true,
-      hint: "f",
+      hint: strings.Join(query.sort_fields(), "|"),
       help: f"{strings.Join(query.sort_fields(), ", ")}; prefix - for descending\npriority leads with urgent (- leads with low); unprioritised last either way\n(default: LLL_SORT or 'sort' in .lll.toml, else created)",
       ..,
     },
@@ -194,7 +195,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--priority",
       alias: "-p",
       value: true,
-      hint: "name|0-4",
+      hint: priority_hint(),
       help: "0 none, 1 urgent (!!!), 2 high (!!), 3 medium (!), 4 low (·)",
       ..,
     },
@@ -303,6 +304,12 @@ fn issue_release_spec() -> Slice<flags.Flag> {
   ])
 }
 
+/// Enum values ride the usage line, generated so they cannot drift (1.0
+/// fleet: three of ten read sixty lines of help to find them).
+fn priority_hint() -> string {
+  strings.Join(display.priorities(), "|") + "|0-4"
+}
+
 /// `--reason` is the one spelling for why a forced action was taken (LLL-646
 /// decision): it goes into the comment the server leaves. `-b` stays an
 /// alias only on release, which has no other body.
@@ -313,7 +320,7 @@ fn reason_flag(verb: string) -> flags.Flag {
     alias,
     value: true,
     hint: "\"why\"",
-    help: "with --force: the reason, recorded in the comment ('--reason -' reads stdin)",
+    help: "with --force: the reason, recorded in the comment ('--reason -' reads stdin);\n'issue release' also takes it as -b",
     ..,
   }
 }
@@ -644,9 +651,9 @@ fn issue_union_spec() -> Slice<flags.Flag> {
   let mut out: Slice<flags.Flag> = []
   for c in issue_commands() {
     for fl in c.spec {
-      // Keyed by name AND aliases: -b is the description on create and
-      // update, an alias of --reason on release, and every row belongs here.
-      if out.find(|f| f.name == fl.name && f.alias == fl.alias).is_none() { out = out.append(fl) }
+      // One row per flag name: --reason is one flag, though release alone
+      // also spells it -b (its help says so). -b is its own row: the body.
+      if out.find(|f| f.name == fl.name).is_none() { out = out.append(fl) }
     }
   }
   out

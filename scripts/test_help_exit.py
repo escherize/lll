@@ -16,6 +16,13 @@ binary = str(Path(sys.argv[1]).resolve())
 HIDDEN = [('issue', 'read'), ('doc', 'read'), ('finding', 'read'), ('finding', 'view')]
 
 
+def flags_block(page):
+    """The Flags: section of a help page, or '' when it has none."""
+    if '\nFlags:\n' not in '\n' + page:
+        return ''
+    return page.split('Flags:\n', 1)[1]
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='lll-help-exit-') as directory:
         env = {k: v for k, v in os.environ.items() if not k.startswith(('LLL_', 'XDG_'))}
@@ -35,11 +42,18 @@ def main():
             verbs = [w for w in verb_rows.get(noun, '').split() if not w.startswith('-')]
             cases += [[noun, verb, '--help'] for verb in verbs]
         cases += [[noun, verb, '--help'] for noun, verb in HIDDEN]
+        cases.append(['--help'])
         wrong = []
         for args in cases:
             done = run(*args)
             if done.returncode != 0 or not done.stdout.strip():
                 wrong.append(f"lll {' '.join(args)}: exit {done.returncode}: {(done.stderr or done.stdout).strip()[:160]}")
+            # No page lists a flag twice (1.0 fleet: 'lll issue --help' had
+            # two --reason rows).
+            rows = re.findall(r'^  (--?[\w-]+)(?:,| {2}|$)', flags_block(done.stdout), re.M)
+            twice = sorted({r for r in rows if rows.count(r) > 1})
+            if twice:
+                wrong.append(f"lll {' '.join(args)}: flags listed twice: {', '.join(twice)}")
     for line in wrong:
         print(line)
     assert not wrong, f'{len(wrong)} of {len(cases)} help requests did not exit 0 with a page'

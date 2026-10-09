@@ -72,6 +72,23 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   applies at write time and needs no stamp beside concurrent appends.
 - `lll issue priority` (or `state`, `assignee`, `label`, `project`) names
   `lll issue update KEY --priority <name>`.
+- `lll login --password -`, `member set-password --password -` and
+  `--old-password -` read the password from stdin. `-` was taken as the
+  password itself.
+- `--help` answers on every verb before a required flag is checked: `lll
+  invite create --help` exited 2. A test drives `--help` on every noun and
+  verb from the command table and checks no page lists a flag twice.
+- `lll member view` names `lll member access NAME`.
+- `--team` on a server-wide command (`member`, `team`, `token`, ...) says the
+  command is server-wide; it offered an LLL_TEAM override that filters
+  nothing. `member list` adds that its last column shows each member's teams.
+- An unknown `--old-password` says only an administrator can reset a
+  password you do not know.
+- Usage lines list enum values, generated from the enums: `--state
+  backlog|todo|...`, `--priority none|urgent|...|0-4`, `--sort`, project
+  `--status` and doc `-k`.
+- `lll issue --help` lists `--reason` once; its help says `issue release`
+  also takes it as `-b`.
 - `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
   instead of the update usage.
 

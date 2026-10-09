@@ -105,7 +105,7 @@ fn project_create_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"name\"", help: "project name", .. },
     flags.Flag { name: "-b", alias: "--body -d --description", value: true, hint: "desc", help: "project description", .. },
-    flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
+    flags.Flag { name: "--status", value: true, hint: strings.Join(records.project_statuses(), "|"), help: "planned, started, paused, completed, or cancelled\n(defaults to planned)", .. },
     flags.Flag { name: "--team", value: true, hint: "KEY", help: "team key the project belongs to (defaults to LLL_TEAM)", .. },
     flags.Flag { name: "--json", help: "print the created project record as JSON", .. },
   ])
@@ -115,7 +115,7 @@ fn project_edit_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "-n", alias: "--name", value: true, hint: "\"new name\"", help: "new project name", .. },
     flags.Flag { name: "-b", alias: "--body -d --description", value: true, hint: "desc", help: "new project description", .. },
-    flags.Flag { name: "--status", value: true, hint: "s", help: "planned, started, paused, completed, or cancelled", .. },
+    flags.Flag { name: "--status", value: true, hint: strings.Join(records.project_statuses(), "|"), help: "planned, started, paused, completed, or cancelled", .. },
     json_after_flag("the project record"),
   ])
 }
