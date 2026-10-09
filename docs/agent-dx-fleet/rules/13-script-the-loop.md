@@ -17,24 +17,25 @@ Read every object in full before you change it.
 Team FLEET has issues labelled `sweep`. Some are ready to work; one is blocked
 and must stay open.
 
-1. Write a shell script `fleet-13-NN.sh` in your directory. It must loop: ask
-   lll for the next ready issue labelled `sweep` and take it in the same call,
-   close it, and repeat. It must branch on lll's EXIT CODES, not on message
-   text: on "nothing to do" it stops and exits 0; on any other failure it
-   exits with that code.
+1. Write a shell script `fleet-13-NN.sh` in your directory. It takes the
+   label as its only argument (`$1`, no default). It must loop: ask lll for
+   the next ready issue with that label and take it in the same call, close
+   it, and repeat. It must branch on lll's EXIT CODES, not on message text: on
+   "nothing to do" it stops and exits 0; on any other failure it exits with
+   that code. Read `./lll issue next --help` before writing it.
 2. The script calls the wrapper (`./lll`, or its absolute path). It must not
    contain a token or read conn.txt; the wrapper supplies the connection.
-3. Read the script back, then run it once. Do NOT claim, close, release,
-   reopen or update any `sweep` issue except inside that single run. Read
-   `./lll issue next --help` before writing the script. To test your
-   `--claim` parsing, use `--label practice` (three disposable issues) as often
-   as you like; never test on `sweep`. If the run goes wrong, stop and report;
-   do not repair the board by hand.
-4. Confirm with lll: every ready `sweep` issue is done and unclaimed (its
-   claim is empty; the assignee that close leaves behind is expected, so do
-   not clear it), the
-   blocked one is untouched, and the script's last lll call reported nothing
-   to do.
+3. Read the script back, then rehearse: `./fleet-13-NN.sh practice` (three
+   disposable issues). Fix the script and rehearse again until that run exits
+   0 with every practice issue done. Only then run `./fleet-13-NN.sh sweep`,
+   exactly once. Never claim, close, release, reopen or update a `sweep`
+   issue by hand. If the sweep run goes wrong, stop and report; do not repair
+   the board by hand.
+4. Confirm with lll, without taking anything: every ready `sweep` issue is
+   done and unclaimed (its claim is empty; the assignee that close leaves
+   behind is expected, so do not clear it), and the blocked one is untouched.
+   Take "nothing to do" from the sweep run's own output and exit status; if
+   you check again, use `./lll issue next --label sweep` with no `--claim`.
 
 The artifacts are the script file and the board: ready sweep issues done, no
 claims, nothing else changed.
