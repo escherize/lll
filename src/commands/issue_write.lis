@@ -396,7 +396,7 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if self_assigned && !finishing {
     let held = fetch_claim(ctx, issue.id)?
     if held.is_none() {
-      out = out.line(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
+      out = out.notice(f"assigned, not claimed: 'lll issue claim {key}' holds it against other agents")
     }
   }
   Ok(out)
@@ -585,10 +585,10 @@ fn comment(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     if comments.is_empty() { return Ok(empty_list("comments")) }
     // Fleet tasks 4 and 5: every waiting agent re-read this list five times
     // ten seconds apart. The verb that blocks instead is named where the
-    // polling happens.
+    // polling happens, as a notice: a script reading the list gets the list.
     let key = f"{issue.expand.team.key}-{issue.number}"
     return Ok(
-      comments_output(comments).line(
+      comments_output(comments).notice(
         f"(waiting for the next one? 'lll issue watch {key} --until TEXT' blocks until a comment containing TEXT arrives)",
       ),
     )

@@ -115,7 +115,7 @@ fn config_set(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     let effective = if key == "url" { cfg.url } else { cfg.web_url }
     let origin = if key == "url" { src.url } else { src.web_url }
     if effective != endpoint {
-      out = out.line(f"note: {config.origin(origin)} overrides this setting; 'lll config list' shows the effective configuration")
+      out = out.notice(f"note: {config.origin(origin)} overrides this setting; 'lll config list' shows the effective configuration")
     }
     return Ok(out)
   }
@@ -275,7 +275,7 @@ fn config_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> 
   let tok = if cfg.token == "" { "" } else { "••••" }
   out = out.line(origin_line(src.token, "token", tok))
   if let Some(warning) = committed_token_warning(ctx, src.token) {
-    out = out.line(warning)
+    out = out.notice(warning)
   }
   Ok(out)
 }
@@ -325,7 +325,7 @@ fn config_check(input: flags.CommandInput) -> Result<output.Output, pb.CliError>
     Err(e) => return Err(e.with_message(f"{cfg.url} is not a reachable lll server API: {e.message}")),
   }
   if let Some(warning) = committed_token_warning(ctx, src.token) {
-    out = out.line(warning)
+    out = out.notice(warning)
   }
   Ok(out)
 }

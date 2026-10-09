@@ -1428,8 +1428,9 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "--until with --timeout: expected nonzero exit"
 assert_contains "$out" "no comment containing 'never-coming'" "--timeout names what did not arrive"
-out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
-assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
+# A notice (LLL-683): stderr, so a script reading the listing gets the listing.
+out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY" 2>&1 >/dev/null)
+assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until on stderr"
 
 python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
@@ -2015,8 +2016,9 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src)
 assert_contains "$out" "migration-hazard" "finding near matches the parent directory"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src/pb/up.lis)
 assert_contains "$out" "migration-hazard" "finding near matches a file inside a stored directory"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates)
-assert_contains "$out" "No findings for web/templates." "finding near with no match says so"
+# A notice, like every empty list's (LLL-683): stderr, so stdout stays empty.
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates 2>&1 >/dev/null)
+assert_contains "$out" "No findings for web/templates." "finding near with no match says so on stderr"
 
 # LLL-314: exact coordinates beat an earlier slug's broad directory match.
 LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create -s a-ranking-directory -t "Broad ranking note" \
@@ -3268,9 +3270,10 @@ cmp -s "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml" \
 # connection; the next process reads it without an endpoint environment value.
 STATIC_HOME="$DATA_DIR/static-token-home"
 mkdir -p "$STATIC_HOME"
+# The note is a notice (LLL-683): stderr, so stdout carries only the setting.
 out=$(cd "$STATIC_HOME" && env -u LLL_TOKEN HOME="$STATIC_HOME" LLL_URL=http://127.0.0.1:1 \
-  "$LLL_ABS" config set url "$URL/")
-assert_contains "$out" 'overrides this setting' 'URL setter explains an environment override'
+  "$LLL_ABS" config set url "$URL/" 2>&1 >/dev/null)
+assert_contains "$out" 'overrides this setting' 'URL setter explains an environment override on stderr'
 cp "$STATIC_HOME/.config/lll/lll.toml" "$DATA_DIR/static-endpoint.toml"
 for invalid_endpoint in ftp://invalid https://invalid/path?query=yes https://invalid/path#fragment; do
   out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" "$LLL_ABS" config set url "$invalid_endpoint" 2>&1) \

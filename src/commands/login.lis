@@ -339,7 +339,7 @@ fn finish_login(
   out = out.line(f"logged in as {name}")
   out = out.line(f"token saved to {path}")
   if ctx.settings.env.token != "" {
-    out = out.line("note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset")
+    out = out.notice("note: LLL_TOKEN is set in this shell and overrides the saved token until it is unset")
   }
   // A team is what 'issue create' asks for next, and every usability run hit
   // it as a fresh dead end several commands after logging in. When the server
