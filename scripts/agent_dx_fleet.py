@@ -679,9 +679,15 @@ def judge_08(board, changes, after):
                title=f'Upload retry holds the cache lock (worker {seat.number})', area='storage',
                body='The retry path takes the cache lock before the upload finishes.',
                confidence='confirmed', author=seat.member_id)
-        if not called(board, seat, 'finding', 'create', also=('suspected',)) or \
-                not called(board, seat, 'finding', 'confirm'):
-            errors.append('audit lacks a suspected `finding create` followed by `finding confirm`')
+        # Filing suspected may go through `finding create` or `doc create -k
+        # finding` (both take --confidence since fleet-fixes-1); confirming
+        # through `finding confirm` or `doc edit --confidence confirmed`.
+        filed = called(board, seat, 'finding', 'create', also=('suspected',)) or \
+            called(board, seat, 'doc', 'create', also=('finding', 'suspected'))
+        confirmed = called(board, seat, 'finding', 'confirm') or \
+            called(board, seat, 'doc', 'edit', also=('confirmed',))
+        if not (filed and confirmed):
+            errors.append('audit lacks a suspected finding filed and then confirmed')
         if {p.strip() for p in doc.get('paths', '').split(',')} != {'src/upload', 'src/retry'}:
             errors.append(f'finding paths: expected src/upload and src/retry, got {doc.get("paths")!r}')
     return errors
