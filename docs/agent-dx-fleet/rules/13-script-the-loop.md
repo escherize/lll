@@ -27,7 +27,10 @@ and must stay open.
    contain a token or read conn.txt; the wrapper supplies the connection.
 3. Read the script back, then rehearse: `./fleet-13-NN.sh practice` (three
    disposable issues). Fix the script and rehearse again until that run exits
-   0 with every practice issue done. Only then run `./fleet-13-NN.sh sweep`,
+   0 with every practice issue done. Read back with `./lll issue list --label
+   practice`: every practice issue done and unclaimed. A rehearsal that strands
+   a claim is cleaned with `./lll issue release KEY` (practice only). Only then
+   run `./fleet-13-NN.sh sweep`,
    exactly once. Never claim, close, release, reopen or update a `sweep`
    issue by hand. If the sweep run goes wrong, stop and report; do not repair
    the board by hand.
