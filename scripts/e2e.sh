@@ -1741,9 +1741,14 @@ out=$(HOME="$FAKEHOME" LLL_WEB_URL=http://127.0.0.1:8100 "$LIN" board)
 [ "$out" = "http://127.0.0.1:8100" ] || fail "board URL: got '$out'"
 out=$(LLL_WEB_URL=https://lll.example.com/ "$LIN" board)
 [ "$out" = "https://lll.example.com" ] || fail "board URL trims trailing slash: got '$out'"
+# A repo file's web_url is not a board link (LLL-688): the link can carry
+# the board token, and a cloned repo could name any host.
 printf 'url = "%s"\nweb_url = "https://cfg.example.com"\n' "$URL" > "$WORK/.lll.toml"
-out=$(cd "$WORK" && HOME="$FAKEHOME" "$LLL_ABS" board)
-[ "$out" = "https://cfg.example.com" ] || fail "board URL from config web_url: got '$out'"
+out=$(cd "$WORK" && HOME="$FAKEHOME" LLL_BOARD_TOKEN=e2e-board-token "$LLL_ABS" board 2>&1) \
+  && fail "board linked to a repo file's web_url: $out"
+assert_contains "$out" "web_url = https://cfg.example.com, which 'lll board' does not use" \
+  "board names the repo file's web_url it will not link to"
+assert_not_contains "$out" "e2e-board-token" "board never prints the board token for a repo file's host"
 
 # --- -w opens via the first opener on PATH (stubbed; no real browser) ---
 mkdir -p "$DATA_DIR/bin"
@@ -3001,7 +3006,7 @@ curl -sf -X PATCH "$URL/api/collections/members/records/$AGENT_ID" \
 
 # AC#1: login stores a token in the home config and prints who you are and
 # which file — never the token itself.
-login_out=$(printf '%s\n' "$LOGIN_PASS" | env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login -e e2e-agent@lll.test) \
+login_out=$(printf '%s\n' "$LOGIN_PASS" | env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login --url "$URL" -e e2e-agent@lll.test) \
   || fail "lll login exited nonzero: $login_out"
 assert_contains "$login_out" "logged in as e2e-agent" "login says who you are"
 assert_contains "$login_out" "token saved to" "login names the file the token landed in"
@@ -3023,7 +3028,7 @@ assert_contains "$out" "e2e-agent" "the home-config token authenticates a member
 
 # TASK-242 AC: --password is a flag, not only a prompt. Agents and CI machines
 # have no terminal to type into, and piping stdin was the undocumented answer.
-out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e e2e-agent@lll.test --password "$LOGIN_PASS") \
   || fail "login --password exited nonzero: $out"
 assert_contains "$out" "logged in as e2e-agent" "login takes the password as a flag"
@@ -3056,18 +3061,18 @@ CREATE_HOME="$DATA_DIR/createhome"
 mkdir -p "$CREATE_HOME"
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e newcomer@lll.test --password newcomer-pass-789 --create) \
+  "$LIN" login --url "$URL" -e newcomer@lll.test --password newcomer-pass-789 --create) \
   || fail "login --create exited nonzero: $out"
 assert_contains "$out" "created member newcomer" "--create says it made the account"
 assert_contains "$out" "logged in as newcomer" "--create logs into what it made"
 # The account is real: a second login without --create authenticates it.
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e newcomer@lll.test --password newcomer-pass-789) \
   || fail "the --create account does not log in again: $out"
 # And --create on a name that exists refuses rather than clobbering.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e newcomer@lll.test --password another-pass-987 --create 2>&1) \
+  "$LIN" login --url "$URL" -e newcomer@lll.test --password another-pass-987 --create 2>&1) \
   && fail "--create on an existing member should refuse"
 assert_contains "$out" "already exists" "--create refuses an existing member"
 
@@ -3077,27 +3082,27 @@ assert_contains "$out" "already exists" "--create refuses an existing member"
 # superuser identity with whatever password it typed.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e admin@local.dev --password whatever-123 --create 2>&1) \
+  "$LIN" login --url "$URL" -e admin@local.dev --password whatever-123 --create 2>&1) \
   && fail "--create with the admin email should refuse"
 assert_contains "$out" "admin identity, not a member" "--create refuses the admin's email"
 
 # Too short is one sentence, not PocketBase's raw validation blob.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e shorty@lll.test --password short --create 2>&1) \
+  "$LIN" login --url "$URL" -e shorty@lll.test --password short --create 2>&1) \
   && fail "--create with a short password should refuse"
 assert_contains "$out" "at least 8 characters" "--create checks the password length"
 assert_not_contains "$out" "validation_min_text_constraint" "no raw PocketBase blob"
 
 # With no terminal to prompt at, every missing credential is named at once.
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login </dev/null 2>&1) \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" </dev/null 2>&1) \
   && fail "login with nothing on a closed stdin should refuse"
 assert_contains "$out" "no terminal to prompt at" "login names both missing credentials at once"
 
 # TASK-242 AC: the 400 that told nobody anything now names both causes and the
 # command for each. PocketBase answers the same 400 for a missing account and
 # a wrong password, so both branches are printed.
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e nobody@lll.test --password whatever 2>&1) \
   && fail "login as a nonexistent member should fail"
 assert_contains "$out" "no member with email nobody@lll.test" "login names the identity it tried"
@@ -3222,7 +3227,7 @@ bot_out=$(env LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123
 
 # A bot member cannot authenticate interactively, whatever password is typed.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
-  "$LIN" login --email bot-e2e@members.invalid --password not-the-password 2>&1) \
+  "$LIN" login --url "$URL" --email bot-e2e@members.invalid --password not-the-password 2>&1) \
   && fail "a bot member logged in with a password: $out"
 assert_contains "$out" "cannot sign in with a password" "the login refusal names the bot rule"
 
@@ -3484,6 +3489,135 @@ printf 'me = "zed"\n' > "$ME_HOME/.config/lll/lll.toml"
 grep -q '^me = "zed"$' "$ME_HOME/.config/lll/lll.toml" \
   || fail "login --url overwrote a configured me: $(cat "$ME_HOME/.config/lll/lll.toml")"
 
+# LLL-688: a token goes only to the server it was minted on. B is a listener
+# that logs every connection, a partial one included; a .lll.toml naming it
+# sits in the directory every command below runs from. B must see nothing:
+#   - login --url A by password, --token and --create: the team check after
+#     login used to re-resolve the layered config, where that file's url
+#     outranks the home one, and sent A's fresh token to B;
+#   - login without --url: it used to send the password to the file's url;
+#   - an ordinary command with the home login for A: the layers combine key by
+#     key, so the file's url was paired with A's token.
+B_REC="$DATA_DIR/login-b-connections.txt"
+B_PORT=$(free_port 20000 39999)
+cat > "$DATA_DIR/count_server.py" <<'COUNT_EOF'
+import socket, sys, threading
+port, rec = int(sys.argv[1]), sys.argv[2]
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", port))
+s.listen(50)
+def log(line):
+    with open(rec, "a") as f:
+        f.write(line + "\n")
+def handle(c):
+    log("CONN accepted")
+    c.settimeout(2)
+    data = b""
+    try:
+        while b"\r\n\r\n" not in data and len(data) < 65536:
+            chunk = c.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    except OSError:
+        pass
+    first = data.split(b"\r\n")[0].decode("latin1") or "<no request line>"
+    log(f"REQ {first}")
+    try:
+        c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+    except OSError:
+        pass
+    c.close()
+while True:
+    conn, _ = s.accept()
+    threading.Thread(target=handle, args=(conn,), daemon=True).start()
+COUNT_EOF
+python3 "$DATA_DIR/count_server.py" "$B_PORT" "$B_REC" >/dev/null 2>&1 &
+B_PID=$!
+SPY_PIDS="${SPY_PIDS:-} $B_PID"
+wait_ok "http://127.0.0.1:$B_PORT/" || fail "the counting listener did not start"
+sleep 0.2
+: > "$B_REC"
+HOSTILE="$DATA_DIR/hostile_repo"
+mkdir -p "$HOSTILE"
+printf 'url = "http://127.0.0.1:%s"\n' "$B_PORT" > "$HOSTILE/.lll.toml"
+b_saw_nothing() { # what
+  [ -s "$B_REC" ] && fail "$1 reached the .lll.toml's server: $(cat "$B_REC")"
+  return 0
+}
+TWO_TOKEN=""
+for mode in password token create; do
+  TWO_HOME="$DATA_DIR/two_server_home_$mode"
+  mkdir -p "$TWO_HOME"
+  case "$mode" in
+    password)
+      out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+        "$LLL_ABS" login --url "$URL" -e onboard@lll.test --password "$ONBOARD_PASS") \
+        || fail "login --url beside another server's .lll.toml failed: $out" ;;
+    token)
+      out=$(cd "$HOSTILE" && printf '%s\n' "$TWO_TOKEN" | env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+        "$LLL_ABS" login --url "$URL" --token -) \
+        || fail "login --url --token beside another server's .lll.toml failed: $out" ;;
+    create)
+      out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$TWO_HOME" \
+        "$LLL_ABS" login --url "$URL" -e two-create@lll.test --password two-create-pass-123 --create) \
+        || fail "login --url --create beside another server's .lll.toml failed: $out" ;;
+  esac
+  b_saw_nothing "login --url ($mode)"
+  TWO_TOML="$TWO_HOME/.config/lll/lll.toml"
+  grep -q "^url = \"$URL\"\$" "$TWO_TOML" || fail "login --url ($mode) did not save A's url"
+  grep -q '^token = ' "$TWO_TOML" || fail "login --url ($mode) did not save the token"
+  [ "$mode" = password ] && TWO_TOKEN=$(sed -n 's/^token = "\(.*\)"$/\1/p' "$TWO_TOML")
+  assert_contains "$out" "ENG" "login --url ($mode) checked teams on the server it logged in to"
+  assert_contains "$out" ".lll.toml sets url = http://127.0.0.1:$B_PORT, which outranks the home config" \
+    "login --url ($mode) names the repo file whose url outranks the home config"
+done
+
+# Without --url, login refuses the file's url (exit 2) before any credential
+# leaves the machine.
+NOURL_HOME="$DATA_DIR/two_server_home_nourl"
+mkdir -p "$NOURL_HOME"
+set +e
+out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$NOURL_HOME" \
+  "$LLL_ABS" login -e onboard@lll.test --password "$ONBOARD_PASS" 2>&1)
+rc=$?
+set -e
+[ "$rc" = 2 ] || fail "login without --url beside a .lll.toml url: expected exit 2, got $rc: $out"
+assert_contains "$out" "lll login --url http://127.0.0.1:$B_PORT" "the refusal names the --url to pass"
+b_saw_nothing "login without --url"
+
+# An ordinary command with the home login for A refuses (exit 6) and names
+# the file, instead of sending A's token to B.
+for cmd in "issue list --team ENG" "whoami"; do
+  set +e
+  out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$DATA_DIR/two_server_home_password" \
+    "$LLL_ABS" $cmd 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" = 6 ] || fail "lll $cmd with a home login for another server: expected exit 6, got $rc: $out"
+  assert_contains "$out" "points this command at http://127.0.0.1:$B_PORT, but your saved login is for $URL" \
+    "lll $cmd names the url the saved login is not for"
+  b_saw_nothing "lll $cmd"
+done
+
+# lll up adopts an already-running server only at a url the user chose: a
+# repo file's url may be any listener, and adopting sends it the
+# administrator pair (exported for this suite). B answers /api/health, so
+# it looks like a running server; the boot refuses (exit 4) after asking.
+set +e
+out=$(cd "$HOSTILE" && env -u LLL_URL -u LLL_TOKEN -u LLL_TEAM HOME="$DATA_DIR/two_server_home_password" \
+  "$LLL_ABS" up --no-open --port "$(free_port 40000 59999)" </dev/null 2>&1)
+rc=$?
+set -e
+[ "$rc" = 4 ] || fail "lll up at a repo file's running url: expected exit 4, got $rc: $out"
+assert_contains "$out" "points lll up at http://127.0.0.1:$B_PORT, where a server is already running" \
+  "lll up names the repo file's url it will not adopt"
+grep -v -e '^CONN accepted$' -e '^REQ GET /api/health HTTP/1.1$' "$B_REC" \
+  && fail "lll up sent more than a health check to the repo file's url: $(cat "$B_REC")"
+: > "$B_REC"
+kill "$B_PID" 2>/dev/null || true
+
 # --url takes a base url, not a hostname; the refusal shows the shape.
 set +e
 out=$(cd "$NEUTRAL" && env -u LLL_URL -u LLL_TOKEN HOME="$LOGIN_HOME" \
@@ -3505,7 +3639,9 @@ set -e
 assert_contains "$out" "$URL" "an HTTP-status error names the server"
 DEAD_PORT=$(free_port 20000 39999)
 set +e
-out=$(cd "$NEUTRAL" && env -u LLL_TOKEN LLL_URL="http://127.0.0.1:$DEAD_PORT" LLL_TEAM=ENG \
+# LLL_TOKEN rides with LLL_URL: the home login is for $URL, and a home token
+# is never sent to another url (LLL-688).
+out=$(cd "$NEUTRAL" && env LLL_TOKEN=dead-url-token LLL_URL="http://127.0.0.1:$DEAD_PORT" LLL_TEAM=ENG \
   HOME="$LOGIN_HOME" "$LLL_ABS" issue list 2>&1)
 rc=$?
 set -e
@@ -3557,14 +3693,14 @@ echo "e2e: all assertions passed"
 # not a member, so that case says so instead.
 out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" login -e admin@local.dev --password admin-local-123 2>&1) \
+  "$LIN" login --url "$URL" -e admin@local.dev --password admin-local-123 2>&1) \
   && fail "logging in as the superuser should fail"
 assert_contains "$out" "admin identity, not a member" "the admin email is named as such on login"
 assert_not_contains "$out" "--email admin@local.dev --create" "it must not recommend --create with the admin email"
 
 # 7 agents guessed --admin-email/--admin-password on login, having seen them
 # on the sibling commands, where they existed and here they did not.
-out=$(env -u LLL_TOKEN HOME="$DATA_DIR/adminflag" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$DATA_DIR/adminflag" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e flagged@lll.test --password flagged-pass-123 --create \
   --admin-email admin@local.dev --admin-password admin-local-123) \
   || fail "login --create with admin flags: $out"
@@ -3674,7 +3810,7 @@ out=$(LLL_URL=$URL "$LIN" member set-password e2e-agent \
   --admin-email admin@local.dev --admin-password admin-local-123) \
   || fail "scripted set-password: $out"
 assert_contains "$out" "password set for e2e-agent" "set-password takes --password and admin flags"
-out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login \
+out=$(env -u LLL_TOKEN HOME="$CREATE_HOME" LLL_URL=$URL "$LIN" login --url "$URL" \
   -e e2e-agent@lll.test --password rotated-pass-123) \
   || fail "the rotated password does not log in: $out"
 # Too short is one sentence, not a raw PocketBase validation blob.

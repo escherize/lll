@@ -199,6 +199,13 @@ check what is configured with 'lll config list'"),
     ctx
   }
 
+  if !starting {
+    let home = ctx.settings.load_home().map_err(pb.failed)?
+    if let Some(why) = adopt_refusal(db_url, src.url, home.url) {
+      return Err(pb.fail(pb.ErrorKind.Refused, why))
+    }
+  }
+
   let mut api_line = f"api    {db_url} (already running)"
 
   let (email, pass) = ctx.settings.admin().map_or(("", ""), |admin| (admin.email, admin.password))
@@ -364,10 +371,13 @@ password in its own data directory's .lll-admin.json."),
     )
   }
   if demo {
-    let token_in_file = match src.token {
+    // A home token held back from this url (LLL-688) is still somebody's
+    // login: the demo must not overwrite it.
+    let token_from_file = match src.token {
       Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) => true,
       Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => false,
     }
+    let token_in_file = token_from_file || ctx.settings.withheld().is_some()
     seed_demo(ctx, team, member.name, db_url, token_in_file)?
   }
   let chosen = free_port(web_port)
@@ -402,7 +412,7 @@ password in its own data directory's .lll-admin.json."),
         db_url,
       },
     )
-    for line in log_cli_in(ctx, member.name, db_url, plan, src.token)? {
+    for line in log_cli_in(ctx, member.name, db_url, plan, src.token, (cfg.url, src.url))? {
       fmt.Println(line)
     }
   }
@@ -528,6 +538,28 @@ fn server_key(url: string) -> string {
   u
 }
 
+/// Pure. Why `lll up` must not adopt the server already answering at
+/// `db_url`, or None (LLL-688). Adopting sends it the administrator pair
+/// and the boot's tokens. A url a repo file chose may be anything listening
+/// on this machine, and a data-dir marker cannot vouch for it: a repo can
+/// ship its own ./pb/pb_data with a marker and a pair. A repo url that is
+/// the home config's url was chosen by the home file too, so it is adopted.
+///
+/// The way out leads with removing the repo's url: the listener may be
+/// someone else's, and adopting it hands over the admin credentials.
+fn adopt_refusal(db_url: string, source: Option<config.Source>, home_url: string) -> Option<string> {
+  if config.same_url(db_url, home_url) { return None }
+  match source {
+    Some(config.Source.RepoFile(path)) => Some(
+      f"{path} points lll up at {db_url}, where a server is already running, and nothing else here chose that url
+if you did not choose this url: remove the url line from {path}
+only if that server is yours: LLL_URL={db_url} lll up (this sends your admin credentials to it)",
+    ),
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => None,
+  }
+}
+
 fn loopback_bind(settings: config.Settings) -> bool {
   let bind = settings.bind()
   bind == "localhost" || net.ParseIP(bind).IsLoopback()
@@ -613,13 +645,16 @@ fn cli_login_plan(s: CliState) -> CliLogin {
 }
 
 /// Carry out the plan and return the banner lines. The member token to save
-/// is the one board_identity handed `ctx`.
+/// is the one board_identity handed `ctx`. `configured` is the url this boot
+/// started with and where it came from: one set above the home config still
+/// wins after the save (LLL-688).
 fn log_cli_in(
   ctx: pb.Client,
   name: string,
   db_url: string,
   plan: CliLogin,
   token_source: Option<config.Source>,
+  configured: (string, Option<config.Source>),
 ) -> Result<Slice<string>, pb.CliError> {
   match plan {
     CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {config.origin(token_source)}"]),
@@ -637,6 +672,10 @@ fn log_cli_in(
         },
         Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) |
           Some(config.Source.Default) | None => (),
+      }
+      let (url, url_source) = configured
+      if let Some(notice) = shadowed_url_notice(db_url, url, url_source) {
+        lines = lines.append(f"cli    {notice}")
       }
       Ok(lines)
     },

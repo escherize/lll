@@ -81,15 +81,17 @@ Precedence: env vars (LLL_URL, LLL_TEAM, LLL_SORT, LLL_WEB_URL,
 LLL_TOKEN) > the repo's .lll.toml > ~/.config/lll/lll.toml. The files layer:
 each supplies the keys it names, so the committed repo file carries 'team' and
 nothing else while 'url' and 'token' stay per-machine. 'lll attach' writes the
-repo file.
+repo file. The saved token is sent only to the url saved beside it: when
+the repo file or LLL_URL names another server, commands there refuse
+rather than send it.
 
-Save or replace the token with {token_save_hint()}."
+Save or replace the token with {token_save_hint("lll login")}."
 }
 
 /// How to save a token you already hold; named by `config --help` and by
 /// `config set token`.
-fn token_save_hint() -> string {
-  "'lll login --token -' (reads it from stdin)"
+fn token_save_hint(login: string) -> string {
+  f"'{login} --token -' (reads it from stdin)"
 }
 
 /// Set a machine-level endpoint, without changing repo config.
@@ -99,7 +101,9 @@ fn config_set(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // 1.0 fleet: three agents concluded LLL_TOKEN or a hand edit were the only
   // ways to save a token.
   if input.parsed.first() == "token" {
-    return Err(flags.usage_error(f"the token is saved by logging in: {token_save_hint()}"))
+    let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
+    let login = pb.login_command(cfg.url, src.url)
+    return Err(flags.usage_error(f"the token is saved by logging in: {token_save_hint(login)}"))
   }
   if input.parsed.positional_count() != 2 { return Err(flags.usage_error(usage)) }
   let key = input.parsed.first()

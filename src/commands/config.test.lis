@@ -99,6 +99,6 @@ fn a_revoked_token_is_replaced_where_it_came_from() {
     (None, Some("tokens minted before this change are revoked, including the one from ; unset LLL_TOKEN if it is set, then log in again with: lll login --email a@x")),
   ]
   for (source, notice) in rows {
-    assert kept_token_notice(source, "a@x") == notice
+    assert kept_token_notice(source, "a@x", "lll login") == notice
   }
 }

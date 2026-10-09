@@ -160,6 +160,40 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   --create` without `--password`) reads the prompt's answer from the same
   stdin; the answer was lost and the command said there was no password.
 
+### Security
+
+- A token goes only to the server it was saved for (LLL-688). The config
+  layers combine key by key, so a `.lll.toml` naming only `url = B`, or
+  `LLL_URL=B`, paired B with the home config's token for A: every command
+  run there, and the team check after `lll login --url A`, sent A's token
+  to B. A cloned repo could collect tokens that way. Now:
+  - the home config's token is sent only when the effective url is the
+    home config's url (a trailing slash aside; `localhost` and `127.0.0.1`
+    differ), or the default when it names none. Otherwise a command that
+    needs it exits 6, names the file, variable or flag that chose the url,
+    and leads with removing it; logging in there is offered last, with what
+    it sends and replaces. A token from `LLL_TOKEN` or a repo file still
+    goes to the url configured with it;
+  - `lll login` sends every request after it holds a token to the server it
+    logged in to, and says when a repo file or `LLL_URL` will send later
+    commands elsewhere. `lll up` says the same after it saves its CLI login;
+  - `lll login` without `--url` exits 2 when a repo file or `LLL_URL` chose
+    the url, instead of sending the password or token there;
+  - `lll member invite` sends the superuser token to, and prints, only a
+    `web_url` saved in the home config for this server, or given by flag;
+  - `lll board` (and `--team`, `-w`) no longer puts the board token in a
+    link to a repo file's `web_url`: that `web_url` counts as none;
+  - `lll up` no longer adopts a server already running at a url a repo file
+    chose, which received the administrator pair (including the generated
+    one in `./pb/pb_data`), unless the home config names the same url. It
+    exits 4, leads with removing the repo's url line, and offers
+    `LLL_URL=<url> lll up` only for a server that is yours, saying it sends
+    the admin credentials. With nothing running there it starts its own
+    server, as before;
+  - requests no longer follow redirects. Go's default client kept the
+    `Authorization` header for the same host on another port and re-sent a
+    login POST body on 307. A redirect is now an error naming its target.
+
 ### Fixed
 
 - Every bad command line exits 2, as the contract says. These exited 1: an
