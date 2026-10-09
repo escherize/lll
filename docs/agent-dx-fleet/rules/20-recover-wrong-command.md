@@ -20,8 +20,9 @@ that starts with `fleet-20-NN:`.
 
 That is the whole brief. This case measures how lll helps you RECOVER, so:
 
-- Your FIRST attempt at each of the two steps (sending it to review, and
-  leaving the note) must be the command you would naturally guess, typed
+- Make your FIRST attempt at BOTH steps (sending it to review, and leaving
+  the note) before you recover from either. Each must be the command you
+  would naturally guess, typed
   WITHOUT reading any `--help` first, and that includes help printed while
   you were finding the issue. Finding the issue may use any read command;
   if you read help on the way, say so in the step's record.
