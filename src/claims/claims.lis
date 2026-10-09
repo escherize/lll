@@ -1,4 +1,5 @@
 import "go:net/url"
+import "display"
 import "models"
 import "pb"
 import "query"
@@ -36,4 +37,22 @@ pub fn for_team(ctx: pb.Client, scope: query.TeamScope) -> Result<Slice<models.C
     page += 1
   }
   Ok(result)
+}
+
+/// A refusal models.transition decided before any request, as the error the
+/// server gives a raw API client for the same write: its words and its code,
+/// so callers branch on it as on the server's. `held` is the claim the
+/// transition was planned from.
+pub fn refused(r: models.Refusal, hold: models.Hold, held: Option<models.Claim>) -> pb.CliError {
+  // The server names a holder the caller may not see "a hidden member"
+  // (gopb rosterName).
+  let holder = held.map_or("an unknown member", |h| {
+    let name = if h.expand.member.name == "" { "a hidden member" } else { h.expand.member.name }
+    display.byline(name, h.agent)
+  })
+  let code = match r {
+    models.Refusal.NeedsForce => pb.ServerCode.NeedsForce,
+    models.Refusal.KeepNotHolder => pb.ServerCode.ClaimHeld,
+  }
+  pb.CliError { kind: pb.ErrorKind.Refused, status: 0, code: Some(code), message: r.message(hold, holder) }
 }

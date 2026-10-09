@@ -1,4 +1,5 @@
 import "records"
+import "claims"
 import "go:html/template"
 import "go:net/http"
 import "go:strings"
@@ -227,7 +228,7 @@ fn create_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   Ok(signals_event("{\"ni_open\": false, \"new_title\": \"\"}"))
 }
 
-fn state_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
+fn state_write(ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   // FormValue, not PostFormValue: drag-and-drop posts key/state as query params.
   let key = r.FormValue("key")
   let state = query.state(r.FormValue("state"))?
@@ -242,7 +243,18 @@ fn state_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   // team's board must compute the midpoint against that team's column, not
   // the boot team's.
   let sort = reorder_sort(who.reads, issue, state, before, issue.team)?
-  patch_issue(who, active, writes.IssuePatch { state: Some(state), sort: Some(sort), ..writes.IssuePatch.unchanged() })
+  // A drag is a move through the transition table (LLL-685), read as the
+  // viewer: the viewer's own finish releases its hold, anyone else's stays.
+  // The board writes as the board's member for the board token.
+  let held = claims.fetch(who.reads, issue.id)?
+  let me = match who.member {
+    Some(m) => Some(m.id),
+    None => records.token_member(ctx.token()),
+  }
+  let hold = models.hold_of(held, me, "")
+  let effects = models.transition(issue.state(), hold, models.Ask.Move { to: state, keep_claim: false })
+    .map_err(|refusal| claims.refused(refusal, hold, held))?
+  patch_issue(who, active, writes.IssuePatch { state: Some(effects), sort: Some(sort), ..writes.IssuePatch.unchanged() })
 }
 
 /// New manual position for `issue` landing in `state` before the record id

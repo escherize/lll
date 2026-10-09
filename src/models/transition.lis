@@ -58,6 +58,22 @@ pub enum Refusal {
   KeepNotHolder,
 }
 
+impl Refusal {
+  /// The refusal in the server's words (gopb releaseAuthority and closeIssue,
+  /// as PocketBase sentences them), so a refusal decided here before any
+  /// request reads as the one the server gives a raw API client. `holder` is
+  /// the holder's byline as the caller may see it.
+  pub fn message(self, hold: Hold, holder: string) -> string {
+    match self {
+      Refusal.NeedsForce => {
+        let whose = if hold == Hold.OtherSession { "another session's" } else { "another member's" }
+        f"The claim is held by {holder}; releasing {whose} claim needs force."
+      },
+      Refusal.KeepNotHolder => f"The claim is held by {holder}; only the holder keeps a claim while closing, and closing anyone else's claimed issue releases it.",
+    }
+  }
+}
+
 /// The writes a state change makes: the state, and what becomes of the
 /// claim. Only `transition` builds one; the fields are private so nothing
 /// else can.
