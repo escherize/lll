@@ -13,10 +13,23 @@ planned transition:
   bypasses in a copy of the tree and expects `lis check` to fail on each.
 - Inside src/models/ the privacy does not hold, so an Effects or StateWrite
   is built only in src/models/transition.lis.
-- What the types cannot see is text: a hand-written JSON body, a Map body, a
-  json attribute naming the field. No string literal in src/writes/ may
-  contain the word "state", and no struct there may have a field named
-  state of any other type.
+- What the types cannot see is text and other structs:
+  - No string literal in src/writes/ or src/pb/ (the client the layer sends
+    through) may contain the word "state": a hand-written JSON body, a Map
+    key, a json attribute.
+  - src/writes/ builds no Map, whose keys are text a concatenation can hide.
+  - Every struct in src/ that puts a state on the wire (a state field of any
+    type but the planned ones, or a json attribute naming "state") is a
+    state type. src/writes/ may name one only where STATE_TYPES_ALLOWED says
+    why: NewIssue on the create path, the read Issue where it is decoded.
+    A struct with an unplanned state field declared in src/writes/ itself
+    fails outright.
+
+This is a lint over source text, not a proof: a value of a state type can
+still reach src/writes/ through a function that returns one without naming
+the type. What enforces the claim rule is the server (gopb TransitionClaim,
+read by /close and finishReleases); this test keeps the client from
+growing a second way to set a state by accident.
 
 `//` comments are skipped. Tests are skipped: they may build fixtures.
 """
@@ -38,6 +51,18 @@ DECLARATION = re.compile(r'(\b(struct|impl)\s+|->\s*)(Effects|StateWrite)\s*\{$'
 STRUCT = re.compile(r'(?:pub\s+)?struct\s+(\w+)\s*\{(.*?)\n\}', re.S)
 STATE_FIELD = re.compile(r'^\s*(?:pub\s+)?state\s*:\s*([^,\n]*)', re.M | re.I)
 PLANNED_TYPES = ('Option<models.Effects>', 'Option<models.StateWrite>')
+JSON_STATE = re.compile(r'#\[json\(\s*"state"')
+FN = re.compile(r'\bfn\s+(\w+)')
+MAP = re.compile(r'\bMap\b')
+
+# (qualified type, function in src/writes/) -> why that function may name it.
+STATE_TYPES_ALLOWED = {
+    ('models.NewIssue', 'create_issue'): 'the create path: a new issue starts in a state, with no claim to transition',
+    ('models.NewIssue', 'create_issue_once'): 'the create path, with an idempotency key',
+    ('models.Issue', 'update_issue'): 'the record as read; the update sends IssueFields, never the record',
+    ('models.Issue', 'reread'): 'decoded from the server after a 412, never encoded',
+}
+
 STRING = re.compile(r'(?:\bf|\br)?"((?:[^"\\]|\\.)*)"')
 STATE_WORD = re.compile(r'state', re.I)
 
@@ -85,6 +110,45 @@ def state_literals(files):
     return found
 
 
+def state_types(files):
+    """{qualified name: (module, bare name)} for every struct that puts a state
+    on the wire. A src/writes/ struct is named bare there, so its key is bare."""
+    found = {}
+    for rel, text in files:
+        module = rel.split('/')[1]
+        for m in STRUCT.finditer(text):
+            body = m.group(2)
+            unplanned = any(f.group(1).strip() not in PLANNED_TYPES for f in STATE_FIELD.finditer(body))
+            if unplanned or JSON_STATE.search(body):
+                name = m.group(1)
+                found[name if module == 'writes' else f'{module}.{name}'] = (module, name)
+    return found
+
+
+def state_type_uses(files, types):
+    """Names of a state type in src/writes/ outside STATE_TYPES_ALLOWED."""
+    found = []
+    for rel, text in files:
+        for qualified, (module, name) in types.items():
+            pattern = rf'(?<![\w.]){name}\b' if module == 'writes' else rf'\b{module}\.{name}\b'
+            for m in re.finditer(pattern, text):
+                fns = FN.findall(text, 0, m.start())
+                fn = fns[-1] if fns else ''
+                if (qualified, fn) in STATE_TYPES_ALLOWED:
+                    continue
+                line = text.count('\n', 0, m.start()) + 1
+                found.append(f'{rel}:{line}: {fn or "top level"} names {qualified}, which carries a state; send IssueFields from a planned Effects, or add it to STATE_TYPES_ALLOWED with the reason')
+    return found
+
+
+def map_bodies(files):
+    found = []
+    for rel, text in files:
+        for m in MAP.finditer(text):
+            found.append(f'{rel}:{text.count(chr(10), 0, m.start()) + 1}: builds a Map; a write body is a struct')
+    return found
+
+
 class TransitionRatchetTest(unittest.TestCase):
     def test_effects_and_state_writes_are_built_only_by_the_transition(self):
         found = built_outside(sources(ROOT, ('src/',)))
@@ -92,8 +156,28 @@ class TransitionRatchetTest(unittest.TestCase):
 
     def test_no_state_on_the_wire_except_a_planned_one(self):
         writes = list(sources(ROOT, ('src/writes/',)))
-        found = state_fields(writes) + state_literals(writes)
+        types = state_types(sources(ROOT, ('src/',)))
+        found = (state_fields(writes) + state_literals(list(sources(ROOT, ('src/writes/', 'src/pb/'))))
+                 + map_bodies(writes) + state_type_uses(writes, types))
         self.assertEqual(found, [], '\n'.join(found))
+
+    def test_the_state_types_are_the_known_ones(self):
+        # If this list grows, the new type is one src/writes/ must not send.
+        types = state_types(sources(ROOT, ('src/models/', 'src/writes/', 'src/pb/', 'src/claims/')))
+        self.assertEqual(sorted(types), ['models.Issue', 'models.NewIssue'])
+
+    def test_each_review_bypass_is_seen(self):
+        # N1: a new struct with a state field, declared elsewhere and sent from writes.
+        n1_types = state_types([('src/models/x.lis', 'pub struct Move {\n  pub state: string,\n}')])
+        self.assertTrue(state_type_uses([('src/writes/x.lis', 'fn send() {\n  let body = encode(models.Move { state: s }, "m")?\n}')], n1_types))
+        # N2: a Map body whose key is built so no literal says "state".
+        self.assertTrue(map_bodies([('src/writes/x.lis', 'let mut body = Map.new<string, string>()\nbody["st" + "ate"] = "done"')]))
+        # N3: the existing NewIssue, encoded and sent as a PATCH outside the create path.
+        real = state_types(sources(ROOT, ('src/models/',)))
+        self.assertTrue(state_type_uses([('src/writes/x.lis', 'fn finish(issue: models.NewIssue) {\n  let body = encode(issue, "issue")?\n}')], real))
+        self.assertFalse(state_type_uses([('src/writes/x.lis', 'fn create_issue(issue: models.NewIssue) {\n}')], real))
+        # N4: a helper in the HTTP client that sends a state.
+        self.assertTrue(state_literals([('src/pb/client.lis', 'let _ = self.send_as(c, "PATCH", path, "{\\"state\\":\\"done\\"}", "application/json")')]))
 
     def test_the_update_and_close_writes_take_effects(self):
         issues = (ROOT / 'src/writes/issues.lis').read_text()
