@@ -698,3 +698,9 @@ fn a_second_issue_key_says_one_key_per_call() {
   assert extra_argument("extra", ["FLEET-4"]) == "unexpected argument: 'extra'"
   assert extra_argument("FLEET-5", ["title"]) == "unexpected argument: 'FLEET-5'"
 }
+
+/// Final 1.0 replay, case 20: `issue update KEY status review`.
+#[test]
+fn a_stray_status_word_names_the_state_flag() {
+  assert extra_argument("status", ["FLEET-4"]).contains("use --state <name>")
+}

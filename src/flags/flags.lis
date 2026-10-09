@@ -254,6 +254,10 @@ fn url_default_hint(origin: Option<config.Source>) -> string {
 /// `issue view FLEET-4 FLEET-5` (1.0 fleet, cases 13 and 09): say each verb
 /// takes one key.
 fn extra_argument(arg: string, pos: Slice<string>) -> string {
+  // `issue update KEY status review`: a field typed as a word (final replay, case 20).
+  if arg == "status" || arg == "state" {
+    return f"unexpected argument: '{arg}'; to change the state use --state <name> (states: backlog, todo, in-progress, in-review, done, cancelled)"
+  }
   let key = regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$")
   if key.MatchString(arg) && pos.any(|p| key.MatchString(p)) {
     return f"unexpected argument: '{arg}'; this takes one issue key: run it once per key, or 'lll issue list --json' to read several"

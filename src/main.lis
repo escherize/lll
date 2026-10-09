@@ -309,6 +309,10 @@ fn unknown_command(noun: string, verb: string) -> string {
   }
   // 'lll FLEET-4': a key where the noun goes (case 20).
   if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(noun) {
+    // `lll FLEET-4 status review` wants a change, not a view (final replay, case 20).
+    if verb == "status" || verb == "state" {
+      return f"unknown command: '{noun}' is an issue ID; to change its state use 'lll issue update {noun} --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"
+    }
     return f"unknown command: '{noun}' is an issue ID; to see it use 'lll issue view {noun}'"
   }
   // A member verb typed as a noun, the same mistake shape (fleet case 11 was

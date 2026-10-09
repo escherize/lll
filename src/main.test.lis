@@ -48,3 +48,10 @@ fn a_non_key_second_word_is_not_carried_into_the_suggestion() {
   let msg = unknown_command("comment", "add")
   assert msg.contains("'lll issue comment ...'")
 }
+
+/// Final 1.0 replay, case 20: `lll FLEET-4 status review` wants update.
+#[test]
+fn a_key_then_status_names_update() {
+  assert unknown_command("FLEET-4", "status").contains("lll issue update FLEET-4 --state in-review")
+  assert unknown_command("FLEET-4", "").contains("lll issue view FLEET-4")
+}
