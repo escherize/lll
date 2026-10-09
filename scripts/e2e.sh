@@ -2756,7 +2756,7 @@ out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue release "$CKEY")
 assert_contains "$out" "Released $CKEY (was bryan's)" "release output"
 assert_contains "$out" "cleared assignee" "release reports assignment removal"
 out=$(env $E "$LIN" issue view "$CKEY")
-assert_not_contains "$out" "Claimed:" "release removes the hold"
+assert_contains "$out" "Claimed:   none" "release removes the hold, and view says so"
 assert_contains "$out" "Assignee:  none" "release clears the assignee the claim set"
 out=$(env $E LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue claim "$CKEY")
 assert_contains "$out" "Claimed $CKEY for carol" "a released issue can be claimed again"

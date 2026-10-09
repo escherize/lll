@@ -118,7 +118,8 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
         let renewed = if held.updated == "" || held.updated == held.created { "" } else { f", renewed {display.absolute(held.updated)}" }
         Some(f"- **Claimed:** {holder} (since {display.absolute(held.created)}{renewed})")
       },
-      None => None,
+      // Said, not omitted: two 1.0 fleet agents read a missing row as held.
+      None => Some("- **Claimed:** none"),
     }
     if !source.is_empty() || claim_line.is_some() {
       fmt.Println("")
@@ -170,9 +171,13 @@ fn view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // who it is for, Claimed says who is holding it right now, and only the
   // latter is exclusive.
   let claim = await_issue_view(reads.claim, "claim")?
-  if let Some(held) = claim {
-    let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
-    fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
+  // Always printed: two 1.0 fleet agents read a missing row as claimed.
+  match claim {
+    Some(held) => {
+      let holder = display.member_name(held.member, held.expand.member.name, "an unknown member")
+      fmt.Println(f"Claimed:   {display.byline(holder, held.agent)} ({display.relative(held.created)})")
+    },
+    None => fmt.Println("Claimed:   none"),
   }
   // The work-site slot (TASK-205), under the claim holder: the claim says
   // who, this says where. "(last seen)" once the work is over.

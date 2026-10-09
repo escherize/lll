@@ -56,11 +56,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   --url) and the fix: `lll config set url URL` or `lll login --url URL`.
 - `lll config --help` names `lll login --token -` for saving a token, and
   `lll config set token` refuses with that pointer (exit 2).
-- `lll bot WORD`, where WORD is neither a verb nor a `bot-` name, is an
+- `lll bot WORD`, where WORD is another noun's verb (`list`, `read`), is an
   unknown command (exit 2) that names create, rotate and `lll member list`.
-  It suggested creating a bot named after the word.
+  It suggested creating a bot named after the verb.
 - An unknown verb that is a top-level command names it: `lll member whoami`
   says "did you mean 'lll whoami'?".
+- `issue view` always prints the claim row, `Claimed:   none` when nothing
+  is held, and `--raw` prints `- **Claimed:** none`. Two fleet agents read
+  a missing row as claimed.
+- A refused `--if-unchanged-since` update prints the same command with the
+  issue's current stamp, ready to rerun. `--description-append` help says it
+  applies at write time and needs no stamp beside concurrent appends.
+- `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
+  instead of the update usage.
 
 ### Fixed
 

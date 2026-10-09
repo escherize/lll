@@ -339,9 +339,10 @@ pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // or "create": the server reserves bot- * names, so the forms cannot
   // collide.
   let verb = args.get(2).unwrap_or("")
-  // A word that is neither a verb nor a bot name is a verb guess ('lll bot
-  // list', 1.0 fleet); suggesting a bot named after it would be wrong.
-  if verb != "" && verb != "rotate" && verb != "create" && !verb.starts_with("-") && !verb.starts_with("bot-") {
+  // A verb some noun has ('lll bot list', 'lll bot read', 1.0 fleet) is a
+  // verb guess, not a bot name: suggesting a bot named after it would be
+  // wrong. Any other word falls through to the bot- prefix refusal.
+  if verb != "rotate" && verb != "create" && is_a_verb(verb) {
     return Err(flags.usage_error(f"unknown bot command '{verb}'; bot has create and rotate; list bots with 'lll member list'"))
   }
   match verb {
@@ -349,6 +350,11 @@ pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     "create" => bot_create(ctx, args, 3, "lll bot create"),
     _ => bot_create(ctx, args, 2, "lll bot"),
   }
+}
+
+/// True when some noun's table spells `word` as a verb.
+fn is_a_verb(word: string) -> bool {
+  flags.top_level_commands().any(|noun| flags.resolve_command(command_table(noun), word).is_some())
 }
 
 fn bot_create(ctx: pb.Client, args: Slice<string>, start: int, command: string) -> Result<(), pb.CliError> {

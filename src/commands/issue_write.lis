@@ -140,6 +140,10 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let usage = input.usage
   let p = input.parsed
   let id = p.first()
+  if p.given("--claim") {
+    let key = if id == "" { "KEY" } else { id }
+    return Err(flags.usage_error(f"update does not claim; to claim, run: lll issue claim {key}"))
+  }
   let mut state: Option<models.IssueState> = None
   if p.given("--state") { state = Some(query.state(p.one("--state"))?) }
   let mut priority: Option<models.Priority> = None
@@ -228,7 +232,8 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // server and answers 412 instead of clobbering.
   if let Some(stamp) = since {
     if issue.updated != stamp {
-      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {display.rfc3339(issue.updated)}; read it again ('lll issue view {key} --json' carries updated) and retry with that stamp"))
+      let now = display.rfc3339(issue.updated)
+      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {now}; check what changed ('lll issue view {key}'), then\nretry with the current stamp: {retry_command(input.args, now)}"))
     }
   }
   // Surgical description edits (LLL-391, after veans): a replace must match
@@ -337,7 +342,11 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
       }
       return Err(e.with_message(f"{key}: {e.message}"))
     },
-    Err(failure) => return Err(update_failure(key, failure, since.is_some())),
+    Err(failure) => {
+      let refused = update_failure(key, failure, since.is_some())
+      if since.is_none() { return Err(refused) }
+      return Err(with_retry(ctx, key, input.args, refused))
+    },
   }
   let mut released = ""
   if let Some(t) = result {
@@ -364,6 +373,36 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
 fn assignee_value(p: flags.Parsed) -> string {
   if p.given("--assignee") && strings.TrimSpace(p.one("--assignee")) == "" { return "none" }
   p.one("--assignee")
+}
+
+/// A stale --if-unchanged-since refusal, plus the same command with the
+/// issue's current stamp, so a retry needs no extra read (1.0 fleet). Other
+/// refusals, and a failed re-read, leave the message as it was.
+fn with_retry(ctx: pb.Client, key: string, args: Slice<string>, refused: pb.CliError) -> pb.CliError {
+  let pb.ErrorKind.Refused = refused.kind else { return refused }
+  let Ok(now) = records.fetch_issue(ctx, key) else { return refused }
+  refused.with_message(f"{refused.message}\nretry with the current stamp: {retry_command(args, now.updated)}")
+}
+
+/// `args` again, shell-quoted, with the --if-unchanged-since value replaced
+/// by `stamp`.
+fn retry_command(args: Slice<string>, stamp: string) -> string {
+  let mut out = ["lll"]
+  let mut i = 1
+  while let Some(arg) = args.get(i) {
+    if arg == "--if-unchanged-since" {
+      out = out.append(arg, flags.shell_argument(stamp))
+      i += 2
+      continue
+    }
+    if arg.starts_with("--if-unchanged-since=") {
+      out = out.append(f"--if-unchanged-since={flags.shell_argument(stamp)}")
+    } else {
+      out = out.append(flags.shell_argument(arg))
+    }
+    i += 1
+  }
+  strings.Join(out, " ")
 }
 
 /// The refusal for an update the write layer could not land on `key`.

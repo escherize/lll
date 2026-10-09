@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -191,6 +192,17 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         # --- --raw names the holder (LLL-638) ---
         raw = code(0, 'issue', 'view', 'CON-2', '--raw').stdout
         assert '- **Claimed:** contract-owner (agent wt-a) (since ' in raw, raw
+        # Unclaimed is said, not omitted (1.0 fleet, case 16).
+        assert '- **Claimed:** none' in code(0, 'issue', 'view', 'CON-3', '--raw').stdout
+        assert 'Claimed:   none' in code(0, 'issue', 'view', 'CON-3').stdout
+        # A stale stamp's refusal prints the retry with the current stamp; it runs.
+        stale = code(4, 'issue', 'update', 'CON-3', '-t', 'third r', '--if-unchanged-since', '2020-01-01T00:00:00.000Z')
+        retry = [l for l in stale.stderr.splitlines() if 'retry with the current stamp: ' in l]
+        assert retry, stale.stderr
+        code(0, *shlex.split(retry[0].split('retry with the current stamp: ', 1)[1])[1:])
+        assert as_json('issue', 'view', 'CON-3', '--json')['title'] == 'third r'
+        refused = code(2, 'issue', 'update', 'CON-3', '--claim')
+        assert 'to claim, run: lll issue claim CON-3' in refused.stderr and 'usage:' not in refused.stderr, refused.stderr
 
         # --- time flags take both forms and compare instants ---
         stamp = as_json('issue', 'view', 'CON-3', '--json')['updated']

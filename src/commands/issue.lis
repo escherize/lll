@@ -225,7 +225,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
       name: "--description-append",
       value: true,
       hint: "text",
-      help: "append text to the description on its own line",
+      help: "append text to the description on its own line; applied to the\ncurrent description at write time, so it is safe alongside concurrent\nappends without --if-unchanged-since",
       ..,
     },
     flags.Flag {
@@ -262,6 +262,9 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     reason_flag("update"),
     agent_flag(),
     flags.Flag { name: "--json", help: "print the issue afterwards as JSON: the object 'lll issue list --json' prints per item", .. },
+    // Hidden: declared only so update can refuse it with the verb that
+    // claims (1.0 fleet: claiming by update was guessed three times).
+    flags.Flag { name: "--claim", hidden: true, help: "refused: 'lll issue claim KEY' claims", .. },
   ]...))
 }
 
