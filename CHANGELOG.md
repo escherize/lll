@@ -52,12 +52,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - `issue next` says why it has nothing to offer when the reason is not an
   empty board (LLL-685): ready issues all claimed by someone else are named
   as claimed, and open issues all waiting on blockers are named as blocked,
-  pointing at `lll issue list --blocked`. Both used to read "the agenda is
+  pointing at `lll issue list --blocked` ("no other ready issues" when
+  you hold a ready one yourself). Both used to read "the agenda is
   empty". The all-assigned and own-claims wordings are unchanged.
-- `issue close` over another holder's claim without `--force`, or with
-  `--keep-claim`, is refused before any request, from the same transition
-  table the server enforces (LLL-685). The message and exit code are
-  unchanged.
 - Breaking, toward less surprise: one rule for finishing a claimed issue.
   When the holder moves it to done or cancelled by any path (`issue close`,
   `issue update --state done|cancelled`, the board's state picker, a native
