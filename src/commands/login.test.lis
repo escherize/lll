@@ -41,25 +41,23 @@ fn other_unknown_arguments_keep_the_short_refusal() {
 // elsewhere would hand the token over and save the stranger's answer.
 #[test]
 fn login_renewal_needs_the_home_token_and_the_home_url() {
-  let home = "/h/lll/lll.toml"
   let file = Some(config.Source.HomeFile("/h/lll/lll.toml"))
   let saved = "https://lll.example"
-  assert renews_home_login(config.Sources { token: file, url: file, .. }, home, saved, saved)
+  assert renews_home_login(config.Sources { token: file, url: file, .. }, saved, saved)
   // url is the default and the home config names none
-  assert renews_home_login(config.Sources { token: file, url: Some(config.Source.Default), .. }, home, "", "http://127.0.0.1:8090")
+  assert renews_home_login(config.Sources { token: file, url: Some(config.Source.Default), .. }, "", "http://127.0.0.1:8090")
   // the token is not the home login: never renewed, whatever the url
-  assert !renews_home_login(config.Sources { token: Some(config.Source.Env("LLL_TOKEN")), url: file, .. }, home, saved, saved)
-  assert !renews_home_login(config.Sources { token: Some(config.Source.RepoFile("/repo/.lll.toml")), url: file, .. }, home, saved, saved)
+  assert !renews_home_login(config.Sources { token: Some(config.Source.Env("LLL_TOKEN")), url: file, .. }, saved, saved)
+  assert !renews_home_login(config.Sources { token: Some(config.Source.RepoFile("/repo/.lll.toml")), url: file, .. }, saved, saved)
 }
 
 // LLL-653: automation sets LLL_URL on every call. When it names exactly the
 // home config's url the token goes to the server that issued it, so renew.
 #[test]
 fn login_renewal_follows_an_lll_url_equal_to_the_home_url() {
-  let home = "/h/lll/lll.toml"
   let file = Some(config.Source.HomeFile("/h/lll/lll.toml"))
   let saved = "https://lll.example"
-  assert renews_home_login(config.Sources { token: file, url: Some(config.Source.Env("LLL_URL")), .. }, home, saved, saved)
+  assert renews_home_login(config.Sources { token: file, url: Some(config.Source.Env("LLL_URL")), .. }, saved, saved)
 }
 
 // LLL-653 keeps the LLL-441 review's rule: any other url, however close,
@@ -67,7 +65,6 @@ fn login_renewal_follows_an_lll_url_equal_to_the_home_url() {
 // normalisation can widen it.
 #[test]
 fn login_renewal_refuses_every_url_that_is_not_byte_equal_to_the_home_url() {
-  let home = "/h/lll/lll.toml"
   let file = Some(config.Source.HomeFile("/h/lll/lll.toml"))
   let saved = "http://127.0.0.1:8090"
   let near_misses = [
@@ -84,11 +81,11 @@ fn login_renewal_refuses_every_url_that_is_not_byte_equal_to_the_home_url() {
   ]
   for url in near_misses {
     for from in [Some(config.Source.Env("LLL_URL")), Some(config.Source.RepoFile("/repo/.lll.toml"))] {
-      assert !renews_home_login(config.Sources { token: file, url: from, .. }, home, saved, url)
+      assert !renews_home_login(config.Sources { token: file, url: from, .. }, saved, url)
     }
   }
   // no saved url: only the default is the home config's server
-  assert !renews_home_login(config.Sources { token: file, url: Some(config.Source.Env("LLL_URL")), .. }, home, "", "https://other.example")
+  assert !renews_home_login(config.Sources { token: file, url: Some(config.Source.Env("LLL_URL")), .. }, "", "https://other.example")
 }
 
 #[test]
