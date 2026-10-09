@@ -540,6 +540,8 @@ fn issue_synonym(verb: string) -> Option<string> {
     "ls" => "'lll issue list'",
     "rm" | "remove" => "'lll issue delete KEY-123'",
     "comments" => "'lll issue comment KEY-123' lists them; add one with a body after the key",
+    "note" | "reply" => "'lll issue comment KEY-123 \"body\"' adds one",
+    "review" => "'lll issue update KEY-123 --state in-review' sends it to review",
     "depends" | "dep" | "blocked-by" | "blockedby" => "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start",
     _ => "",
   }

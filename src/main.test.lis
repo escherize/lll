@@ -24,3 +24,12 @@ fn unknown_command_keeps_the_plural_and_generic_branches() {
   assert unknown_command("issues", "list").contains("'lll issue list'")
   assert unknown_command("wibble", "create").contains("see 'lll --help'")
 }
+
+/// 1.0 fleet case 20: five of ten agents typed 'lll read KEY', one 'lll FLEET-4'.
+#[test]
+fn an_issue_alias_or_key_as_the_command_names_the_issue_verb() {
+  assert unknown_command("read", "FLEET-4").contains("it is an issue verb: 'lll issue view FLEET-4'")
+  assert unknown_command("show", "FLEET-4").contains("'lll issue view FLEET-4'")
+  assert unknown_command("FLEET-4", "").contains("is an issue ID; to see it use 'lll issue view FLEET-4'")
+  assert unknown_command("frobnicate", "") == "unknown command: 'frobnicate' (see 'lll --help')"
+}

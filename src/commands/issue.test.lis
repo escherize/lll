@@ -678,3 +678,12 @@ fn an_empty_agenda_names_my_own_held_claims() {
   assert own_claims_note([]) == ""
   assert own_claims_note(["FLEET-8", "FLEET-9"]).contains("you hold claims on FLEET-8, FLEET-9")
 }
+
+/// 1.0 fleet case 20: 'issue note' and 'issue review' name the real verbs.
+#[test]
+fn note_and_review_point_at_comment_and_in_review() {
+  let assert Some(note) = issue_synonym("note")
+  assert note.contains("lll issue comment KEY-123")
+  let assert Some(review) = issue_synonym("review")
+  assert review.contains("--state in-review")
+}

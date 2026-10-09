@@ -1,6 +1,7 @@
 import "go:fmt"
 import "go:github.com/escherize/lll/docs"
 import "go:os"
+import "go:regexp"
 import "go:strings"
 
 import "commands"
@@ -261,13 +262,19 @@ fn unknown_command(noun: string, verb: string) -> string {
     }
   }
   for c in commands.issue_commands() {
-    if c.name == noun {
+    // An accepted alias counts too: 'lll read KEY' (five of ten 1.0 fleet
+    // agents, case 20) names 'issue view', which also takes 'read'.
+    if c.name == noun || (noun != "" && (c.alias == noun || c.hidden_alias == noun)) {
       // 'lll comment create' is the common shape of this mistake; dropping
       // the typed verb here, as the plural branch once did, hid the half
       // the user had right. So the verb rides along (LLL-313).
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {c.name}{rest}' (see 'lll issue {c.name} -h')"
     }
+  }
+  // 'lll FLEET-4': a key where the noun goes (case 20).
+  if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(noun) {
+    return f"unknown command: '{noun}' is an issue ID; to see it use 'lll issue view {noun}'"
   }
   // A member verb typed as a noun, the same mistake shape (fleet case 11 was
   // 'lll invite', which is now its own noun and points back at member invite).
