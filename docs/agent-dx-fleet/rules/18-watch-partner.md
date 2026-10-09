@@ -23,6 +23,10 @@ Role A watches the board live; role B makes changes A must see. Shared
 issue: `Watch handshake (workers AA and BB)`.
 
 Role A (odd NN):
+NN and PP are always TWO digits, zero-padded: worker 9 is `09`, so A's
+comment is `fleet-18-09: watching`, never `fleet-18-9`. If a bounded wait
+times out, stop and report blocked; do not continue to the next step.
+
 1. Start lll's live event stream for team FLEET in machine-readable form in
    the background, stdout to `fleet-18-NN-watch.jsonl` and stderr to
    `fleet-18-NN-watch.err` in your directory.
@@ -30,8 +34,12 @@ Role A (odd NN):
    comment to the shared issue: `fleet-18-NN: watching`.
 3. Wait (bounded: at most 10 minutes) until B's comment starting
    `fleet-18-PP: done` appears on the shared issue, then a few seconds more.
-4. Stop the stream and confirm the process is gone.
-5. From your log, list the keys of issues B created or changed.
+   While waiting, check the stream's PID is still alive (`kill -0 PID`). If it
+   died, record a failure and set `done` false.
+4. Stop the stream by its own PID (never `pkill`) and confirm the process is
+   gone.
+5. From your log, list the keys of issues B created or changed. If your log
+   holds no create and update for B's key, set `done` false and say so.
 
 Role B (even NN):
 1. Wait (bounded: at most 10 minutes, every 5 seconds) until A's comment
