@@ -30,7 +30,7 @@ from board_startup import wait_for_endpoints
 from real_config_guard import refuse_real_config
 
 COLLECTIONS = ('teams', 'members', 'labels', 'projects', 'issues', 'comments',
-               'docs', 'claims', 'views', 'favorites', 'webhooks')
+               'docs', 'claims', 'views', 'favorites', 'webhooks', 'invites', 'issue_counters')
 TARGET_TITLE = 'Retry loses the issue comment'
 TARGET_BODY = 'A socket reset caused the retry to skip the comment. Preserve one comment and report the saved result.'
 CREATE_BODY = 'Retry a dropped upload once and preserve the saved attachment.'
@@ -39,7 +39,8 @@ BOT_SECONDS = 6 * 3600
 # only. config: nothing from conn.txt, the CLI reads the worker's HOME config.
 # override: like env, but a worker-set LLL_TOKEN or LLL_CONFIG_HOME (inside the
 # worker directory) wins, so a worker can act as a second identity. The URL is
-# always conn.txt's, so no inherited setting can reach another server.
+# always conn.txt's: no inherited setting overrides it, and the wrapper refuses
+# a --url or `config set url` naming any other server, in every mode.
 MODES = ('env', 'noteam', 'config', 'override')
 
 
@@ -85,6 +86,7 @@ def redact(text, values=()):
         if value:
             text = text.replace(value, '[REDACTED]')
     text = re.sub(JWT, '[REDACTED JWT]', text)
+    text = re.sub(r'(temporary password: |--old-password |--password[ =])\S+', r'\1[REDACTED]', text)
     return re.sub(r'board_token=[^\s&]+', 'board_token=[REDACTED]', text)
 
 
@@ -164,6 +166,13 @@ def wrapper_main():
     assert mode in MODES, 'unknown wrapper mode'
     env, hidden = wrapper_env(worker, mode, os.environ)
     args = sys.argv[5:]
+    hidden += [value for flag, value in zip(args, args[1:]) if flag in ('--password', '--old-password', '--admin-password')]
+    if foreign_url(args, connection(worker / 'conn.txt')[0]):
+        raise SystemExit('fleet wrapper: this board is the only server; --url and `config set url` must name conn.txt line 1')
+    # Only a minted credential on stdout reaches the worker unredacted, in override
+    # mode: `bot create|rotate --env > helper.env` (case 15) and the temporary
+    # password of `member invite` (case 19) are what the worker must receive.
+    minted = mode == 'override' and (args[:1] == ['bot'] and '--env' in args or args[:2] == ['member', 'invite'])
     # Streams, so `lll watch` in the background writes as it goes; a signal to
     # this process (kill %1, ^C) reaches the CLI and the call is still audited.
     child = subprocess.Popen([str(binary), *args], cwd=worker, env=env,
@@ -172,15 +181,13 @@ def wrapper_main():
         signal.signal(number, lambda sig, _frame: child.send_signal(sig))
     captured = {'stdout': [], 'stderr': []}
 
-    # The audit is always redacted. The worker sees redacted output too, except
-    # in override mode, where a minted token on stdout (`bot create --env >
-    # helper.env`) is the artifact the worker must receive.
+    # The audit is always redacted.
     def pump(source, sink, name):
-        for raw in iter(source.readline, b''):
-            text = raw.decode(errors='replace')
+        for chunk in iter(source.readline, b''):
+            text = chunk.decode(errors='replace')
             line = redact(text, hidden)
             captured[name].append(line)
-            sink.write(text if mode == 'override' else line)
+            sink.write(text if minted and name == 'stdout' else line)
             sink.flush()
 
     pumps = [threading.Thread(target=pump, args=(child.stdout, sys.stdout, 'stdout')),
@@ -200,6 +207,15 @@ def wrapper_main():
         os.fchmod(output.fileno(), 0o600)
         output.write(json.dumps(entry) + '\n')
     raise SystemExit(code)
+
+
+def foreign_url(args, url):
+    """Whether a call names a server other than the board (--url X, config set url X)."""
+    named = [value for flag, value in zip(args, args[1:]) if flag == '--url']
+    named += [a.removeprefix('--url=') for a in args if a.startswith('--url=')]
+    if args[:3] == ['config', 'set', 'url'] and len(args) > 3:
+        named.append(args[3])
+    return any(value.rstrip('/') != url for value in named)
 
 
 def free_port():
@@ -445,6 +461,10 @@ def untouched(changes, added=None, changed=None):
     collection to {record id: fields that may change}. Deletions never pass."""
     errors = []
     for name in COLLECTIONS:
+        if name == 'issue_counters':
+            if changes[name]['changed'] and not (added or {}).get('issues'):
+                errors.append('issue counter moved: an issue was created (and maybe deleted)')
+            continue
         want, got = (added or {}).get(name, 0), len(changes[name]['added'])
         if got != want:
             errors.append(f'expected {want} new {name} record(s), got {got}')
@@ -476,6 +496,12 @@ def row(after, collection, record_id):
     return next(r for r in after[collection] if r['id'] == record_id)
 
 
+def called(board, seat, *words, code=0, also=()):
+    """Whether the seat's audit holds `lll WORDS... [also...]` exiting with code."""
+    return any(e['command'][1:1 + len(words)] == list(words) and e['exit_code'] == code
+               and all(a in e['command'] for a in also) for e in read_audit(board.binary, seat.worker))
+
+
 def answer_errors(seat, **expected):
     answer = seat.answer()
     if not answer:
@@ -483,8 +509,8 @@ def answer_errors(seat, **expected):
     errors = []
     for name, value in expected.items():
         got = answer.get(name)
-        if isinstance(value, set):
-            got = set(got) if isinstance(got, list) else got
+        if isinstance(value, set) and isinstance(got, list) and all(isinstance(g, str) for g in got):
+            got = set(got)
         if got != value:
             errors.append(f'worker {seat.number}: answer {name}: expected {sorted(value) if isinstance(value, set) else value!r}, got {answer.get(name)!r}')
     return errors
@@ -601,6 +627,8 @@ def judge_07(board, changes, after):
     expect(errors, row(after, 'issues', issue), 'issue', state='done', assignee=seat.member_id)
     if any(c['issue'] == issue for c in after['claims']):
         errors.append('issue is still claimed after close')
+    if not called(board, seat, 'issue', 'claim'):
+        errors.append('no successful `issue claim` in the audit')
     comment = one_added(changes, 'comments')
     if comment:
         expect(errors, comment, 'comment', issue=issue, author=seat.member_id,
@@ -621,6 +649,9 @@ def judge_08(board, changes, after):
                title=f'Upload retry holds the cache lock (worker {seat.number})', area='storage',
                body='The retry path takes the cache lock before the upload finishes.',
                confidence='confirmed', author=seat.member_id)
+        if not called(board, seat, 'finding', 'create', also=('suspected',)) or \
+                not called(board, seat, 'finding', 'confirm'):
+            errors.append('audit lacks a suspected `finding create` followed by `finding confirm`')
         if {p.strip() for p in doc.get('paths', '').split(',')} != {'src/upload', 'src/retry'}:
             errors.append(f'finding paths: expected src/upload and src/retry, got {doc.get("paths")!r}')
     return errors
@@ -709,11 +740,15 @@ def judge_12(board, changes, after):
         names = [labels[l]['name'] for l in issue['labels'] if l in labels]
         if names != ['bug'] or any(labels[l]['team'] != issue['team'] for l in issue['labels']):
             errors.append(f'issue {issue["title"]!r} must carry its own team\'s bug label')
+    if sorted(i['team'] for i in changes['issues']['added']) != sorted(wanted):
+        errors.append('expected exactly one new issue in each of OPS and FLEET')
     refused = [e for e in read_audit(board.binary, seat.worker)
-               if e['command'][1:3] == ['issue', 'create'] and '--team' not in e['command'] and e['exit_code'] != 0]
+               if e['command'][1:3] == ['issue', 'create'] and e['exit_code'] != 0
+               and not any(a.startswith('--team') for a in e['command'])]
+    answered = seat.answer().get('no_team_exit')
     if not refused:
         errors.append('no refused `issue create` without --team in the audit')
-    elif seat.answer().get('no_team_exit') != refused[0]['exit_code']:
+    elif type(answered) is not int or answered != refused[0]['exit_code']:
         errors.append(f'worker {seat.number}: answer no_team_exit {seat.answer().get("no_team_exit")!r} '
                       f'does not match the observed exit {refused[0]["exit_code"]}')
     return errors
@@ -742,6 +777,10 @@ def judge_13(board, changes, after):
     text = script.read_text()
     if seat.token in text or re.search(JWT, text) or re.search(r'LLL_TOKEN\s*=', text):
         errors.append(f'{script.name} hard-codes a token')
+    if 'conn.txt' in text:
+        errors.append(f'{script.name} reads conn.txt; the wrapper supplies the connection')
+    for issue in ready:
+        expect(errors, row(after, 'issues', issue), f'issue {board.key(issue, after)}', assignee=seat.member_id)
     if 'issue next' not in text or '5' not in text:
         errors.append(f'{script.name} does not drive `issue next` and test exit 5')
     nexts = [e for e in read_audit(board.binary, seat.worker) if e['command'][1:3] == ['issue', 'next']]
@@ -812,8 +851,8 @@ def judge_15(board, changes, after):
         if not helper or board.token_identity(new_token) != helper['id']:
             errors.append('the rotated helper token does not authenticate as the helper')
     calls = read_audit(board.binary, seat.worker)
-    if not any(e['exit_code'] == 6 for e in calls):
-        errors.append('no call in the audit was refused with exit 6 (the old token)')
+    if not any(e['command'][1:2] == ['whoami'] and e['exit_code'] == 6 for e in calls):
+        errors.append('no `whoami` in the audit was refused with exit 6 (the old token)')
     if not any(e['command'][1:2] == ['whoami'] and e['exit_code'] == 0 and name in e['stdout'] for e in calls):
         errors.append(f'no successful `whoami` as {name} in the audit')
     for path in (old, new):
@@ -838,6 +877,10 @@ def judge_16(board, changes, after):
     claims = [c for c in after['claims'] if c['issue'] == issue]
     if [c['member'] for c in claims] != [b.member_id]:
         errors.append(f'claim holder: expected only {b.name}')
+    if not called(board, a, 'issue', 'claim') or not called(board, a, 'issue', 'release'):
+        errors.append(f'worker {a.number}: audit lacks role A\'s claim and release')
+    if any('--force' in e['command'] for e in read_audit(board.binary, b.worker)):
+        errors.append(f'worker {b.number}: role B forced a command')
     comments = sorted(changes['comments']['added'], key=lambda c: c['created'])
     expected = [(a.member_id, f'fleet-16-{a.number}: handing off to {b.name}; the queue drain is next.'),
                 (b.member_id, f'fleet-16-{b.number}: picked up from {a.name}.')]
@@ -887,14 +930,16 @@ def judge_18(board, changes, after):
         for line in log.read_text().splitlines():
             if line.strip():
                 event = json.loads(line)
-                if event.get('record', {}).get('id') == created['id']:
+                record = event.get('record') if isinstance(event, dict) else None
+                if isinstance(record, dict) and record.get('id') == created['id']:
                     actions.add(event.get('action'))
     except (OSError, ValueError) as error:
         errors.append(f'{log.name} unreadable or not NDJSON: {error}')
     if not {'create', 'update'} <= actions:
         errors.append(f'{log.name} lacks the partner create and update events (saw {sorted(actions)})')
-    if key not in (a.answer().get('partner_keys') or []):
-        errors.append(f'worker {a.number}: answer partner_keys does not list {key}')
+    keys = a.answer().get('partner_keys')
+    if not isinstance(keys, list) or key not in keys:
+        errors.append(f'worker {a.number}: answer partner_keys is not a list holding {key}')
     return errors
 
 
@@ -915,6 +960,11 @@ def judge_19(board, changes, after):
     visible = sorted(t['key'] for t in board.records('teams', token=token))
     if visible != ['FLEET']:
         errors.append(f'the colleague sees teams {visible}, expected only FLEET')
+    if not called(board, seat, 'login') or not called(board, seat, 'team', 'list'):
+        errors.append('audit lacks the colleague login and team list')
+    invite = seat.worker / f'invite-{seat.number}.txt'
+    if invite.exists():
+        invite.write_text(redact(invite.read_text()))
     return errors + answer_errors(seat, colleague_teams=['FLEET'])
 
 

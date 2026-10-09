@@ -63,7 +63,7 @@ def harness_checks():
                                  'wrapper', str(worker), str(fake), 'env', '--help'],
                                 env=env, text=True, capture_output=True, timeout=10)
         assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == 'isolated wrapper: [REDACTED]'
+        assert result.stdout.strip() == 'isolated wrapper: [REDACTED]', (result.stdout, result.stderr)
         primary = audit_path(fake, worker)
         audit = json.loads(primary.read_text())
         assert audit['command'] == ['lll', '--help'] and audit['exit_code'] == 0
@@ -103,6 +103,15 @@ def harness_checks():
             pass
         else:
             raise AssertionError('override accepted a config home outside the worker directory')
+        from agent_dx_fleet import foreign_url, redact
+        board = 'http://127.0.0.1:1234'
+        assert foreign_url(['member', 'invite', 'x', '--url', 'https://elsewhere.invalid'], board)
+        assert foreign_url(['login', '--url=https://elsewhere.invalid'], board)
+        assert foreign_url(['config', 'set', 'url', 'http://127.0.0.1:9'], board)
+        assert not foreign_url(['config', 'set', 'url', board + '/'], board)
+        assert not foreign_url(['issue', 'list'], board)
+        assert 'C4BHS4' not in redact('  temporary password: C4BHS4YE2PXQP22GF6F2CV5TLP\n')
+        assert 'hunter2' not in redact('lll login --email a@b.c --password hunter2')
         snapshot = {'webhooks': [{'id': 'hook', 'secret': 'throwaway-hook-secret'}]}
         assert public_snapshot(snapshot)['webhooks'][0]['secret'] == '[REDACTED]'
         assert snapshot['webhooks'][0]['secret'] == 'throwaway-hook-secret'
@@ -139,7 +148,7 @@ def harness_checks():
     rules = HERE.parent / 'docs' / 'agent-dx-fleet' / 'rules'
     assert sorted(p.name for p in rules.glob('*.md')) == sorted(f'{k}-{c["slug"]}.md' for k, c in CASES.items())
     print('Fleet harness: incomplete/foreign connections refused; private files; poisoned environment cleared; '
-          'wrapper modes scoped; audited/redacted calls; owned resistant child reaped without signaling '
+          'wrapper modes scoped; foreign URLs refused; audited/redacted calls and passwords; owned resistant child reaped without signaling '
           'unrelated or reaped children; twenty cases each with a rules file.')
 
 

@@ -35,8 +35,8 @@ After every worker has written report.json and report.md, send
 `{"action":"judge"}`. It validates and publishes the authoritative audits into
 worker evidence directories, preserving any worker-supplied file separately.
 Missing/malformed instrumentation means unavailable counts and a fresh rerun,
-not reconstruction from worker claims. The controller snapshots all eleven member-writable
-collections over REST, compares every seeded record, counts every new record
+not reconstruction from worker claims. The controller snapshots every member-writable
+collection, invites and issue counters over REST, compares every seeded record, counts every new record
 and verifies the exact expected author/creator, fields and relations. Any
 change the case does not name fails it. Read-only cases also check the
 `answer` object in report.json; case 13 checks the worker's script, case 14 its
