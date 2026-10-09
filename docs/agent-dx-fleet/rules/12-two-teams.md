@@ -18,7 +18,9 @@ This board has two teams, FLEET and OPS. Each has a label called `bug`.
 
 1. First, try to create an issue titled `fleet-12-NN rollout checklist`
    WITHOUT naming any team. lll must refuse because no team is configured.
-   Record the exit code and message. Check that nothing was created.
+   Record the exit code and message. Check that nothing was created. This
+   refusal is the expected result: put it in `answer.no_team_exit` and the
+   call log, not in `failures`.
 2. Create `fleet-12-NN rollout checklist` in team OPS with OPS's label `bug`.
 3. Create `fleet-12-NN rollout notes` in team FLEET with FLEET's label `bug`.
 4. Read both back and confirm each sits in its own team with its own team's
