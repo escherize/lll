@@ -314,7 +314,22 @@ fn issue_next_spec() -> Slice<flags.Flag> {
       help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
       ..,
     },
+    // Hidden: next only offers ready issues, so --ready (a 1.0 fleet guess,
+    // carried over from 'issue list --ready') changes nothing.
+    flags.Flag { name: "--ready", hidden: true, help: "accepted; next only offers ready issues", .. },
   ]...))
+}
+
+/// `lll issue next --help`: the generated usage and flags, then the output
+/// contract. Nine of ten 1.0 fleet agents captured `2>&1` and fed the claim
+/// notice on to the next command as a key.
+fn issue_next_page() -> string {
+  let spec = issue_next_spec()
+  f"usage: {flags.usage("lll issue next", spec, "")}{flags.section(spec)}
+
+stdout: the key (or, with --json, one JSON object) and nothing else.
+stderr: notices. Exit 5 when nothing is ready.
+Capture stdout only: key=$(lll issue next --claim)"
 }
 
 /// Dispatch `lll issue next` (LLL-395) — the agenda verb. Prints ONE key so a
@@ -343,9 +358,10 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // holder may set the assignee to someone else or clear it, and an issue
   // offered here that 'claim' then refuses is a lie to the loop.
   let held = claims.for_team(ctx, scope)?.map(|c| c.issue)
-  let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "" && !held.contains(i.id))
+  let ranked = rank_agenda(candidates, unblocks).filter(|i| !held.contains(i.id))
+  let agenda = ranked.filter(|i| i.assignee == "")
   if agenda.is_empty() {
-    return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
+    return Err(pb.fail(pb.ErrorKind.NothingToDo, empty_agenda_message(ranked)))
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
@@ -362,7 +378,8 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
         e.with_message(f"{key}: {e.message}; {held_elsewhere_hint(key)}")
       } else { e }
     })?
-    fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")
+    // --json carries the claim, so it prints nothing else anywhere.
+    if !p.given("--json") { fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}") }
   }
   if p.given("--json") {
     // One packet replaces next-then-view: the 'lll issue view --json' object,
@@ -385,6 +402,21 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   fmt.Println(key)
   Ok(())
+}
+
+/// Why `issue next` has nothing. `unclaimed` is every ready, unclaimed match;
+/// when some exist they are all assigned, and an assigned issue (close keeps
+/// the assignee) is not offered. Four 1.0 fleet agents read "the agenda is
+/// empty" as "no ready issues"; one spent forty calls on it.
+fn empty_agenda_message(unclaimed: Slice<models.Issue>) -> string {
+  if unclaimed.is_empty() {
+    return "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"
+  }
+  let count = if unclaimed.length() > 3 { 3 } else { unclaimed.length() }
+  let shown = unclaimed[..count]
+  let mut named = shown.map(|i| f"{i.expand.team.key}-{i.number} to {i.expand.assignee.name}")
+  if unclaimed.length() > 3 { named = named.append("...") }
+  f"no unassigned, unclaimed ready issues; {unclaimed.length()} ready match but are assigned ({strings.Join(named, ", ")}): 'lll issue update KEY --assignee none' offers one"
 }
 
 /// The `list --ready` candidate set (LLL-175), reused as the `issue next`

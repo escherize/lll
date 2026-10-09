@@ -198,7 +198,12 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let reason = forced_reason(p, force, "a forced release")?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let Some(held) = claims.fetch(ctx, issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
+  let Some(held) = claims.fetch(ctx, issue.id)? else {
+    // An assignee without a claim keeps the issue out of 'issue next'; name
+    // the way to offer it (1.0 fleet).
+    let hint = if issue.assignee == "" { "" } else { f"; it is assigned to {issue.expand.assignee.name}: 'lll issue update {key} --assignee none' offers it to 'issue next'" }
+    return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed{hint}"))
+  };
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
   let result = writes.release_claim(ctx, issue.id, held.id, by).map_err(|e| {
     if e.has_code(pb.ServerCode.NeedsForce) {

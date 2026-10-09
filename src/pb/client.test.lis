@@ -50,7 +50,7 @@ fn only_an_empty_token_means_absent() {
 #[test]
 fn a_refused_default_url_points_at_login_url() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://127.0.0.1:8090", true, e)
+  let msg = unreachable_hint("http://127.0.0.1:8090", "default", e)
   assert msg.message.contains("127.0.0.1:8090")
   assert msg.message.contains("lll login --url")
 }
@@ -58,9 +58,20 @@ fn a_refused_default_url_points_at_login_url() {
 #[test]
 fn a_refused_configured_url_is_named_without_the_fresh_machine_hint() {
   let e = errors.New("connection refused")
-  let msg = unreachable_hint("http://tracker.example.com:8091", false, e)
+  let msg = unreachable_hint("http://tracker.example.com:8091", "", e)
   assert msg.message.contains("tracker.example.com:8091")
   assert !msg.message.contains("lll login --url")
+}
+
+/// The 1.0 fleet: a stale saved url names the file it came from and the fix.
+#[test]
+fn a_refused_saved_url_names_its_file_and_the_fix() {
+  let e = errors.New("connection refused")
+  let msg = unreachable_hint("http://old.example.com", "file:/home/a/.config/lll/lll.toml", e)
+  assert msg.message.contains("comes from /home/a/.config/lll/lll.toml")
+  assert msg.message.contains("lll config set url URL")
+  let env = unreachable_hint("http://old.example.com", "env:LLL_URL", e)
+  assert env.message.contains("LLL_URL in the environment")
 }
 
 // The third pure seam (TASK-213): which 404s get told about the port. The
@@ -321,4 +332,13 @@ fn another_servers_token_in_the_file_is_never_sent_here() {
   for auth in seen {
     assert !auth.contains("BBBB")
   }
+}
+
+/// The 1.0 fleet: an expired token's message offered only the superuser and
+/// password paths; the holder of a valid token has one too.
+#[test]
+fn an_expired_token_names_login_token_and_config_check() {
+  let msg = expired_token("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.sig", "env:LLL_TOKEN")
+  assert msg.message.contains("lll login --token -")
+  assert msg.message.contains("lll config check")
 }

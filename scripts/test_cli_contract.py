@@ -161,6 +161,26 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         assert updated['key'] == 'CON-3' and updated['title'] == 'third b'
         nxt = as_json('issue', 'next', '--json')
         assert nxt['key'] == 'CON-3' and 'comments' in nxt and 'claim' in nxt
+        # 1.0 fleet case 13: with --json, stdout is one JSON value and stderr
+        # is empty, the claim included; --ready is accepted.
+        claimed = code(0, 'issue', 'next', '--claim', '--json', '--ready')
+        assert claimed.stderr == '', claimed.stderr
+        assert json.loads(claimed.stdout)['claim']['holder'] == 'contract-owner', claimed.stdout
+        text = code(0, 'issue', 'release', 'CON-3')
+        assert text.stdout.startswith('Released CON-3'), text.stdout
+        assert 'Capture stdout only' in code(0, 'issue', 'next', '--help').stdout
+        # An assigned ready issue is not offered, and the refusal says so.
+        code(0, 'issue', 'update', 'CON-3', '--assignee', 'contract-owner')
+        empty = code(5, 'issue', 'next')
+        assert '1 ready match but are assigned (CON-3 to contract-owner)' in empty.stderr, empty.stderr
+        unheld = code(4, 'issue', 'release', 'CON-3')
+        assert "'lll issue update CON-3 --assignee none' offers it" in unheld.stderr, unheld.stderr
+        code(0, 'issue', 'update', 'CON-3', '--assignee', '')
+        assert as_json('issue', 'view', 'CON-3', '--json')['assignee'] == ''
+        # A token is saved by logging in; config says how (case 14).
+        refused = code(2, 'config', 'set', 'token', 'x')
+        assert "lll login --token -" in refused.stderr, refused.stderr
+        assert "lll login --token -" in code(0, 'config', '--help').stdout
 
         made = as_json('issue', 'comment', 'CON-3', '-b', 'json comment', '--json')
         assert made['body'] == 'json comment' and RFC3339.match(made['created']), made

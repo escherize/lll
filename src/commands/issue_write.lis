@@ -144,7 +144,7 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("--state") { state = Some(query.state(p.one("--state"))?) }
   let mut priority: Option<models.Priority> = None
   if p.given("--priority") { priority = Some(check_priority(p.one("--priority"))?) }
-  let assignee_name = p.one("--assignee")
+  let assignee_name = assignee_value(p)
   let label_names = p.all("--label")
   let add_label_names = p.all("--add-label")
   let remove_label_names = p.all("--remove-label")
@@ -189,11 +189,6 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let since = if p.given("--if-unchanged-since") { Some(unchanged_since_stamp(p.one("--if-unchanged-since"))?) } else { None }
   let emoji = records.check_emoji(p.one("--emoji"))?
   let emoji_set = p.given("--emoji")
-  // An empty --assignee is the natural guess for "clear it" (two of thirty
-  // fleet agents); the word is 'none', and this is where to say so.
-  if p.given("--assignee") && assignee_name == "" {
-    return Err(flags.usage_error("--assignee needs a member name, or 'none' to clear it"))
-  }
   // LLL-516: clearing the assignee releases the claim, so it takes release's
   // --force, --reason and agent label, and nothing else does.
   if force && assignee_name != "none" {
@@ -362,6 +357,13 @@ fn update(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
   }
   Ok(())
+}
+
+/// --assignee as given; an empty value is 'none' (the 1.0 fleet: three of ten
+/// agents typed --assignee '' to clear it).
+fn assignee_value(p: flags.Parsed) -> string {
+  if p.given("--assignee") && strings.TrimSpace(p.one("--assignee")) == "" { return "none" }
+  p.one("--assignee")
 }
 
 /// The refusal for an update the write layer could not land on `key`.
