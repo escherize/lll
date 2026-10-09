@@ -162,7 +162,7 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     f"Password for {email}: "
   }
   let password = if p.given("--password") {
-    password_value(p.one("--password"), input)?
+    password_value(p.one("--password"), "--password", prompt, input)?
   } else {
     read_password(input, prompt)?
   }
@@ -626,9 +626,19 @@ fn read_password(input: mut Ref<bufio.Reader>, prompt: string) -> Result<string,
 
 /// A password flag's value; '-' reads one line from stdin, the Unix
 /// convention (two 1.0 agents logged in with the literal password "-").
-fn password_value(raw: string, input: mut Ref<bufio.Reader>) -> Result<string, pb.CliError> {
-  if raw == "-" { return read_line(input) }
-  Ok(raw)
+/// On a terminal '-' prompts with `prompt` and echo off, as read_password
+/// does: a plain line read there echoed the secret. Piped stdin that is
+/// empty is a usage error naming `flag`, whichever command reads it.
+fn password_value(raw: string, flag: string, prompt: string, input: mut Ref<bufio.Reader>) -> Result<string, pb.CliError> {
+  if raw != "-" { return Ok(raw) }
+  if term.IsTerminal(os.Stdin.Fd() as int) { return read_password(input, prompt) }
+  let line = match input.ReadString(10 as byte) {
+    Partial.Ok(l) => strip_eol(l),
+    Partial.Both(l, _) => strip_eol(l),
+    Partial.Err(_) => "",
+  }
+  if line == "" { return Err(flags.usage_error(f"{flag} -: stdin was empty")) }
+  Ok(line)
 }
 
 /// One line from stdin, EOL stripped. Partial.Both (data, then EOF with no

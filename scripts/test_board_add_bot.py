@@ -227,7 +227,7 @@ with tempfile.TemporaryDirectory(prefix='lll-546-') as directory:
             assert out.returncode != 0 and 'team key' in out.stderr and 'LLL_TOKEN' not in out.stdout, \
                 out.stdout + out.stderr
         url_env = dict(cli_env, LLL_URL=api.replace('http://', 'http://u@'))
-        out = subprocess.run([binary, 'bot', 'bot-evilurl', '--team', 'ALPHA', '--env'], cwd=root, env=url_env,
+        out = subprocess.run([binary, 'bot', 'bot-evilurl', '--env'], cwd=root, env=url_env,
                              text=True, capture_output=True, timeout=30)
         assert out.returncode != 0 and 'server url' in out.stderr and out.stdout == '', out.stdout + out.stderr
         assert set(members()) == before, set(members()) ^ before

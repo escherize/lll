@@ -27,6 +27,8 @@ pub fn config_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "list",
       alias: "--list",
+      // Fleet case 14: two workers guessed `config show`.
+      hidden_alias: "show",
       summary: "every effective value and the file it came from",
       spec: [flags.Flag { name: "--json", help: "print the values as a JSON list of key, value and source", .. }],
       run: config_list,

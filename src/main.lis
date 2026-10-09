@@ -54,7 +54,10 @@ fn main() {
     }
     // Every failing exit is decided here, by the error's kind (LLL-645,
     // docs/cli-contract.md): scripts branch on the code, not the text.
-    fmt.Fprintln(os.Stderr, f"Error: {err.message}")
+    // Exit 5 is an outcome, not a failure (fleet case 13): "Error:" belongs
+    // only to real errors.
+    let prefix = if let pb.ErrorKind.NothingToDo = err.kind { "Nothing to do" } else { "Error" }
+    fmt.Fprintln(os.Stderr, f"{prefix}: {err.message}")
     os.Exit(pb.exit_code(err.kind))
   }
 }
@@ -96,19 +99,21 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.
       Ok(())
     },
     "help" => help(ctx, args),
-    "--version" => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
-    "-v" => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
-    "version" => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
+    "--version" | "-v" | "version" => version(noun, args),
     other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),
+  }
+}
+
+/// `lll version`, `--version` and `-v`: the version, `--help` the usage, and
+/// anything else a usage error (exit 2) like every other command line.
+fn version(noun: string, args: Slice<string>) -> Result<(), pb.CliError> {
+  match args.get(2) {
+    None => {
+      fmt.Println(f"lll {buildinfo.version()}")
+      Ok(())
+    },
+    Some("--help") | Some("-h") => Err(pb.fail(pb.ErrorKind.Help, "lll version - print the version\n\nUsage:\n  lll version    (also: lll --version, lll -v)")),
+    Some(extra) => Err(pb.fail(pb.ErrorKind.Usage, f"lll {noun} takes no arguments; got '{extra}'")),
   }
 }
 

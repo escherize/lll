@@ -35,6 +35,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   beside a name another team you can see also uses: `Labels: bug (OPS)`.
 - `issue update --keep-claim`, with `--state done|cancelled`, keeps your
   claim (see Changed).
+- `config show` is a permanent hidden alias of `config list`.
+- Every noun's `--help` ends with the exit-code legend `lll --help` has.
+  The `issue next` row says the key is alone on stdout, notices go to
+  stderr, and exit 5 means nothing is ready.
+- `--admin-password -` reads stdin, as the other password flags do. Only
+  one password flag per command can read stdin.
 - `issue next --ready` is accepted, hidden: next only offers ready issues.
 - `lll issue next --help` states its output contract: stdout is the key (or
   one JSON object), stderr the notices, exit 5 when nothing is ready.
@@ -56,6 +62,20 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - `issue release` on a done or cancelled issue that clears the assignee
   names both repairs on the same line: `issue close KEY` releases and keeps
   it, or re-assign with `issue update KEY --assignee NAME`.
+- Exit 5 (nothing to do) prints `Nothing to do: ` on stderr, not
+  `Error: `. The exit code is unchanged.
+- A password flag given `-` on a terminal prompts with echo off; it read a
+  plain line and echoed the secret. Piped empty stdin is a usage error (exit
+  2), `--password -: stdin was empty`, for `login` and `member set-password`
+  alike.
+- `lll version`, `--version` and `-v`: `--help` prints help, and any other
+  argument exits 2. They printed the version and exited 0.
+- `bot create|rotate --env --team KEY` exits 2: `--env` prints no prompt, so
+  `--team` had been ignored unchecked.
+- An unsupported `--url` names what sets the url: LLL_URL or a repo
+  `.lll.toml` outranks `lll config set url`, so it is only suggested when it
+  would take effect. The server-wide `--team` refusal names `lll api`, not
+  `lll api METHOD`.
 - `lll --help` shows `lll issue claim KEY` in its examples.
 - `issue update KEY --assignee <yourself>` adds one line to its text
   output: assigned is not claimed, and `lll issue claim KEY` holds the

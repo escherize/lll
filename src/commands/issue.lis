@@ -493,7 +493,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "next",
-      summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it",
+      summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (key alone on stdout, notices on stderr; exit 5 when nothing is ready)",
       spec: issue_next_spec(),
       page: issue_next_page(),
       run: issue_next,

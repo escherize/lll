@@ -1620,6 +1620,7 @@ assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completio
 python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_flag_policy.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_usage_exit.py "$LIN"
+python3 "$REPO_ROOT"/scripts/test_password_tty.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_write_json.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_help_exit.py "$LIN"
 python3 "$REPO_ROOT"/scripts/test_help_ticket_keys.py "$LIN"

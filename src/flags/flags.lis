@@ -1,5 +1,7 @@
+import "go:regexp"
 import "go:strings"
 
+import "config"
 import "pb"
 
 /// One source of truth for a CLI flag (TASK-127). The verb's parser loop,
@@ -213,7 +215,10 @@ fn team_scope_error(arg: string, key: string, usage: string) -> string {
   // override hint would mislead (1.0 fleet: 'lll member list --team FLEET').
   let words = strings.Fields(usage)
   let noun = words.get(1).unwrap_or("")
-  let verb = words.get(2).unwrap_or("")
+  // A verb is a lowercase word; 'lll api METHOD PATH' has none, so its
+  // METHOD placeholder must not be named as one.
+  let second = words.get(2).unwrap_or("")
+  let verb = if regexp.MustCompile(r"^[a-z][a-z-]*$").MatchString(second) { second } else { "" }
   if noun == "member" && verb == "list" {
     return head + "\nmember list is server-wide; the last column shows each member's teams"
   }
@@ -231,7 +236,18 @@ fn team_scope_error(arg: string, key: string, usage: string) -> string {
 /// default, in that order of commitment.
 fn url_scope_error(arg: string, url: string, usage: string) -> string {
   let value = shell_argument(url)
-  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; to change the default, run 'lll config set url URL'."
+  // Where the url comes from decides what changes it (the round-2 rule the
+  // unreachable hint follows): 'config set url' writes the home file, which
+  // LLL_URL and a repo .lll.toml both outrank.
+  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or("", |t| t.1.url)
+  let change = if origin == "env:LLL_URL" {
+    "the default comes from LLL_URL in the environment; correct or unset it"
+  } else if strings.HasSuffix(origin, ".lll.toml") {
+    f"the default comes from {strings.TrimPrefix(origin, "file:")}; edit its url line"
+  } else {
+    "to change the default, run 'lll config set url URL'"
+  }
+  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {change}."
 }
 
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own
@@ -555,7 +571,15 @@ fn noun_help(noun: string, tagline: string, intro: string, cmds: Slice<Command>)
     out += f"\n  {l}\n      {c.summary}"
   }
   if intro != "" { out += f"\n\n{intro}" }
+  // Fleet case 13: two workers read only a noun's help and guessed the
+  // exit codes, so every noun page carries the legend 'lll --help' does.
+  out += "\n\n" + exit_code_legend()
   out
+}
+
+/// The one-line exit-code legend every noun's --help ends with.
+pub fn exit_code_legend() -> string {
+  "Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict, 5 nothing to do, 6 not authenticated"
 }
 
 /// A usage line fragment: "lll issue create -t \"title\" [-d desc] ...".

@@ -50,7 +50,8 @@ names its `status`): 401 is 6, 403, 409 and 412 are 4, 404 is 3, anything
 else is 1. Any other error body, such as a proxy's or gateway's, exits 1. The
 body still prints.
 
-Errors print on stderr as `Error: ` and a message. The message is for people:
+Errors print on stderr as `Error: ` and a message; exit 5 prints `Nothing to do: `
+instead, because it is an outcome, not an error. The message is for people:
 it names the cause and the fix, and it can change in any release.
 
 ## Output streams
@@ -193,6 +194,7 @@ These aliases are permanent:
 | `new` | `create` | `issue`, `doc`, `finding` |
 | `show` | `view` | `issue`, `doc` |
 | `read` | `view` | `issue`, `doc`, `finding` (hidden: no help row, no completion) |
+| `show` | `list` | `config` (hidden: no help row, no completion) |
 | `add` | `create` | `member` |
 | `remove` | `delete` | `member` |
 | `edit`, `update` | each other | `issue`, `doc`, `project`, `label` |

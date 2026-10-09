@@ -19,7 +19,19 @@ binary = str(Path(sys.argv[1]).resolve())
 PROBE = '--zz-usage-probe'
 # Spellings that dispatch but are never completed (flags.Command.hidden_alias
 # and hidden verbs); they must refuse a bad flag the same way.
-HIDDEN = [('issue', 'read'), ('doc', 'read'), ('finding', 'read'), ('finding', 'view')]
+HIDDEN = [('issue', 'read'), ('doc', 'read'), ('finding', 'read'), ('finding', 'view'), ('config', 'show')]
+# dispatch arms that print the top-level usage whatever follows.
+USAGE_PAGES = {'--help', '-h'}
+
+
+def dispatched_nouns():
+    """Every noun src/main.lis's dispatch match routes, as its arms spell
+    them: the real command table, which also holds the nouns completion does
+    not list (version, --version, -v)."""
+    source = (Path(__file__).resolve().parent.parent / 'src' / 'main.lis').read_text()
+    body = re.search(r'fn dispatch\(.*?\n}\n', source, re.S).group(0)
+    arms = re.findall(r'^\s+((?:"[^"]+"(?: \| )?)+) =>', body, re.M)
+    return [n for arm in arms for n in re.findall(r'"([^"]+)"', arm)]
 
 
 def main():
@@ -35,6 +47,11 @@ def main():
         verb_rows = dict(re.findall(r"^      ([a-z-]+)\) words='([^']*)' ;;$", bash, re.M))
         nouns = [n for n in re.search(r"words='(issue [^']*)'", bash).group(1).split() if not n.startswith('-')]
         assert 'whoami' in nouns and 'issue' in nouns, nouns
+        dispatched = dispatched_nouns()
+        assert {'version', '--version', '-v'} <= set(dispatched), dispatched
+        missing = sorted(set(nouns) - set(dispatched))
+        assert not missing, f'completed but not dispatched: {missing}'
+        nouns += [n for n in dispatched if n not in nouns and n not in USAGE_PAGES]
         cases = []
         for noun in nouns:
             cases.append([noun, PROBE])
@@ -48,6 +65,11 @@ def main():
             done = run(*args)
             if done.returncode != 2:
                 wrong.append(f"lll {' '.join(args)}: exit {done.returncode}: {(done.stderr or done.stdout).strip()[:160]}")
+        # --help is help, not the version (#340 review).
+        for noun in ('version', '--version', '-v'):
+            done = run(noun, '--help')
+            if done.returncode != 0 or 'Usage' not in done.stdout:
+                wrong.append(f"lll {noun} --help: exit {done.returncode}: {done.stdout.strip()[:160]}")
     for line in wrong:
         print(line)
     assert not wrong, f'{len(wrong)} of {len(cases)} bad command lines did not exit 2'

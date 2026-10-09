@@ -1,5 +1,7 @@
 import "records"
+import "go:bufio"
 import "go:encoding/json"
+import "go:os"
 import "go:fmt"
 import "go:regexp"
 import "go:strconv"
@@ -210,7 +212,17 @@ pub enum AdminLogin {
 /// without the other is refused.
 pub fn given_admin_login(settings: config.Settings, p: flags.Parsed) -> Result<AdminLogin, pb.CliError> {
   let email = p.one("--admin-email")
-  let pass = p.one("--admin-password")
+  let mut pass = p.one("--admin-password")
+  // '-' reads stdin, as every password flag does, prompting with echo off
+  // on a terminal. Only one flag can read it: a second reader would lose
+  // what the first one buffered.
+  if pass == "-" {
+    if p.one("--password") == "-" || p.one("--old-password") == "-" {
+      return Err(flags.usage_error("only one password flag can read stdin ('-'); pass the other as a value"))
+    }
+    let mut stdin = bufio.NewReader(os.Stdin)
+    pass = password_value(pass, "--admin-password", "Superuser password: ", stdin)?
+  }
   if (email == "") != (pass == "") {
     return Err(flags.usage_error("--admin-email and --admin-password go together; give both"))
   }
@@ -470,7 +482,14 @@ fn prompt_team(
   env_only: bool,
   flag: string,
 ) -> Result<string, pb.CliError> {
-  if env_only { return Ok("") }
+  if env_only {
+    // --team only shapes the prompt, which --env does not print; taking it
+    // silently let a typo pass unchecked (#340 review).
+    if flag != "" {
+      return Err(flags.usage_error("--team names the team the agent prompt attaches to, and --env prints no prompt; drop one of them"))
+    }
+    return Ok("")
+  }
   let key = if flag != "" { flag } else { ctx.settings.config().map_err(pb.failed)?.team }
   let wanted = records.normalize_team_key(key)
   if wanted == "" {
