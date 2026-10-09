@@ -6,6 +6,7 @@ import "go:strings"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 
 /// Print a value as JSON, the end of every `--json` command that prints one
@@ -229,4 +230,10 @@ fn print_issue_json(record: string, claim: Option<models.Claim>) -> Result<(), p
   let fields = issue_json(record.bytes() as json.RawMessage, claim)?
   fmt.Println(encode_json(fields, "issue")? as string)
   Ok(())
+}
+
+/// A verb that still prints for itself, adapted to return an Output while
+/// the verbs move over to returning theirs (LLL-683).
+fn printed(r: Result<(), pb.CliError>) -> Result<output.Output, pb.CliError> {
+  r.map(|_| output.none())
 }

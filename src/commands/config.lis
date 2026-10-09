@@ -7,6 +7,7 @@ import "go:strings"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 import "query"
 
@@ -14,7 +15,7 @@ import "query"
 /// Dispatch parses args against the verb's spec BEFORE calling it, which is
 /// what stops `lll config check -h` from RUNNING the check - a network call -
 /// the way the old `match verb` did when it handed a zero-arg fn nothing.
-pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn config_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "config", "manage configuration", config_intro(), config_commands(), args)
 }
 
@@ -31,7 +32,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       hidden_alias: "show",
       summary: "every effective value and the file it came from",
       spec: [flags.Flag { name: "--json", help: "print the values as a JSON list of key, value and source", .. }],
-      run: config_list,
+      run: |i| printed(config_list(i)),
       ..
     },
     flags.Command {
@@ -39,21 +40,21 @@ pub fn config_commands() -> Slice<flags.Command> {
       summary: "print one effective value: url, web_url, team or sort",
       spec: [],
       positional: "KEY",
-      run: config_get,
+      run: |i| printed(config_get(i)),
       ..,
     },
     flags.Command {
       name: "check",
       summary: "check the configured lll server API",
       spec: [],
-      run: config_check,
+      run: |i| printed(config_check(i)),
       ..
     },
     flags.Command {
       name: "init",
       summary: "write a commented .lll.toml template to the current directory",
       spec: [],
-      run: config_init,
+      run: |i| printed(config_init(i)),
       ..
     },
     flags.Command {
@@ -61,7 +62,7 @@ pub fn config_commands() -> Slice<flags.Command> {
       summary: "save url or web_url in ~/.config/lll/lll.toml",
       spec: [],
       positional: "<url|web_url> VALUE",
-      run: config_set,
+      run: |i| printed(config_set(i)),
       ..
     },
   ]

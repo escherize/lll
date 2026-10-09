@@ -11,6 +11,7 @@ import "go:time"
 import "config"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "secret"
 import "tokens"
@@ -30,7 +31,7 @@ import "tokens"
 /// Dispatch `lll token <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll token --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn token(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn token(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "token", "work with agent tokens", token_intro(), token_commands(), args)
 }
 
@@ -46,7 +47,7 @@ pub fn token_commands() -> Slice<flags.Command> {
       page: token_create_page(),
       spec: token_create_spec(),
       positional: "<member>",
-      run: token_create,
+      run: |i| printed(token_create(i)),
       ..
     },
   ]

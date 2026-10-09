@@ -4,6 +4,7 @@ import "go:strings"
 
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "records"
 
@@ -13,7 +14,7 @@ import "records"
 // superuser (LLL-629), and its refusal names who can; this command only
 // resolves team keys and prints the link.
 
-pub fn invite(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn invite(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx,
     "invite",
     "single-use join links",
@@ -29,7 +30,7 @@ pub fn invite_commands() -> Slice<flags.Command> {
       name: "create",
       summary: "print a single-use link that lets one person join with these teams",
       spec: invite_create_spec(),
-      run: invite_create,
+      run: |i| printed(invite_create(i)),
       ..,
     },
   ]

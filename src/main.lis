@@ -6,6 +6,7 @@ import "go:strings"
 
 import "commands"
 import "config"
+import "output"
 import "pb"
 import "query"
 import "buildinfo"
@@ -16,7 +17,7 @@ fn main() {
   // carry state, so a child process sees only what lll's parent gave it.
   let env = config.read_env()
   let Some(noun) = os.Args.get(1) else {
-    print_usage(pb.Client.new(config.resolve(env, config.no_overrides())))
+    render(Ok(usage(pb.Client.new(config.resolve(env, config.no_overrides())))), None)
     return
   }
 
@@ -41,7 +42,18 @@ fn main() {
     Ok((args, _)) => dispatch(ctx, noun, args),
     Err(msg) => Err(msg),
   }
-  if let Some(Some(line)) = skew.receive() {
+  render(result, skew.receive().unwrap_or(None))
+}
+
+/// The one place lll writes a command's outcome (LLL-683): the data to
+/// stdout and the notices to stderr (none under --json or --env), then the
+/// version-skew line, then any error with its exit code.
+fn render(result: Result<output.Output, pb.CliError>, skew: Option<string>) {
+  if let Ok(out) = result {
+    fmt.Print(out.data)
+    for n in out.stderr_lines() { fmt.Fprintln(os.Stderr, n) }
+  }
+  if let Some(line) = skew {
     fmt.Fprintln(os.Stderr, line)
   }
 
@@ -63,42 +75,35 @@ fn main() {
   }
 }
 
-fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.CliError> {
+fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   match noun {
     "issue" => commands.issue(ctx, args),
     "team" => commands.team(ctx, args),
     "member" => commands.member(ctx, args),
     "invite" => commands.invite(ctx, args),
     "project" => commands.project(ctx, args),
-    "api" => commands.api(ctx, args),
+    "api" => commands.api(ctx, args).map(|_| output.none()),
     "label" => commands.label(ctx, args),
     "doc" => commands.doc(ctx, args),
     "finding" => commands.finding(ctx, args),
     "import" => commands.import_cmd(ctx, args),
-    "export" => commands.export_cmd(ctx, args),
+    "export" => commands.export_cmd(ctx, args).map(|_| output.none()),
     "config" => commands.config_cmd(ctx, args),
-    "login" => commands.login(ctx, args),
-    "logout" => commands.logout(ctx, args),
-    "whoami" => commands.whoami(ctx, args),
+    "login" => commands.login(ctx, args).map(|_| output.none()),
+    "logout" => commands.logout(ctx, args).map(|_| output.none()),
+    "whoami" => commands.whoami(ctx, args).map(|_| output.none()),
     "token" => commands.token(ctx, args),
-    "bot" => commands.bot(ctx, args),
-    "attach" => commands.attach(ctx, args),
-    "watch" => commands.watch(ctx, args),
+    "bot" => commands.bot(ctx, args).map(|_| output.none()),
+    "attach" => commands.attach(ctx, args).map(|_| output.none()),
+    "watch" => commands.watch(ctx, args).map(|_| output.none()),
     "webhook" => commands.webhook(ctx, args),
-    "search" => commands.search_cmd(ctx, args),
-    "up" => commands.up(ctx, args),
-    "board" => commands.board(ctx, args),
-    "skill" => commands.skill(args),
-    "completions" => commands.completions(args),
-    "upgrade" => commands.upgrade(args),
-    "--help" => {
-      print_usage(ctx)
-      Ok(())
-    },
-    "-h" => {
-      print_usage(ctx)
-      Ok(())
-    },
+    "search" => commands.search_cmd(ctx, args).map(|_| output.none()),
+    "up" => commands.up(ctx, args).map(|_| output.none()),
+    "board" => commands.board(ctx, args).map(|_| output.none()),
+    "skill" => commands.skill(args).map(|_| output.none()),
+    "completions" => commands.completions(args).map(|_| output.none()),
+    "upgrade" => commands.upgrade(args).map(|_| output.none()),
+    "--help" | "-h" => Ok(usage(ctx)),
     "help" => help(ctx, args),
     "--version" | "-v" | "version" => version(noun, args),
     other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),
@@ -107,12 +112,9 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.
 
 /// `lll version`, `--version` and `-v`: the version, `--help` the usage, and
 /// anything else a usage error (exit 2) like every other command line.
-fn version(noun: string, args: Slice<string>) -> Result<(), pb.CliError> {
+fn version(noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   match args.get(2) {
-    None => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
+    None => Ok(output.line(f"lll {buildinfo.version()}")),
     Some("--help") | Some("-h") => Err(pb.fail(pb.ErrorKind.Help, "lll version - print the version\n\nUsage:\n  lll version    (also: lll --version, lll -v)")),
     Some(extra) => Err(pb.fail(pb.ErrorKind.Usage, f"lll {noun} takes no arguments; got '{extra}'")),
   }
@@ -122,16 +124,10 @@ fn version(noun: string, args: Slice<string>) -> Result<(), pb.CliError> {
 /// is reference text, like --help, and `help` already answers with the usage
 /// page. It ships in the binary because installed users have no docs/ (1.0
 /// fleet: a worker tried 'lll skill get cli-contract').
-fn help(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+fn help(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   match (args.get(2), args.get(3)) {
-    (None, _) | (Some("--help"), None) | (Some("-h"), None) => {
-      print_usage(ctx)
-      Ok(())
-    },
-    (Some("contract"), None) => {
-      fmt.Print(docs.Contract())
-      Ok(())
-    },
+    (None, _) | (Some("--help"), None) | (Some("-h"), None) => Ok(usage(ctx)),
+    (Some("contract"), None) => Ok(output.text(docs.Contract())),
     _ => Err(
       pb.fail(
         pb.ErrorKind.Usage,
@@ -141,8 +137,8 @@ fn help(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   }
 }
 
-fn print_usage(ctx: pb.Client) {
-  fmt.Println(
+fn usage(ctx: pb.Client) -> output.Output {
+  let page = output.line(
     f"lll - a Linear-style issue tracker
 
 Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"',
@@ -244,7 +240,7 @@ layer, each supplying the keys it names; 'lll config list' shows which won):
   LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (set with 'lll config set web_url URL')",
   )
   let hint = commands.setup_hint(ctx)
-  if hint != "" { fmt.Println(hint) }
+  if hint == "" { page } else { page.line(hint) }
 }
 
 /// An issue verb typed as a noun ('lll comment ...') is the most common

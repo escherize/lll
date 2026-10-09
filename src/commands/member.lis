@@ -9,6 +9,7 @@ import "config"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "records"
 import "secret"
@@ -18,7 +19,7 @@ import "writes"
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   // 1.0 fleet: one member's details live under access.
   if args.get(2) == Some("view") || args.get(2) == Some("show") {
     return Err(flags.usage_error(
@@ -48,7 +49,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       name: "list",
       summary: "list members (name, email, access)",
       spec: member_list_spec(),
-      run: member_list,
+      run: |i| printed(member_list(i)),
       ..,
     },
     flags.Command {
@@ -58,7 +59,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       page: member_add_page(),
       spec: member_add_spec(),
       positional: "[\"name\"]",
-      run: member_add,
+      run: |i| printed(member_add(i)),
       ..,
     },
     flags.Command {
@@ -67,7 +68,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       page: member_invite_page(),
       spec: member_invite_spec(),
       positional: "NAME",
-      run: member_invite,
+      run: |i| printed(member_invite(i)),
       ..,
     },
     flags.Command {
@@ -75,7 +76,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       summary: "make private, copyable human teammate tokens for a local board",
       page: member_passes_page(),
       spec: member_passes_spec(),
-      run: member_passes,
+      run: |i| printed(member_passes(i)),
       ..,
     },
     flags.Command {
@@ -85,7 +86,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
-      run: member_remove,
+      run: |i| printed(member_remove(i)),
       ..,
     },
     flags.Command {
@@ -94,7 +95,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       page: member_access_page(),
       spec: member_access_spec(),
       positional: "NAME",
-      run: member_access_cmd,
+      run: |i| printed(member_access_cmd(i)),
       ..,
     },
     flags.Command {
@@ -103,7 +104,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       page: member_set_password_page(),
       spec: set_password_spec(),
       positional: "NAME",
-      run: member_set_password,
+      run: |i| printed(member_set_password(i)),
       ..,
     },
   ]

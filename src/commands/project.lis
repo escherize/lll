@@ -6,6 +6,7 @@ import "go:net/url"
 import "go:strings"
 
 import "models"
+import "output"
 import "pb"
 import "flags"
 import "query"
@@ -14,7 +15,7 @@ import "writes"
 /// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll project
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "project", "work with projects", project_intro(), project_commands(), args)
 }
 
@@ -28,7 +29,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       name: "list",
       summary: "list projects (name, status, team); this team's, or every team's when none is configured",
       spec: project_list_spec(),
-      run: project_list,
+      run: |i| printed(project_list(i)),
       ..
     },
     flags.Command {
@@ -36,7 +37,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       summary: "show a project and its issues",
       spec: flags.with_team([flags.Flag { name: "--json", help: "print the project record as JSON, with its issues as issues", .. }]),
       positional: "NAME",
-      run: project_view,
+      run: |i| printed(project_view(i)),
       ..
     },
     flags.Command {
@@ -44,7 +45,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       summary: "create a project (status defaults to planned; --team defaults to LLL_TEAM)",
       spec: project_create_spec(),
       positional: "[NAME]",
-      run: project_create,
+      run: |i| printed(project_create(i)),
       ..
     },
     flags.Command {
@@ -53,7 +54,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       summary: "rename, re-describe or re-status a project; it keeps its issues",
       spec: project_edit_spec(),
       positional: "NAME",
-      run: project_edit,
+      run: |i| printed(project_edit(i)),
       ..
     },
     flags.Command {
@@ -61,7 +62,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       summary: "move a project to another team; refuses while issues outside it still belong to it",
       spec: project_move_spec(),
       positional: "NAME",
-      run: project_move,
+      run: |i| printed(project_move(i)),
       ..
     },
     flags.Command {
@@ -69,7 +70,7 @@ pub fn project_commands() -> Slice<flags.Command> {
       summary: "delete a project; refuses while issues still belong to it, and --force drops it off all of them",
       spec: project_delete_spec(),
       positional: "NAME",
-      run: project_delete,
+      run: |i| printed(project_delete(i)),
       ..
     },
   ]

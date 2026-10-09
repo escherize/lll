@@ -7,6 +7,7 @@ import "go:strings"
 import "config"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "theme"
@@ -15,7 +16,7 @@ import "writes"
 /// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll team --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "team", "work with teams", team_intro(), team_commands(), args)
 }
 
@@ -29,7 +30,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       name: "list",
       summary: "list teams (KEY, name); --archived includes archived ones",
       spec: team_list_spec(),
-      run: team_list,
+      run: |i| printed(team_list(i)),
       ..
     },
     flags.Command {
@@ -37,7 +38,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "create a team; the key is the bare argument or --key",
       spec: team_create_spec(),
       positional: "[KEY]",
-      run: team_create,
+      run: |i| printed(team_create(i)),
       ..
     },
     flags.Command {
@@ -45,7 +46,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "show a team, its accent and its issue count",
       spec: [flags.Flag { name: "--json", help: "print the team record as JSON, with its issue count as issues", .. }],
       positional: "KEY",
-      run: team_view,
+      run: |i| printed(team_view(i)),
       ..
     },
     flags.Command {
@@ -53,7 +54,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "change a team's key, its name, or both",
       spec: team_rename_spec(),
       positional: "KEY",
-      run: team_rename,
+      run: |i| printed(team_rename(i)),
       ..
     },
     flags.Command {
@@ -61,7 +62,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "set the board accent colour ('' clears it)",
       spec: [json_after_flag("the team record")],
       positional: "KEY #rrggbb",
-      run: team_set_accent,
+      run: |i| printed(team_set_accent(i)),
       ..
     },
     flags.Command {
@@ -69,7 +70,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "set the team's glyph, beside its key ('' clears it)",
       spec: [json_after_flag("the team record")],
       positional: "KEY EMOJI",
-      run: team_set_emoji,
+      run: |i| printed(team_set_emoji(i)),
       ..
     },
     flags.Command {
@@ -77,7 +78,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "hide the team from lists and the board rail (data kept)",
       spec: [json_after_flag("the team record")],
       positional: "KEY",
-      run: team_archive,
+      run: |i| printed(team_archive(i)),
       ..
     },
     flags.Command {
@@ -85,7 +86,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       summary: "bring an archived team back",
       spec: [json_after_flag("the team record")],
       positional: "KEY",
-      run: team_unarchive,
+      run: |i| printed(team_unarchive(i)),
       ..
     },
     flags.Command {
@@ -94,7 +95,7 @@ pub fn team_commands() -> Slice<flags.Command> {
       page: team_delete_page(),
       spec: team_delete_spec(),
       positional: "KEY",
-      run: team_delete,
+      run: |i| printed(team_delete(i)),
       ..
     },
   ]

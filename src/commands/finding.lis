@@ -4,6 +4,7 @@ import "go:strings"
 
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "writes"
 import "records"
@@ -15,7 +16,7 @@ import "records"
 ///
 /// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
 /// finding --help` and shell completions all read it, so none can drift.
-pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
 }
 
@@ -29,7 +30,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       summary: "findings about a file or directory, exact path matches first",
       spec: flags.with_team([flags.Flag { name: "--json", help: "print the findings as a JSON list", .. }]),
       positional: "<path>",
-      run: finding_near,
+      run: |i| printed(finding_near(i)),
       ..
     },
     flags.Command {
@@ -37,14 +38,14 @@ pub fn finding_commands() -> Slice<flags.Command> {
       summary: "file a finding: 'lll doc create -k finding' with the kind already set",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
-      run: finding_new,
+      run: |i| printed(finding_new(i)),
       ..
     },
     flags.Command {
       name: "list",
       summary: "every finding, or one area's, one line each (slug, area, title)",
       spec: finding_list_spec(),
-      run: finding_list,
+      run: |i| printed(finding_list(i)),
       ..
     },
     flags.Command {
@@ -52,7 +53,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       summary: "assert a finding is fact; clears any refutation's reason",
       spec: flags.with_team([json_after_flag("the finding")]),
       positional: "SLUG",
-      run: finding_confirm,
+      run: |i| printed(finding_confirm(i)),
       ..
     },
     flags.Command {
@@ -60,7 +61,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       summary: "mark a finding refuted and record why: -b why ('-b -' reads stdin)",
       spec: finding_refute_spec(),
       positional: "SLUG",
-      run: finding_refute,
+      run: |i| printed(finding_refute(i)),
       ..
     },
     // Hidden (LLL-505): a finding is a doc, so 'lll doc view' is the
@@ -72,7 +73,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
       summary: "show one finding by slug; the documented spelling is 'lll doc view'",
       spec: doc_view_spec(),
       positional: "SLUG",
-      run: doc_view,
+      run: |i| printed(doc_view(i)),
       ..
     },
   ]

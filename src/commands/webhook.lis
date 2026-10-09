@@ -8,6 +8,7 @@ import "go:os"
 import "go:strings"
 
 import "models"
+import "output"
 import "pb"
 import "flags"
 import "query"
@@ -16,7 +17,7 @@ import "writes"
 
 /// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll webhook --help` and shell completions all read the table.
-pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx,
     "webhook",
     "outbound webhooks for issue events",
@@ -55,14 +56,14 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       summary: "register a URL that receives this team's issue events, or one project's with --project",
       spec: webhook_add_spec(),
       positional: "URL",
-      run: webhook_add,
+      run: |i| printed(webhook_add(i)),
       ..
     },
     flags.Command {
       name: "list",
       summary: "list this team's registrations: scope, URL, whether a secret is set",
       spec: webhook_list_spec(),
-      run: webhook_list,
+      run: |i| printed(webhook_list(i)),
       ..
     },
     flags.Command {
@@ -70,7 +71,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
       spec: webhook_remove_spec(),
       positional: "URL",
-      run: webhook_remove,
+      run: |i| printed(webhook_remove(i)),
       ..
     },
   ]

@@ -6,6 +6,7 @@ import "go:strings"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "writes"
@@ -14,7 +15,7 @@ import "records"
 /// Dispatch `lll doc <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll doc --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn doc(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn doc(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   // Removed at 1.0 (D5): the link lives on the issue noun.
   let verb = args.get(2).unwrap_or("")
   if verb == "link" || verb == "unlink" {
@@ -33,14 +34,14 @@ pub fn doc_commands() -> Slice<flags.Command> {
       name: "create", alias: "new",
       summary: "create a doc; -b - reads the body from stdin",
       spec: doc_new_spec(),
-      run: doc_new,
+      run: |i| printed(doc_new(i)),
       ..
     },
     flags.Command {
       name: "list",
       summary: "list docs (slug, kind, title), one line each",
       spec: doc_list_spec(),
-      run: doc_list,
+      run: |i| printed(doc_list(i)),
       ..
     },
     flags.Command {
@@ -48,7 +49,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       summary: "show one doc with its linked issues; --raw prints only the body; --json prints the raw record",
       spec: doc_view_spec(),
       positional: "SLUG",
-      run: doc_view,
+      run: |i| printed(doc_view(i)),
       ..
     },
     flags.Command {
@@ -57,7 +58,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       summary: "replace fields (at least one flag); -b - reads the whole body from stdin",
       spec: doc_edit_spec(),
       positional: "SLUG",
-      run: doc_edit,
+      run: |i| printed(doc_edit(i)),
       ..
     },
     flags.Command {
@@ -65,7 +66,7 @@ pub fn doc_commands() -> Slice<flags.Command> {
       summary: "delete; asks [y/N] unless --yes",
       spec: doc_delete_spec(),
       positional: "SLUG",
-      run: doc_delete,
+      run: |i| printed(doc_delete(i)),
       ..
     },
   ]
