@@ -636,3 +636,15 @@ fn empty_command_alias_does_not_resolve_an_empty_verb() {
   assert resolve_command(commands, "").is_none()
   assert command_names(commands).equals(["list"])
 }
+
+/// The 1.0 fleet: 'lll member whoami'. A top-level command typed as a verb
+/// is named back.
+#[test]
+fn a_top_level_command_typed_as_a_verb_is_suggested() {
+  let commands = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let assert Err(e) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "whoami"])
+  assert pb.exit_code(e.kind) == 2
+  assert e.message.contains("unknown member command: 'whoami'; did you mean 'lll whoami'?")
+  let assert Err(plain) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "frob"])
+  assert !plain.message.contains("did you mean")
+}

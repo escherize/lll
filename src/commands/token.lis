@@ -1,7 +1,6 @@
 import "records"
 import "go:encoding/json"
 import "go:fmt"
-import "go:os"
 import "go:regexp"
 import "go:strconv"
 import "go:strings"
@@ -339,7 +338,13 @@ pub fn bot(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // - where a bare create's NAME would sit. A bot cannot be named "rotate"
   // or "create": the server reserves bot- * names, so the forms cannot
   // collide.
-  match args.get(2).unwrap_or("") {
+  let verb = args.get(2).unwrap_or("")
+  // A word that is neither a verb nor a bot name is a verb guess ('lll bot
+  // list', 1.0 fleet); suggesting a bot named after it would be wrong.
+  if verb != "" && verb != "rotate" && verb != "create" && !verb.starts_with("-") && !verb.starts_with("bot-") {
+    return Err(flags.usage_error(f"unknown bot command '{verb}'; bot has create and rotate; list bots with 'lll member list'"))
+  }
+  match verb {
     "rotate" => bot_rotate(ctx, args),
     "create" => bot_create(ctx, args, 3, "lll bot create"),
     _ => bot_create(ctx, args, 2, "lll bot"),
@@ -478,10 +483,12 @@ or pass --env to print only the LLL_URL and LLL_TOKEN export lines",
   Ok(team.key)
 }
 
-/// A progress line. With --env, stdout carries only the export lines, so
-/// `lll bot bot-x --env > agent.env` writes a file that sources cleanly.
+/// A progress line, for the prompt form only. With --env nothing but the
+/// export lines is printed anywhere: agents capture `2>&1`, and a status line
+/// in that capture broke `source` (1.0 fleet: four of ten, one of whom then
+/// ran as the bot's owner without noticing).
 fn bot_status(env_only: bool, line: string) {
-  if env_only { fmt.Fprintln(os.Stderr, line) } else { fmt.Println(line) }
+  if !env_only { fmt.Println(line) }
 }
 
 /// Print a freshly minted bot token: the one place it is ever shown. The
@@ -502,8 +509,6 @@ fn print_bot_credential(
   let expiry = tokens.expiry_line(duration, time.Now(), f"lll bot rotate {name}")
   if env_only {
     fmt.Print(tokens.agent_env(url, tok))
-    fmt.Fprintln(os.Stderr, f"one-time bot token for {name}, shown only here")
-    fmt.Fprintln(os.Stderr, expiry)
     return Ok(())
   }
   fmt.Println(f"one-time bot token for {name}, shown only here; {expiry}")

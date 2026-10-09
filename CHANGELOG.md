@@ -22,6 +22,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   record). A test lists every verb that still has none, with the reason.
 - `doc create -k finding` takes `--confidence suspected|confirmed`, as
   `finding create` does (LLL-641). On another kind it exits 2.
+- `--assignee ''` means `none` on `issue update`. It exited 2.
+- `issue next --ready` is accepted, hidden: next only offers ready issues.
+- `lll issue next --help` states its output contract: stdout is the key (or
+  one JSON object), stderr the notices, exit 5 when nothing is ready.
+- The contract covers which stream carries what: data on stdout, notices on
+  stderr, and with `--json` exactly one JSON value on stdout.
 
 ### Changed
 
@@ -35,6 +41,26 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - A rename names the old and new names: `Renamed label regresion ->
   regression`, `Renamed project A -> B`, `Renamed team ENG -> PLAT`.
 - `finding create --help` describes `-k` as defaulting to finding.
+- `issue next --claim --json` prints no "Claimed" notice, and `issue start
+  --branch --json` no Git lines: the JSON carries both.
+- `bot create --env` and `bot rotate --env` print nothing on stderr, so a
+  `2>&1` capture sources cleanly. Four of ten fleet agents captured that
+  way; the expiry line broke `source` and the next command ran as the owner.
+- `issue next` with nothing to offer names the ready issues it skipped for
+  being assigned, and how to offer one (`--assignee none`). `issue release`
+  of an assigned, unclaimed issue says the same.
+- An expired or rejected token's message adds `lll login --token -` for a
+  caller who holds a valid token, then `lll config check`. `whoami` with an
+  expired token also reports a server that does not answer.
+- A refused connection names where the url came from (the file, LLL_URL or
+  --url) and the fix: `lll config set url URL` or `lll login --url URL`.
+- `lll config --help` names `lll login --token -` for saving a token, and
+  `lll config set token` refuses with that pointer (exit 2).
+- `lll bot WORD`, where WORD is neither a verb nor a `bot-` name, is an
+  unknown command (exit 2) that names create, rotate and `lll member list`.
+  It suggested creating a bot named after the word.
+- An unknown verb that is a top-level command names it: `lll member whoami`
+  says "did you mean 'lll whoami'?".
 
 ### Fixed
 

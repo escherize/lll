@@ -3087,6 +3087,7 @@ bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
   "$LIN" bot bot-e2e --team ENG --duration 3600) || fail "lll bot exited nonzero: $bot_out"
 assert_contains "$bot_out" "created bot member bot-e2e" "bot creates a bot-kind member when missing"
+assert_contains "$bot_out" "re-mint with 'lll bot rotate bot-e2e'" "the bot expiry line names bot rotate (LLL-625)"
 # LLL-546: the token arrives inside the design's agent prompt, once.
 assert_contains "$bot_out" "true 'You are joining lll team ENG at $URL.'" "the bot prompt names the team and server"
 assert_contains "$bot_out" "export LLL_URL=$URL" "the bot prompt exports the server"
@@ -3107,16 +3108,16 @@ assert_contains "$out" "bot bot-e2e already exists" "create refuses an existing 
 assert_contains "$out" "lll bot rotate bot-e2e" "the refusal names bot rotate"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "a refused create does not rotate the token"
-# --env: stdout is exactly the two export lines, so it sources cleanly;
-# the progress lines go to stderr.
-bot_err="$DATA_DIR/bot-env.err"
+# --env prints the two export lines and nothing else, on either stream: the
+# 1.0 fleet captured 2>&1, and a status line there broke `source`. So this
+# captures 2>&1 and sources it.
 bot_out=$(env -u LLL_TOKEN -u LLL_TEAM HOME="$E2E_HOME" LLL_URL=$URL \
   LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
-  "$LIN" bot rotate bot-e2e --env --duration 3600 2>"$bot_err") || fail "lll bot rotate --env exited nonzero"
-assert_contains "$(cat "$bot_err")" "one-time bot token for bot-e2e" "rotate --env reports on stderr"
-assert_contains "$(cat "$bot_err")" "re-mint with 'lll bot rotate bot-e2e'" "the bot expiry line names bot rotate (LLL-625)"
+  "$LIN" bot rotate bot-e2e --env --duration 3600 2>&1) || fail "lll bot rotate --env exited nonzero"
 [ "$(printf '%s\n' "$bot_out" | wc -l | tr -d ' ')" = 2 ] || fail "lll bot --env printed more than the export lines: $bot_out"
-BOT_TOK=$( (eval "$bot_out"; printf '%s' "$LLL_TOKEN") )
+printf '%s\n' "$bot_out" > "$DATA_DIR/bot.env"
+BOT_TOK=$( (set -e; . "$DATA_DIR/bot.env"; printf '%s' "$LLL_TOKEN") ) || fail "the 2>&1 capture of bot --env does not source"
+[ -n "$BOT_TOK" ] || fail "sourcing bot --env set no LLL_TOKEN"
 out=$(LLL_TOKEN="$BOT_TOK" HOME="$E2E_HOME" LLL_URL=$URL "$LIN" whoami)
 assert_contains "$out" "bot-e2e <" "the --env exports carry the rotated bot token"
 # The prompt's team must exist and be visible; the refusal comes before

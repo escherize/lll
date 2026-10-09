@@ -467,6 +467,9 @@ pub fn dispatch(
     return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
   let Some(c) = resolve_command(cmds, verb) else {
+    if !verb.starts_with("-") && top_level_commands().contains(verb) {
+      return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {verb}'? (see 'lll {noun} --help')"))
+    }
     return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
   }
   // A verb with its own page answers --help with it; the generic parse-time
@@ -481,6 +484,43 @@ pub fn dispatch(
   let usage = usage(cmd, c.spec, c.positional)
   let parsed = parse_n(c.spec, args, 3, arity, usage)?
   (c.run)(CommandInput { ctx, args, parsed, usage })
+}
+
+/// Every top-level command, the first word after `lll`. Completions offer
+/// them, and dispatch names one when it is typed as a noun's verb ('lll
+/// member whoami', 1.0 fleet).
+pub fn top_level_commands() -> Slice<string> {
+  [
+    "issue",
+    "search",
+    "bot",
+    "team",
+    "member",
+    "invite",
+    "project",
+    "label",
+    "api",
+    "doc",
+    "finding",
+    "config",
+    "import",
+    "export",
+    "attach",
+    "watch",
+    "up",
+    "board",
+    "login",
+    "logout",
+    "token",
+    "webhook",
+    "skill",
+    "completions",
+    "upgrade",
+    "whoami",
+    "help",
+    "--version",
+    "-v",
+  ]
 }
 
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the

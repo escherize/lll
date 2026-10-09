@@ -11,6 +11,7 @@ Covered:
 - exit codes;
 - the JSON that `--json` prints, for the fields this page names;
 - the list envelope;
+- which stream carries what (below);
 - command, verb and flag spellings, including the permanent aliases below.
 
 Not covered:
@@ -51,6 +52,17 @@ body still prints.
 
 Errors print on stderr as `Error: ` and a message. The message is for people:
 it names the cause and the fix, and it can change in any release.
+
+## Output streams
+
+Data goes to stdout: a key, a record, a list. Notices go to stderr. Capture
+stdout only: `key=$(lll issue next --claim)`, not `2>&1`.
+
+With `--json`, stdout is exactly one JSON value (`lll watch --json`: one per
+line). `lll issue next --claim --json` and `lll issue start --json` print no
+notice at all: the JSON carries the claim and the branch. `lll bot create
+--env` and `lll bot rotate --env` print the two export lines and nothing
+else, on either stream.
 
 ## JSON output
 

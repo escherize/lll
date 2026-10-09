@@ -58,13 +58,16 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
       Ok(created) => created,
       Err(reason) => return Err(pb.failed(f"{reason}\nIssue {key} state unchanged; branch setup failed.")),
     }
-    // Under --json stdout is the issue alone; the Git lines move to stderr.
-    let out = if p.given("--json") { os.Stderr } else { os.Stdout }
-    fmt.Fprintln(out, f"Branch: {branch}")
-    if created {
-      fmt.Fprintln(out, f"Created and switched to branch '{branch}'")
-    } else {
-      fmt.Fprintln(out, f"Switched to existing branch '{branch}'")
+    // Under --json the issue is the whole output (the contract's stream
+    // rule): its record carries the work branch, so the Git lines are not
+    // printed anywhere.
+    if !p.given("--json") {
+      fmt.Println(f"Branch: {branch}")
+      if created {
+        fmt.Println(f"Created and switched to branch '{branch}'")
+      } else {
+        fmt.Println(f"Switched to existing branch '{branch}'")
+      }
     }
   }
   let started = writes.update_issue(ctx, issue,
