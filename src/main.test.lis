@@ -41,3 +41,10 @@ fn an_issue_synonym_as_the_command_names_the_issue_form() {
   assert unknown_command("send", "FLEET-4").contains("--state in-review")
   assert unknown_command("note", "FLEET-4").contains("lll issue comment KEY-123")
 }
+
+/// Case 20: 'lll comment add KEY' must not suggest the refused 'issue comment add'.
+#[test]
+fn a_non_key_second_word_is_not_carried_into_the_suggestion() {
+  let msg = unknown_command("comment", "add")
+  assert msg.contains("'lll issue comment ...'")
+}

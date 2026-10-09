@@ -142,3 +142,9 @@ fn a_near_state_names_the_one_it_matches() {
   let assert Err(far) = state("xyz")
   assert !far.message.contains("did you mean")
 }
+
+#[test]
+fn a_longer_spelling_of_a_state_names_it_too() {
+  let assert Err(e) = state("reviewing")
+  assert e.message.contains("did you mean 'in-review'?")
+}

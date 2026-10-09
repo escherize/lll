@@ -269,7 +269,10 @@ fn unknown_command(noun: string, verb: string) -> string {
       // the typed verb here, as the plural branch once did, hid the half
       // the user had right. So the verb rides along (LLL-313).
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {c.name}{rest}' (see 'lll issue {c.name} -h')"
+      // Only a key is carried into the suggestion: 'lll comment add' must not
+      // become 'lll issue comment add', which is refused too (case 20).
+      let carried = if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(verb) { f" {verb}" } else { " ..." }
+      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}' (see 'lll issue {c.name} -h')"
     }
   }
   // 'lll FLEET-4': a key where the noun goes (case 20).

@@ -15,7 +15,12 @@ pub fn states() -> Slice<string> {
 pub fn state(value: string) -> Result<models.IssueState, pb.CliError> {
   let Some(s) = models.IssueState.parse(value) else {
     // 'review' for in-review: four 1.0 fleet agents (case 20).
-    let near = states().filter(|w| value.length() >= 3 && strings.Contains(w, strings.ToLower(value)))
+    // Either way round, against the state less its 'in-' ('reviewing').
+    let typed = strings.ToLower(value)
+    let near = states().filter(|w| {
+      let stem = strings.TrimPrefix(w, "in-")
+      typed.length() >= 3 && (strings.Contains(w, typed) || strings.Contains(typed, stem))
+    })
     let guess = if near.length() == 1 { f"; did you mean '{near[0]}'?" } else { "" }
     return Err(pb.fail(pb.ErrorKind.Usage, f"unknown state '{value}'{guess} (use one of: {strings.Join(states(), ", ")})"))
   }

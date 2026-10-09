@@ -527,7 +527,7 @@ fn issue_synonym(verb: string) -> Option<string> {
   // of its own, so it never reaches here.
   if ["priority", "state", "assignee", "label", "project"].contains(verb) {
     return Some(
-      f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'",
+      f"unknown issue command '{verb}'; to change it use 'lll issue update KEY --{verb} <name>'{field_values(verb)}",
     )
   }
   // 'lll issue FLEET-4 review': the key where the verb goes (case 20).
@@ -538,6 +538,15 @@ fn issue_synonym(verb: string) -> Option<string> {
   }
   let Some(hint) = issue_verb_hint(verb) else { return None }
   Some(f"unknown issue command: '{verb}'; {hint} (see 'lll issue -h')")
+}
+
+/// The closed set an update field takes, when it has one: two 1.0 fleet
+/// agents (case 20) followed the 'issue state' hint with --state review.
+fn field_values(field: string) -> string {
+  match field {
+    "state" => f" (states: {strings.Join(query.states(), ", ")})",
+    _ => "",
+  }
 }
 
 /// The right spelling for a word that is no issue verb; main's top-level
