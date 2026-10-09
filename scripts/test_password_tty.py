@@ -18,6 +18,7 @@ import time
 
 binary = str(Path(sys.argv[1]).resolve())
 SECRET = 'tty-secret-7f3a'
+TRIES = 10
 
 
 def run_on_tty(args, env, cwd, prompt=b'assword'):
@@ -57,12 +58,18 @@ def main():
             ['login', '--token', '-'],
         ]
         wrong = []
+        # SECRET is typed the moment the prompt shows. Echo must already be
+        # off by then: a prompt printed before it is turned off echoed the
+        # token on a slow runner (LLL-686), so each case runs several times.
         for args in cases:
-            out, typed = run_on_tty(args, env, directory, b'Token' if '--token' in args else b'assword')
-            if not typed:
-                wrong.append(f"lll {' '.join(args)}: no password prompt on a terminal: {out[:200]!r}")
-            elif SECRET in out:
-                wrong.append(f"lll {' '.join(args)}: echoed the password: {out[:200]!r}")
+            for _ in range(TRIES):
+                out, typed = run_on_tty(args, env, directory, b'Token' if '--token' in args else b'assword')
+                if not typed:
+                    wrong.append(f"lll {' '.join(args)}: no password prompt on a terminal: {out[:200]!r}")
+                    break
+                if SECRET in out:
+                    wrong.append(f"lll {' '.join(args)}: echoed the password: {out[:200]!r}")
+                    break
         for args, flag in [(cases[0], '--password'), (cases[1], '--old-password'),
                            (cases[2], '--admin-password'), (cases[3], '--token')]:
             done = subprocess.run([binary, *args], cwd=directory, env=env, text=True,
