@@ -166,9 +166,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
     link to a repo file's `web_url`: that `web_url` counts as none;
   - `lll up` no longer adopts a server already running at a url a repo file
     chose, which received the administrator pair (including the generated
-    one in `./pb/pb_data`). It exits 4 and names `LLL_URL=<url> lll up` to
-    use that server deliberately. With nothing running there it starts its
-    own server, as before;
+    one in `./pb/pb_data`), unless the home config names the same url. It
+    exits 4, leads with removing the repo's url line, and offers
+    `LLL_URL=<url> lll up` only for a server that is yours, saying it sends
+    the admin credentials. With nothing running there it starts its own
+    server, as before;
   - requests no longer follow redirects. Go's default client kept the
     `Authorization` header for the same host on another port and re-sent a
     login POST body on 307. A redirect is now an error naming its target.

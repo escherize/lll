@@ -145,10 +145,19 @@ fn web_url_is_saved_only_beside_this_boards_url() {
 #[test]
 fn up_adopts_a_running_server_only_at_a_url_the_user_chose() {
   let url = "http://127.0.0.1:29733"
-  let Some(why) = adopt_refusal(url, Some(config.Source.RepoFile(".lll.toml"))) else { panic("expected a refusal") };
-  assert why == ".lll.toml points lll up at http://127.0.0.1:29733, where a server is already running; to use it, run LLL_URL=http://127.0.0.1:29733 lll up; or stop that server"
-  assert adopt_refusal(url, Some(config.Source.HomeFile("/h/lll.toml"))).is_none()
-  assert adopt_refusal(url, Some(config.Source.Env("LLL_URL"))).is_none()
-  assert adopt_refusal(url, Some(config.Source.Flag("--url"))).is_none()
-  assert adopt_refusal(url, Some(config.Source.Default)).is_none()
+  let repo = Some(config.Source.RepoFile(".lll.toml"))
+  let Some(why) = adopt_refusal(url, repo, "") else { panic("expected a refusal") };
+  // The safe way out first; adopting is offered last, saying what it sends.
+  assert why == ".lll.toml points lll up at http://127.0.0.1:29733, where a server is already running, and nothing else here chose that url
+if you did not choose this url: remove the url line from .lll.toml
+only if that server is yours: LLL_URL=http://127.0.0.1:29733 lll up (this sends your admin credentials to it)"
+  assert adopt_refusal(url, repo, "http://127.0.0.1:8090").is_some()
+  assert adopt_refusal(url, repo, "http://localhost:29733").is_some()
+  // The home config names the same url (a trailing slash aside): adopted.
+  assert adopt_refusal(url, repo, url).is_none()
+  assert adopt_refusal(url + "/", repo, url).is_none()
+  assert adopt_refusal(url, Some(config.Source.HomeFile("/h/lll.toml")), url).is_none()
+  assert adopt_refusal(url, Some(config.Source.Env("LLL_URL")), "").is_none()
+  assert adopt_refusal(url, Some(config.Source.Flag("--url")), "").is_none()
+  assert adopt_refusal(url, Some(config.Source.Default), "").is_none()
 }

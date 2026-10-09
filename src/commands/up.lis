@@ -197,7 +197,8 @@ check what is configured with 'lll config list'"),
   }
 
   if !starting {
-    if let Some(why) = adopt_refusal(db_url, src.url) {
+    let home = ctx.settings.load_home().map_err(pb.failed)?
+    if let Some(why) = adopt_refusal(db_url, src.url, home.url) {
       return Err(pb.fail(pb.ErrorKind.Refused, why))
     }
   }
@@ -538,11 +539,18 @@ fn server_key(url: string) -> string {
 /// `db_url`, or None (LLL-688). Adopting sends it the administrator pair
 /// and the boot's tokens. A url a repo file chose may be anything listening
 /// on this machine, and a data-dir marker cannot vouch for it: a repo can
-/// ship its own ./pb/pb_data with a marker and a pair.
-fn adopt_refusal(db_url: string, source: Option<config.Source>) -> Option<string> {
+/// ship its own ./pb/pb_data with a marker and a pair. A repo url that is
+/// the home config's url was chosen by the home file too, so it is adopted.
+///
+/// The way out leads with removing the repo's url: the listener may be
+/// someone else's, and adopting it hands over the admin credentials.
+fn adopt_refusal(db_url: string, source: Option<config.Source>, home_url: string) -> Option<string> {
+  if config.same_url(db_url, home_url) { return None }
   match source {
     Some(config.Source.RepoFile(path)) => Some(
-      f"{path} points lll up at {db_url}, where a server is already running; to use it, run LLL_URL={db_url} lll up; or stop that server",
+      f"{path} points lll up at {db_url}, where a server is already running, and nothing else here chose that url
+if you did not choose this url: remove the url line from {path}
+only if that server is yours: LLL_URL={db_url} lll up (this sends your admin credentials to it)",
     ),
     Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
       Some(config.Source.Default) | None => None,
