@@ -146,10 +146,11 @@ record, below), `docs` and `findings` (each a doc record, below).
 A member's `owner`, `scope`, `teams`, `mode` and `team_keys` are absent when
 empty. A comment's `author_kind` is `"system"` on a comment the server wrote on
 its own (today only the claim-expiry note, which has no `author`), and absent
-otherwise. A doc's `last_editor` is the member record id whose token made the
-latest member write, set by the server: the author until another member edits
-it. Linking an issue and confirming or refuting a finding are writes too.
-It is `""` on a doc with no author (absent in `issue view --json`).
+otherwise. A doc's `last_editor` is the member record id of the member who last
+changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
+by the server: the author until another member edits it. Linking an issue,
+confirming or refuting a finding, and a write that changes no content leave it
+unchanged. It is `""` on a doc with no author (absent in `issue view --json`).
 `project view --json` lists its `issues` as records without `key` or
 `claim`; use `issue list --project NAME --json` for the issue object.
 

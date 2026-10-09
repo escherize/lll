@@ -177,6 +177,27 @@ for key in ('last_editor+', '+last_editor', 'last_editor-'):
     assert 400 <= status < 500, ('last_editor modifier accepted', key, status, out)
 person_rec = record('person-doc')
 assert person_rec['last_editor'] == editor['id'] and person_rec['body'] == 'edited body', person_rec
+# Only a content edit moves it: linking and unlinking an issue, confirming or
+# refuting a finding, an empty PATCH and a same-value PATCH by another member
+# leave the author as last editor; a body edit by that member does not.
+cli('finding', 'create', 'shared-finding', '-t', 'Shared finding', '-b', 'owner body', token=owner_tok)
+shared = record('shared-finding')
+assert shared['last_editor'] == owner['id'], shared
+key = json.loads(cli('issue', 'create', '-t', 'Linked issue', '--json'))['key']
+cli('issue', 'link', key, 'shared-finding', token=editor_tok)
+assert len(record('shared-finding')['issues']) == 1
+cli('issue', 'unlink', key, 'shared-finding', token=editor_tok)
+cli('finding', 'refute', 'shared-finding', '-b', 'not so', token=editor_tok)
+cli('finding', 'confirm', 'shared-finding', token=editor_tok)
+ok('PATCH', '/api/collections/docs/records/' + shared['id'], editor_tok, {})
+ok('PATCH', '/api/collections/docs/records/' + shared['id'], editor_tok,
+   dict(title='Shared finding', body='owner body', issues=[]))
+shared = record('shared-finding')
+assert shared['last_editor'] == owner['id'] and shared['confidence'] == 'confirmed', shared
+assert 'Edited by' not in cli('finding', 'view', 'shared-finding')
+cli('doc', 'edit', 'shared-finding', '-b', 'editor body', token=editor_tok)
+assert record('shared-finding')['last_editor'] == editor['id']
+assert 'Edited by: da-editor\n' in cli('finding', 'view', 'shared-finding')
 # A superuser keeps the stored editor unless it names one (imports, repairs).
 ok('PATCH', '/api/collections/docs/records/' + person_rec['id'], su, dict(title='Person doc, su'))
 assert record('person-doc')['last_editor'] == editor['id']

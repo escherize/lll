@@ -9,8 +9,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 ### Added
 
 - Docs record who last edited them. `last_editor` is set by the server from
-  the caller: the author on create, the caller on every member update. A
-  member cannot send it. When it is not the author, `lll doc view` and
+  the caller: the author on create, then the member whose update changes the
+  doc's content (slug, title, kind, body, area or paths). Linking an issue
+  and confirming or refuting a finding do not count. A member cannot send
+  it. When it is not the author, `lll doc view` and
   `lll finding view` print `Edited by:`, and the board's doc page and docs
   index show it, with a bot's owner and "hidden member" as for the author.
   `doc view --json` has a `last_editor` field. Existing docs get their
