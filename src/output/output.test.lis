@@ -3,13 +3,13 @@ import "go:strings"
 #[test]
 fn lines_and_text_accumulate_in_order() {
   let out = line("a").text("b").line("c")
-  assert out.data == "a\nbc\n"
+  assert out.data() == "a\nbc\n"
 }
 
 #[test]
 fn text_output_sends_its_notices_to_stderr() {
   let out = line("Created label bug").notice("note: one")
-  assert out.data == "Created label bug\n"
+  assert out.data() == "Created label bug\n"
   assert strings.Join(out.stderr_lines(), "|") == "note: one"
 }
 
@@ -18,15 +18,27 @@ fn a_machine_document_drops_the_notices() {
   // --json and --env print the document alone: a script reads stdout whole.
   assert json("{}").notice("no labels").stderr_lines().length() == 0
   assert env("export A=1\n").notice("hint").stderr_lines().length() == 0
-  assert json("{}").data == "{}\n"
+  assert json("{}").data() == "{}\n"
 }
 
 #[test]
 fn then_joins_data_and_notices_and_keeps_a_machine_kind() {
   let joined = notice("first").then(json("[]").notice("second"))
-  assert joined.data == "[]\n"
-  assert strings.Join(joined.notices, "|") == "first|second"
+  assert joined.data() == "[]\n"
+  assert strings.Join(joined.then(none()).notice("x").stderr_lines(), "|") == ""
+  assert strings.Join(notice("first").then(line("data").notice("second")).stderr_lines(), "|") == "first|second"
   assert joined.stderr_lines().length() == 0
   let text_after = json("{}").then(none())
   assert text_after.stderr_lines().length() == 0
+}
+
+#[test]
+fn written_keeps_the_order_the_command_said_it_in() {
+  // A notice that introduces the data ("send them this, below") stays above it.
+  let parts = notice("intro").line("data").notice("outro").written()
+  assert parts.length() == 3
+  let Part.Notice(first) = parts[0] else { panic("notice first") }
+  assert first == "intro"
+  let Part.Data(second) = parts[1] else { panic("data second") }
+  assert second == "data\n"
 }

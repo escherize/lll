@@ -4,30 +4,39 @@
 /// its own, and the 1.0 fleet found the drift: notices on stdout, --env
 /// output on stderr, "Error:" before an exit that was only nothing-to-do.
 /// Now a command returns an Output and main's renderer is the one place
-/// that writes: `data` to stdout, `notices` to stderr, and under --json or
+/// that writes: the data to stdout, the notices to stderr, and under --json or
 /// --env only the data.
 pub struct Output {
-  /// The command's answer, exactly as stdout carries it: what a pipe or a
-  /// script reads. Built with `line` and `text`, so it ends in a newline
-  /// whenever the command's last write did.
-  pub data: string,
-  /// Remarks for the person at the terminal, one per line: stderr.
-  pub notices: Slice<string>,
+  /// What to write, in the order the command said it: the renderer keeps
+  /// that order, so a notice that introduces the data still comes first on
+  /// a terminal.
+  pub parts: Slice<Part>,
   pub kind: Kind,
 }
 
-/// What `data` is. A machine document (--json, --env) stands alone on
+/// One piece of an Output.
+pub enum Part {
+  /// The command's answer, exactly as stdout carries it: what a pipe or a
+  /// script reads. Written as it is; `line` adds the newline.
+  Data(string),
+  /// A remark for the person at the terminal, one line: stderr.
+  Notice(string),
+}
+
+/// What the data is. A machine document (--json, --env) stands alone on
 /// stdout: the renderer drops the notices, so a script never has to tell
 /// the answer from the commentary.
 pub enum Kind {
   Text,
+  /// A --json document.
   Json,
-  Env,
+  /// --env: shell export lines.
+  Exports,
 }
 
 /// Nothing to say.
 pub fn none() -> Output {
-  Output { data: "", notices: [], kind: Kind.Text }
+  Output { parts: [], kind: Kind.Text }
 }
 
 /// One line of text.
@@ -42,12 +51,12 @@ pub fn text(s: string) -> Output {
 
 /// A --json document: one line of JSON.
 pub fn json(doc: string) -> Output {
-  Output { data: f"{doc}\n", notices: [], kind: Kind.Json }
+  Output { parts: [Part.Data(f"{doc}\n")], kind: Kind.Json }
 }
 
 /// --env output: shell export lines, written as they are.
 pub fn env(exports: string) -> Output {
-  Output { data: exports, notices: [], kind: Kind.Env }
+  Output { parts: [Part.Data(exports)], kind: Kind.Exports }
 }
 
 /// A notice alone, with no data: an empty list's "no labels".
@@ -58,34 +67,56 @@ pub fn notice(s: string) -> Output {
 impl Output {
   /// `s` and a newline appended to the data.
   pub fn line(self, s: string) -> Output {
-    Output { data: f"{self.data}{s}\n", ..self }
+    self.text(f"{s}\n")
   }
 
   /// `s` appended to the data as it is.
   pub fn text(self, s: string) -> Output {
-    Output { data: f"{self.data}{s}", ..self }
+    Output { parts: self.parts.append(Part.Data(s)), ..self }
   }
 
   /// `s` added as one more notice.
   pub fn notice(self, s: string) -> Output {
-    Output { notices: self.notices.append(s), ..self }
+    Output { parts: self.parts.append(Part.Notice(s)), ..self }
   }
 
-  /// This output followed by `next`: data after data, notices after
-  /// notices. A machine document in `next` makes the whole one machine.
+  /// This output followed by `next`. A machine document in `next` makes
+  /// the whole one machine.
   pub fn then(self, next: Output) -> Output {
     let kind = match next.kind {
       Kind.Text => self.kind,
       other => other,
     }
-    Output { data: f"{self.data}{next.data}", notices: self.notices.append(next.notices...), kind }
+    Output { parts: self.parts.append(next.parts...), kind }
+  }
+
+  /// The parts the renderer writes, in order: every part of a text output,
+  /// only the data of a --json or --env document.
+  pub fn written(self) -> Slice<Part> {
+    match self.kind {
+      Kind.Text => self.parts,
+      Kind.Json | Kind.Exports => self.parts.filter(|part| match part {
+        Part.Data(_) => true,
+        Part.Notice(_) => false,
+      }),
+    }
+  }
+
+  /// Everything bound for stdout, joined.
+  pub fn data(self) -> string {
+    let mut all = ""
+    for part in self.parts {
+      if let Part.Data(s) = part { all = all + s }
+    }
+    all
   }
 
   /// The notices the renderer writes to stderr: none under --json or --env.
   pub fn stderr_lines(self) -> Slice<string> {
-    match self.kind {
-      Kind.Text => self.notices,
-      Kind.Json | Kind.Env => [],
+    let mut lines: Slice<string> = []
+    for part in self.written() {
+      if let Part.Notice(s) = part { lines = lines.append(s) }
     }
+    lines
   }
 }

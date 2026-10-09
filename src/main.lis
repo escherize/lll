@@ -46,13 +46,11 @@ fn main() {
 }
 
 /// The one place lll writes a command's outcome (LLL-683): the data to
-/// stdout and the notices to stderr (none under --json or --env), then the
-/// version-skew line, then any error with its exit code.
+/// stdout and the notices to stderr (none under --json or --env), in the
+/// order the command gave them, then the version-skew line, then any error
+/// with its exit code.
 fn render(result: Result<output.Output, pb.CliError>, skew: Option<string>) {
-  if let Ok(out) = result {
-    fmt.Print(out.data)
-    for n in out.stderr_lines() { fmt.Fprintln(os.Stderr, n) }
-  }
+  if let Ok(out) = result { write(out) }
   if let Some(line) = skew {
     fmt.Fprintln(os.Stderr, line)
   }
@@ -72,6 +70,15 @@ fn render(result: Result<output.Output, pb.CliError>, skew: Option<string>) {
     let prefix = if let pb.ErrorKind.NothingToDo = err.kind { "Nothing to do" } else { "Error" }
     fmt.Fprintln(os.Stderr, f"{prefix}: {err.message}")
     os.Exit(pb.exit_code(err.kind))
+  }
+}
+
+fn write(out: output.Output) {
+  for part in out.written() {
+    match part {
+      output.Part.Data(s) => fmt.Print(s),
+      output.Part.Notice(s) => fmt.Fprintln(os.Stderr, s),
+    }
   }
 }
 
