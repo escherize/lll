@@ -303,7 +303,7 @@ fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Env credentials count only when no token is configured (D7): otherwise
   // superuser_auth would use the member token and the server would answer a
   // bare 403.
-  let login = given_admin_login(ctx.settings, p)?
+  let login = given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?
   let usable = match login {
     AdminLogin.Explicit(_) => true,
     AdminLogin.Env(_) => ctx.settings.config().map_err(pb.failed)?.token == "",
@@ -485,7 +485,8 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
   }
   let password = if p.given("--password") {
     let mut input = bufio.NewReader(os.Stdin)
-    Some(secret.Secret.read(p, "--password", f"Password for {name}: ", input)?)
+    let typed = secret.Secret.read(p, "--password", f"Password for {name}: ", input)?
+    Some(typed.confirmed(p, "--password", input)?)
   } else {
     None
   }
@@ -747,7 +748,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Administrator credentials only: the members rules refuse every member
   // and bot token, so an agent on someone's token cannot widen a guest or
   // narrow its owner.
-  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   // The record as the administrator reads it: a team-scoped configured token
   // reads a member without the teams it cannot see (LLL-551), and editing
   // that copy would drop them.

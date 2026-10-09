@@ -47,7 +47,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
       name: "--token",
       value: true,
       hint: "token",
-      help: "log in with a member token instead of a password; - prompts for it",
+      help: "log in with a member token instead of a password; '-' reads it from stdin\n(a terminal prompts with echo off)",
       ..,
     },
     flags.Flag {
@@ -61,7 +61,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
       name: "--admin-password",
       value: true,
       hint: "pw",
-      help: "superuser password for --create (else LLL_ADMIN_PASSWORD)",
+      help: "superuser password for --create (else LLL_ADMIN_PASSWORD); '-' reads it from stdin",
       ..,
     },
     flags.Flag {
@@ -107,7 +107,11 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   // Read for the whole command, not just --create: login_failed compares
   // the admin email to recognise the admin identity, and it has to see the
   // flags too or the flag-users get the generic advice.
-  let admin = given_admin_login(ctx.settings, p)?
+  // One reader for the whole flow: a second bufio.Reader would race the
+  // first's read-ahead and could lose a line behind the one it read
+  // (LLL-686: --admin-password - lost the password answers after it).
+  let mut input = bufio.NewReader(os.Stdin)
+  let admin = given_admin_login(ctx.settings, p, input)?
   let admin_email = admin_login_email(admin)
   let target = strings.TrimSuffix(strings.TrimSpace(p.one("--url")), "/")
   if p.given("--url") && !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
@@ -119,9 +123,6 @@ pub fn login(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     return Err(pb.failed(why))
   }
 
-  // One reader for the whole flow: a second bufio.Reader would race the
-  // first's read-ahead and could lose the password line behind the email.
-  let mut input = bufio.NewReader(os.Stdin)
   if p.given("--token") {
     if p.given("--email") || p.given("--password") || p.given("--create") {
       return Err(flags.usage_error("--token logs in with a member token: drop --email, --password and --create"))

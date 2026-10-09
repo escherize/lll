@@ -147,6 +147,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   --password -` and `webhook add --secret -` took `-` as the value.
   `login --token -` printed `Token: ` into a pipe and, on empty stdin, said
   the token was missing.
+- Ctrl-C at a hidden password or token prompt restores terminal echo and
+  exits 130; it left the shell with echo off. `member create --password -`
+  on a terminal asks twice and refuses a mismatch. `--admin-password -`
+  followed by a prompt (`member set-password` without `--password`, `login
+  --create` without `--password`) reads the prompt's answer from the same
+  stdin; the answer was lost and the command said there was no password.
 
 ### Fixed
 
