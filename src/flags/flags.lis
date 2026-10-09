@@ -240,14 +240,18 @@ fn url_scope_error(arg: string, url: string, usage: string) -> string {
   // unreachable hint follows): 'config set url' writes the home file, which
   // LLL_URL and a repo .lll.toml both outrank.
   let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or("", |t| t.1.url)
-  let change = if origin == "env:LLL_URL" {
+  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {url_default_hint(origin)}."
+}
+
+/// How to change the default url, given where it came from.
+fn url_default_hint(origin: string) -> string {
+  if origin == "env:LLL_URL" {
     "the default comes from LLL_URL in the environment; correct or unset it"
   } else if strings.HasSuffix(origin, ".lll.toml") {
     f"the default comes from {strings.TrimPrefix(origin, "file:")}; edit its url line"
   } else {
     "to change the default, run 'lll config set url URL'"
   }
-  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {change}."
 }
 
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own
