@@ -66,7 +66,7 @@ fn only_a_repo_files_token_is_warned_about() {
 // per source.
 #[test]
 fn a_refused_superuser_login_names_where_the_url_came_from() {
-  let refused = pb.CliError { kind: pb.ErrorKind.Auth, status: 400, code: None, message: "Failed to authenticate." }
+  let refused = pb.CliError { kind: pb.ErrorKind.Auth, status: 400, code: None, message: "Failed to authenticate.", said: None }
   let chosen = "authenticating as the superuser: Failed to authenticate.\nif the administrator credentials are right, check the server: "
   let rows: Slice<(Option<config.Source>, string)> = [
     (Some(config.Source.Flag("--url")), chosen + "--url names another one"),

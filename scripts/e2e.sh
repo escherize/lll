@@ -1428,8 +1428,9 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "--until with --timeout: expected nonzero exit"
 assert_contains "$out" "no comment containing 'never-coming'" "--timeout names what did not arrive"
-out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY")
-assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until"
+# A notice (LLL-683): stderr, so a script reading the listing gets the listing.
+out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY" 2>&1 >/dev/null)
+assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until on stderr"
 
 python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
@@ -2020,8 +2021,9 @@ out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src)
 assert_contains "$out" "migration-hazard" "finding near matches the parent directory"
 out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near src/pb/up.lis)
 assert_contains "$out" "migration-hazard" "finding near matches a file inside a stored directory"
-out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates)
-assert_contains "$out" "No findings for web/templates." "finding near with no match says so"
+# A notice, like every empty list's (LLL-683): stderr, so stdout stays empty.
+out=$(LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding near web/templates 2>&1 >/dev/null)
+assert_contains "$out" "No findings for web/templates." "finding near with no match says so on stderr"
 
 # LLL-314: exact coordinates beat an earlier slug's broad directory match.
 LLL_URL=$URL LLL_TEAM=ENG "$LIN" finding create -s a-ranking-directory -t "Broad ranking note" \
@@ -3256,6 +3258,45 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ROT_TOK
   "$URL/api/collections/members/records?perPage=1")
 [ "$code" = 200 ] || fail "the rotated-in token does not authenticate (got $code)"
 
+# LLL-683: a failed write is a failure, not a quiet exit 0. Stdout opened
+# read-only refuses every write, on macOS and linux alike.
+write_fails() { # label command... ; the command must exit 1 naming the write
+  local label=$1 out
+  shift
+  if out=$("$@" 2>&1 1</dev/null); then fail "$label: exited 0 with stdout unwritable"; fi
+  assert_contains "$out" "Error: writing output:" "$label"
+}
+WFKEY=$(LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue create -t "write failure" --json | jq -r .key)
+printf 'attachment bytes\n' > "$DATA_DIR/write-failure.txt"
+LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue attach "$WFKEY" "$DATA_DIR/write-failure.txt" > /dev/null
+WFATT=$(LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue view "$WFKEY" --json | jq -r '.attachments[0]')
+write_fails "issue list with stdout unwritable" env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue list
+write_fails "issue list --json with stdout unwritable" env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue list --json
+write_fails "issue download with stdout unwritable" env LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue download "$WFKEY" "$WFATT"
+out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot create bot-lostwrite --env --duration 3600 2>&1 1</dev/null) && fail "bot create --env exited 0 with stdout unwritable"
+assert_contains "$out" "Error: writing output:" "bot create --env names the failed write"
+assert_contains "$out" "lll bot rotate bot-lostwrite" "and how to get the lost token back"
+# A broken stderr loses only notices: the data still reaches stdout and the
+# command succeeds. 'issue next --claim' holds the claim, so it must print
+# the key it holds.
+NEXT=$(LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue next --claim 2</dev/null) \
+  || fail "issue next --claim exited non-zero with stderr unwritable"
+printf '%s' "$NEXT" | grep -Eq '^ENG-[0-9]+$' || fail "issue next --claim printed no key with stderr unwritable: $NEXT"
+LLL_URL=$URL LLL_TEAM=ENG LLL_TOKEN="$BRYAN_TOK" "$LIN" issue release "$NEXT" > /dev/null 2>&1
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" "$LIN" api GET /api/health 2</dev/null) \
+  || fail "api GET exited non-zero with stderr unwritable"
+assert_contains "$out" '"code":200' "api GET prints the body with stderr unwritable"
+# A command that failed keeps its own message and exit code when stdout is
+# unwritable too: api --fail on a 404 exits 3 (not found), not 1.
+set +e
+out=$(LLL_URL=$URL LLL_TOKEN="$BRYAN_TOK" "$LIN" api GET /api/collections/nope/records --fail 2>&1 1</dev/null)
+rc=$?
+set -e
+[ "$rc" = 3 ] || fail "api --fail 404 with stdout unwritable: expected exit 3, got $rc: $out"
+assert_contains "$out" "Error: writing output:" "the write failure is named"
+assert_contains "$out" "Missing collection context" "and so is the original error"
+
 # Explicit authority and endpoint flags use the same gate without persisting
 # credentials or replacing the caller's configured server.
 cp "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml"
@@ -3273,9 +3314,10 @@ cmp -s "$E2E_HOME/.config/lll/lll.toml" "$DATA_DIR/pre-token-flags.toml" \
 # connection; the next process reads it without an endpoint environment value.
 STATIC_HOME="$DATA_DIR/static-token-home"
 mkdir -p "$STATIC_HOME"
+# The note is a notice (LLL-683): stderr, so stdout carries only the setting.
 out=$(cd "$STATIC_HOME" && env -u LLL_TOKEN HOME="$STATIC_HOME" LLL_URL=http://127.0.0.1:1 \
-  "$LLL_ABS" config set url "$URL/")
-assert_contains "$out" 'overrides this setting' 'URL setter explains an environment override'
+  "$LLL_ABS" config set url "$URL/" 2>&1 >/dev/null)
+assert_contains "$out" 'overrides this setting' 'URL setter explains an environment override on stderr'
 cp "$STATIC_HOME/.config/lll/lll.toml" "$DATA_DIR/static-endpoint.toml"
 for invalid_endpoint in ftp://invalid https://invalid/path?query=yes https://invalid/path#fragment; do
   out=$(cd "$STATIC_HOME" && env -u LLL_URL HOME="$STATIC_HOME" "$LLL_ABS" config set url "$invalid_endpoint" 2>&1) \

@@ -1,12 +1,12 @@
 import "display"
 import "records"
 import "go:encoding/json"
-import "go:fmt"
 import "go:strings"
 
 import "config"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "theme"
@@ -15,7 +15,7 @@ import "writes"
 /// Dispatch `lll team <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll team --help`
 /// and shell completions all read it, so none of the three can drift.
-pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn team(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "team", "work with teams", team_intro(), team_commands(), args)
 }
 
@@ -118,7 +118,7 @@ and no other team's members, keys or ids ('lll member --help'). 'lll whoami'
 shows your access."
 }
 
-fn team_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let mut teams = records.list_teams(ctx)?
@@ -128,14 +128,15 @@ fn team_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if !p.given("--archived") {
     teams.items = teams.items.filter(|t| !t.archived)
   }
-  if p.given("--json") { return print_list_json(teams.items, whole_list(teams.items.length()), "team list") }
-  if teams.items.is_empty() { return say_empty("teams") }
+  if p.given("--json") { return list_json(teams.items, whole_list(teams.items.length()), "team list") }
+  if teams.items.is_empty() { return Ok(empty_list("teams")) }
+  let mut out = output.none()
   for t in teams.items {
     let mut mark = ""
     if t.archived { mark = "\t(archived)" }
-    fmt.Println(f"{display.table_cell(t.key)}\t{display.table_cell(t.name)}{mark}")
+    out = out.line(f"{display.table_cell(t.key)}\t{display.table_cell(t.name)}{mark}")
   }
-  Ok(())
+  Ok(out)
 }
 
 fn team_list_spec() -> Slice<flags.Flag> {
@@ -188,7 +189,7 @@ fn team_rename_spec() -> Slice<flags.Flag> {
   ]
 }
 
-fn team_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   if p.first() != "" && p.given("--key") {
@@ -199,9 +200,8 @@ fn team_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let name = p.one("-n")
 
   let created = create_team(ctx, key, name)?
-  if p.given("--json") { return print_json(created, "team") }
-  fmt.Println(f"Created team {created.key}: {created.name}")
-  Ok(())
+  if p.given("--json") { return json_value(created, "team") }
+  Ok(output.line(f"Created team {created.key}: {created.name}"))
 }
 
 /// `lll team rename KEY [--key NEW] [-n "Name"]` — TASK-87.
@@ -211,7 +211,7 @@ fn team_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
 /// board, in `issue list` and in every URL the moment the PATCH lands. What
 /// does not follow is stored text, and the caller has to be told which
 /// (see team_rename_collateral).
-fn team_rename(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_rename(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -239,7 +239,7 @@ fn team_rename(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
 
   writes.update_team(ctx, pb.Caller.Process, t.id, rename_patch(new_key, new_name))?
-  if p.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
+  if p.given("--json") { return record_after(ctx, "teams", t.id.string()) }
 
   let mut final_key = t.key
   if new_key != "" { final_key = new_key }
@@ -252,11 +252,11 @@ fn team_rename(input: flags.CommandInput) -> Result<(), pb.CliError> {
   } else {
     f"Renamed team {t.key}: {t.name} -> {final_name}"
   }
-  fmt.Println(line)
+  let mut out = output.line(line)
   for line in team_rename_collateral(t.key, final_key) {
-    fmt.Println(line)
+    out = out.line(line)
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The edit for whichever of key/name was given. An empty flag is "not
@@ -288,7 +288,7 @@ fn team_rename_collateral(old_key: string, new_key: string) -> Slice<string> {
 /// `lll team set-accent KEY #rrggbb` — TASK-100. The accent was the one
 /// shared field only the web could write (TASK-83's colour picker), which
 /// inverts the rule TASK-83 was built on.
-fn team_set_accent(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_set_accent(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   if input.parsed.positional_count() != 2 {
     return Err(flags.usage_error("usage: lll team set-accent KEY #rrggbb (empty '' clears it)"))
@@ -302,13 +302,14 @@ fn team_set_accent(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { accent: Some(hex), .. })?
-  if input.parsed.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
+  if input.parsed.given("--json") { return record_after(ctx, "teams", t.id.string()) }
+  let mut out = output.none()
   if hex == "" {
-    fmt.Println(f"Cleared the accent for {t.key}; it uses the canonical orange again")
+    out = out.line(f"Cleared the accent for {t.key}; it uses the canonical orange again")
   } else {
-    fmt.Println(f"Accent for {t.key} is now {hex}")
+    out = out.line(f"Accent for {t.key} is now {hex}")
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The accent to store for a typed argument, matching what /settings stores
@@ -332,7 +333,7 @@ fn accent_value(raw: string) -> Result<string, pb.CliError> {
 /// plus a letter derived from the key, so two teams whose keys share an
 /// initial differed only in hue. Settable from the CLI for the same reason
 /// the accent is: a shared field only the web can write inverts the rule.
-fn team_set_emoji(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_set_emoji(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   if input.parsed.positional_count() != 2 {
     return Err(flags.usage_error("usage: lll team set-emoji KEY EMOJI (empty '' clears it)"))
@@ -343,13 +344,14 @@ fn team_set_emoji(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { emoji: Some(glyph), .. })?
-  if input.parsed.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
+  if input.parsed.given("--json") { return record_after(ctx, "teams", t.id.string()) }
+  let mut out = output.none()
   if glyph == "" {
-    fmt.Println(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
+    out = out.line(f"Cleared the emoji for {t.key}; it shows the letter from its key again")
   } else {
-    fmt.Println(f"{t.key} is now {glyph}")
+    out = out.line(f"{t.key} is now {glyph}")
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The emoji line for `team view`: what the rail and the tab icon will show,
@@ -430,7 +432,7 @@ fn configured_scope(ctx: pb.Client) -> Result<query.TeamScope, pb.CliError> {
 /// Refuses a team holding issues rather than cascading: deleting issues is
 /// not what "delete the team I just made by mistake" means, and PocketBase
 /// would happily orphan them.
-fn team_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_delete(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" {
@@ -450,8 +452,7 @@ fn team_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(aborted())
   }
   writes.delete_team(ctx, t.id)?
-  fmt.Println(f"deleted team {t.key}")
-  Ok(())
+  Ok(output.line(f"deleted team {t.key}"))
 }
 
 fn team_delete_page() -> string {
@@ -467,12 +468,12 @@ mistake. On a terminal it asks first; --yes skips the question."
 
 /// The archive verbs share parsed inputs; each fixes its lifecycle direction
 /// before entering the common implementation.
-fn team_archive(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_archive(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   team_set_archived(ctx, input.parsed, true)
 }
 
-fn team_unarchive(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_unarchive(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   team_set_archived(ctx, input.parsed, false)
 }
@@ -480,7 +481,7 @@ fn team_unarchive(input: flags.CommandInput) -> Result<(), pb.CliError> {
 /// `lll team archive KEY` / `lll team unarchive KEY` — the team lifecycle.
 /// Archiving hides, never deletes: issues, comments and the /t/KEY/ board
 /// all stay, so the command can afford to be one word with no confirm.
-fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<(), pb.CliError> {
+fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<output.Output, pb.CliError> {
   let mut verb = "archive"
   if !archived { verb = "unarchive" }
   let key = p.first()
@@ -491,18 +492,19 @@ fn team_set_archived(ctx: pb.Client, p: flags.Parsed, archived: bool) -> Result<
     return Err(records.unknown_team(ctx, key))
   }
   writes.update_team(ctx, pb.Caller.Process, t.id, writes.TeamPatch { archived: Some(archived), .. })?
-  if p.given("--json") { return print_record_after(ctx, "teams", t.id.string()) }
+  if p.given("--json") { return record_after(ctx, "teams", t.id.string()) }
+  let mut out = output.none()
   if archived {
-    fmt.Println(
+    out = out.line(
       f"Archived team {t.key}: hidden from team lists and the board rail; /t/{t.key}/ stays readable. 'lll team unarchive {t.key}' brings it back.",
     )
   } else {
-    fmt.Println(f"Unarchived team {t.key}")
+    out = out.line(f"Unarchived team {t.key}")
   }
-  Ok(())
+  Ok(out)
 }
 
-fn team_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn team_view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let key = input.parsed.first()
   if key == "" {
@@ -517,18 +519,18 @@ fn team_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let mut fields = Map.new<string, json.RawMessage>()
     if let Err(e) = json.Unmarshal(encode_json(t, "team")?, &fields) { return Err(pb.failed(f"decoding team: {e}")) }
     fields["issues"] = encode_json(issues_held, "team")?
-    return print_json(fields, "team")
+    return json_value(fields, "team")
   }
 
-  fmt.Println(f"Key:    {t.key}")
-  fmt.Println(f"Name:   {t.name}")
+  let mut out = output.line(f"Key:    {t.key}")
+  out = out.line(f"Name:   {t.name}")
   // The stored value is what /settings wrote, so it goes through the same
   // normalizer the board renders with; "" is the canonical orange (TASK-100).
-  fmt.Println(f"Accent: {view_accent(t.accent)}")
-  fmt.Println(f"Emoji:  {view_emoji(t.emoji, t.key)}")
-  fmt.Println(f"Issues: {issues_held}")
+  out = out.line(f"Accent: {view_accent(t.accent)}")
+  out = out.line(f"Emoji:  {view_emoji(t.emoji, t.key)}")
+  out = out.line(f"Issues: {issues_held}")
   if t.archived {
-    fmt.Println("Archived: yes ('lll team unarchive' brings it back)")
+    out = out.line("Archived: yes ('lll team unarchive' brings it back)")
   }
-  Ok(())
+  Ok(out)
 }

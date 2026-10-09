@@ -1,12 +1,11 @@
 import "go:bytes"
-import "go:fmt"
 import "go:io"
 import "go:net/http"
-import "go:os"
 import "go:strings"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 
 // `lll api METHOD PATH` — raw passthrough to the board's server API, the
@@ -28,26 +27,23 @@ pub fn api_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = api_spec()
   // Two bare words: METHOD and PATH, like `veans api` and curl.
   let p = flags.parse_n(spec, args, 2, 2, "lll api METHOD PATH [--body TEXT] [--fail]")?
   if p.given("--help") {
-    print_api_usage()
-    return Ok(())
+    return Ok(output.line(api_usage_page()))
   }
   if p.given("--schema") {
     if p.positional_count() != 0 {
       return Err(flags.usage_error("--schema prints the reference; it takes no METHOD PATH"))
     }
-    fmt.Print(schema_reference())
-    return Ok(())
+    return Ok(output.text(schema_reference()))
   }
   let method = strings.ToUpper(p.nth(0))
   let path = p.nth(1)
   if method == "" && path == "" {
-    print_api_usage()
-    return Ok(())
+    return Ok(output.line(api_usage_page()))
   }
   if path == "" {
     return Err(flags.usage_error("lll api needs METHOD and PATH (see 'lll api --help')"))
@@ -63,7 +59,7 @@ pub fn api(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
 /// right for the verbs and wrong for a passthrough whose whole job is to show
 /// the API as it answered. Transport failures still get the client's
 /// "cannot reach PocketBase" message, because that failure is the same one.
-fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<(), pb.CliError> {
+fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: bool) -> Result<output.Output, pb.CliError> {
   let (cfg, _src) = ctx.settings.traced().map_err(pb.failed)?
   let base = strings.TrimRight(cfg.url, "/")
   let mut req = match http.NewRequest(method, base + path, bytes.NewReader(payload.bytes())) {
@@ -91,18 +87,14 @@ fn send(ctx: pb.Client, method: string, path: string, payload: string, fail: boo
   }
   // Status to stderr, body to stdout: a human sees both, a script pipes the
   // body to jq and reads the status from stderr when it wants it.
-  fmt.Fprintln(os.Stderr, resp.Status)
-  fmt.Println(body as string)
+  let answer = output.notice(resp.Status).line(body as string)
   // --fail (LLL-645): an error answer exits with the code its status maps
-  // to, as every other command's would. Without it any answer is exit 0.
+  // to, as every other command's would, after printing the answer. Without
+  // it any answer is exit 0.
   if fail && resp.StatusCode >= 400 {
-    return Err(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string))
+    return Err(pb.http_error(f"{method} {path}", resp.StatusCode, resp.Status, body as string).after(answer))
   }
-  Ok(())
-}
-
-fn print_api_usage() {
-  fmt.Println(api_usage_page())
+  Ok(answer)
 }
 
 /// The hand-written page for `lll api`, pure so its text can be asserted:

@@ -1,10 +1,10 @@
 import "records"
-import "go:fmt"
 import "go:os"
 import "go:path/filepath"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 
 // `lll attach` — point a repo at a team, once, in a file the repo keeps.
@@ -28,12 +28,11 @@ pub fn attach_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = attach_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll attach", spec, ""))?
   if p.given("--help") {
-    print_attach_usage()
-    return Ok(())
+    return Ok(output.line(attach_usage()))
   }
 
   // The git root, not the working directory: attaching from src/commands must
@@ -54,6 +53,7 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
 
   let name = filepath.Base(root)
   let given = p.one("--key")
+  let mut out = output.none()
   let key = if p.given("--key") {
     if given == "" { return Err(flags.usage_error("--key requires a nonempty team key")) }
     // LLL-235: what lands in .lll.toml is what the server stores.
@@ -66,7 +66,9 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
     // 0, with no delete command to undo it. The directory name is a fine
     // guess for the FIRST team on an empty server; it is a bad guess for any
     // other case, so it is now the fallback rather than the rule.
-    derive_key_from_server(ctx, name)?
+    let (derived, said) = derive_key_from_server(ctx, name)?
+    out = said
+    derived
   }
   if key == "" {
     return Err(pb.failed(f"no team key in '{name}' to derive one from; pass it: lll attach --key KEY"))
@@ -84,36 +86,35 @@ pub fn attach(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
 
   let path = filepath.Join(root, ".lll.toml")
   set_key_in(path, "team", key, false)?
-  fmt.Println(f"team = \"{key}\" in {path}")
-  fmt.Println(ensure_attached_team(ctx, key))
+  out = out.line(f"team = \"{key}\" in {path}")
+  out = out.line(ensure_attached_team(ctx, key))
   // A plain directory has no clone to inherit the file; what it has instead is
   // its own subtree, so say that rather than tell someone to commit a file in
   // a directory git does not track.
   if in_repo {
-    fmt.Println(
+    out = out.line(
       "commit .lll.toml: every clone and worktree of this repo is attached from then on",
     )
   } else {
-    fmt.Println(
+    out = out.line(
       f"not a git repository, so wrote {path}; every subdirectory of it inherits this team",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The team key bare `lll attach` should use, asked of the server first.
 /// One team is the answer; several is a choice only the operator can make;
 /// none (or a server that cannot be reached) falls back to the directory
 /// name, which is the empty-server bootstrap this command was written for.
-fn derive_key_from_server(ctx: pb.Client, dir_name: string) -> Result<string, pb.CliError> {
-  let Ok(teams) = records.list_teams(ctx) else { return Ok(clean_key(dir_name)) }
+fn derive_key_from_server(ctx: pb.Client, dir_name: string) -> Result<(string, output.Output), pb.CliError> {
+  let Ok(teams) = records.list_teams(ctx) else { return Ok((clean_key(dir_name), output.none())) }
   let live = teams.items.filter(|t| !t.archived)
   if live.length() == 1 {
     let key = live[0].key
     // "you can see": a team-scoped member is shown only its own teams, so
     // "the server has" was false for it (fleet case 12, LLL-552).
-    fmt.Println(f"you can see one team, {key}; attaching to it")
-    return Ok(key)
+    return Ok((key, output.line(f"you can see one team, {key}; attaching to it")))
   }
   if live.length() > 1 {
     let keys = live.map(|t| t.key).join(", ")
@@ -121,7 +122,7 @@ fn derive_key_from_server(ctx: pb.Client, dir_name: string) -> Result<string, pb
       pb.failed(f"you can see {live.length()} teams ({keys}); say which: lll attach --key KEY"),
     )
   }
-  Ok(clean_key(dir_name))
+  Ok((clean_key(dir_name), output.none()))
 }
 
 /// Create the team unless the server already has it, and say which happened.
@@ -141,9 +142,8 @@ fn ensure_attached_team(ctx: pb.Client, key: string) -> string {
   f"created team {created.key}; issues will be {created.key}-1, {created.key}-2, ..."
 }
 
-fn print_attach_usage() {
-  fmt.Println(
-    "lll attach - point this directory at a team, once
+fn attach_usage() -> string {
+  "lll attach - point this directory at a team, once
 
 Usage:
   lll attach [--key KEY]
@@ -171,6 +171,5 @@ Use --web-url URL with login when an explicit board address is needed.
 Keep credentials in the home config or environment, never the committed
 .lll.toml. An inherited attachment does not need another 'lll attach'.
 
-'lll config list' shows every effective value and the file it came from.",
-  )
+'lll config list' shows every effective value and the file it came from."
 }

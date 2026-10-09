@@ -41,12 +41,12 @@
   },
   "errors/view": {
     "code": 1,
-    "stdout": "VIEW-1 Read fixture\n\nState:     ○ todo\nPriority:  urgent\nAssignee:  viewer\n",
+    "stdout": "",
     "stderr": "Error: GET <server>/api/collections/claims/records?perPage=1&filter=issue%3D%27issue0000000001%27&expand=member: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed claim\"}\n"
   },
   "errors/raw": {
     "code": 1,
-    "stdout": "# VIEW-1: Read fixture\n",
+    "stdout": "",
     "stderr": "Error: GET <server>/api/collections/claims/records?perPage=1&filter=issue%3D%27issue0000000001%27&expand=member: 503 Service Unavailable: {\"code\": 503, \"message\": \"failed claim\"}\n"
   },
   "errors/json": {

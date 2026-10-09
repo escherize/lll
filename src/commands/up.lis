@@ -10,6 +10,7 @@ import "go:time"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 import "buildinfo"
 import "serve"
@@ -79,12 +80,14 @@ pub fn up_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+/// `lll up` writes its banner as it boots and then serves until stopped: a
+/// stream, so everything after --help prints directly (the banner has to be
+/// on screen while the server runs).
+pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = up_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll up", spec, ""))?
   if p.given("--help") {
-    print_up_usage()
-    return Ok(())
+    return Ok(output.line(up_usage()))
   }
   let scratch = p.given("--scratch")
   let share_bind = p.one("--bind")
@@ -480,7 +483,7 @@ password in its own data directory's .lll-admin.json."),
       fmt.Println(f"could not open a browser: {e.message}")
     }
   }
-  serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"))
+  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui")))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no
@@ -679,9 +682,8 @@ fn log_cli_in(
   }
 }
 
-fn print_up_usage() {
-  fmt.Println(
-    "lll up - start the lll server and web board together
+fn up_usage() -> string {
+  "lll up - start the lll server and web board together
 
 Usage:
   lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo] [--admin-ui]
@@ -764,7 +766,6 @@ Environment:
   LLL_ADMIN_PASSWORD  neither generates one, kept in the data directory)
   LLL_ALLOWED_ORIGINS  browser origins, besides the board, the API answers
 
---scratch ignores every one of these.",
-  )
+--scratch ignores every one of these."
 }
 

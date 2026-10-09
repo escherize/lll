@@ -1,4 +1,5 @@
 import "config"
+import "output"
 import "pb"
 
 /// A client from literal settings (LLL-486): dispatch hands it to the verb.
@@ -478,7 +479,7 @@ fn dispatch_preserves_help_as_an_alias_value_and_stops_real_help() {
     spec: [Flag { name: "-b", alias: "--body -m --message", value: true, .. }],
     positional: "", run: |input| {
       if input.parsed.one("-b") != "--help" { return Err(pb.failed("wrong body")) }
-      Ok(())
+      Ok(output.none())
     },
     ..
   }]
@@ -507,7 +508,7 @@ fn dispatch_hands_over_unicode_and_empty_positionals_without_reinterpreting_them
     run: |input| {
       if input.parsed.positional_count() != 2 { return Err(pb.failed("missing positional")) }
       if input.parsed.first() != "ÉNG-12" || input.parsed.nth(1) != "" { return Err(pb.failed("changed positional")) }
-      Ok(())
+      Ok(output.none())
     },
     ..
   }]
@@ -582,7 +583,7 @@ fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion()
       name: "view", alias: "show", hidden_alias: "read", summary: "view", positional: "KEY",
       run: |input| {
         if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
-        Ok(())
+        Ok(output.none())
       },
       ..
     },
@@ -594,7 +595,7 @@ fn hidden_alias_dispatches_under_the_canonical_name_without_help_or_completion()
   let assert Err(help) = dispatch(test_ctx(), "issue", "", "", commands, ["lll", "issue", "--help"])
   assert !help.message.contains("read")
   assert command_names(commands).equals(["view", "show"])
-  let without = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let without = [Command { name: "list", summary: "list", run: |_| Ok(output.none()), .. }]
   let assert Err(plain) = dispatch(test_ctx(), "team", "", "", without, ["lll", "team", "read"])
   assert pb.exit_code(plain.kind) == 2
 }
@@ -605,7 +606,7 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
     name: "view", alias: "show", summary: "view", page: "", spec: [],
     positional: "KEY", run: |input| {
       if input.parsed.first() != "DEMO-1" { return Err(pb.failed("wrong key")) }
-      Ok(())
+      Ok(output.none())
     },
     ..
   }]
@@ -622,12 +623,12 @@ fn command_alias_dispatch_uses_canonical_help_and_parser() {
 #[test]
 fn hidden_command_dispatches_without_help_row_or_completion() {
   let commands = [
-    Command { name: "near", summary: "near", run: |_| Ok(()), .. },
+    Command { name: "near", summary: "near", run: |_| Ok(output.none()), .. },
     Command {
       name: "view", alias: "read", hidden: true, summary: "view", positional: "SLUG",
       run: |input| {
         if input.parsed.first() != "a-slug" { return Err(pb.failed("wrong slug")) }
-        Ok(())
+        Ok(output.none())
       },
       ..
     },
@@ -643,7 +644,7 @@ fn hidden_command_dispatches_without_help_row_or_completion() {
 
 #[test]
 fn empty_command_alias_does_not_resolve_an_empty_verb() {
-  let commands = [Command { name: "list", run: |_| Ok(()), .. }]
+  let commands = [Command { name: "list", run: |_| Ok(output.none()), .. }]
   assert resolve_command(commands, "").is_none()
   assert command_names(commands).equals(["list"])
 }
@@ -652,7 +653,7 @@ fn empty_command_alias_does_not_resolve_an_empty_verb() {
 /// is named back.
 #[test]
 fn a_top_level_command_typed_as_a_verb_is_suggested() {
-  let commands = [Command { name: "list", summary: "list", run: |_| Ok(()), .. }]
+  let commands = [Command { name: "list", summary: "list", run: |_| Ok(output.none()), .. }]
   let assert Err(e) = dispatch(test_ctx(), "member", "", "", commands, ["lll", "member", "whoami"])
   assert pb.exit_code(e.kind) == 2
   assert e.message.contains("unknown member command: 'whoami'; did you mean 'lll whoami'?")

@@ -2,6 +2,7 @@ import "go:regexp"
 import "go:strings"
 
 import "config"
+import "output"
 import "pb"
 
 /// One source of truth for a CLI flag (TASK-127). The verb's parser loop,
@@ -469,7 +470,7 @@ pub struct Command {
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
-  pub run: fn(CommandInput) -> Result<(), pb.CliError>,
+  pub run: fn(CommandInput) -> Result<output.Output, pb.CliError>,
 }
 
 /// Route `lll <noun> <verb> ...` through a noun's Command table.
@@ -491,7 +492,7 @@ pub fn dispatch(
   intro: string,
   cmds: Slice<Command>,
   args: Slice<string>,
-) -> Result<(), pb.CliError> {
+) -> Result<output.Output, pb.CliError> {
   let Some(verb) = args.get(2) else {
     return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }

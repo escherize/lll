@@ -1,11 +1,11 @@
 import "display"
 import "records"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
 import "go:strings"
 
 import "models"
+import "output"
 import "pb"
 import "flags"
 import "query"
@@ -14,7 +14,7 @@ import "writes"
 /// Dispatch `lll project <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll project
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn project(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx, "project", "work with projects", project_intro(), project_commands(), args)
 }
 
@@ -81,20 +81,21 @@ fn project_intro() -> string {
   "Statuses: planned, started, paused, completed, cancelled"
 }
 
-fn project_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn project_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   // Scoped when a team is configured, every team's when not: a project
   // belongs to one team (TASK-173), so the unscoped list is an admin's view.
   let projects = models.ProjectList { items: records.fetch_projects(ctx, configured_scope(ctx)?)? }
-  if p.given("--json") { return print_list_json(projects.items, whole_list(projects.items.length()), "project list") }
-  if projects.items.is_empty() { return say_empty("projects") }
+  if p.given("--json") { return list_json(projects.items, whole_list(projects.items.length()), "project list") }
+  if projects.items.is_empty() { return Ok(empty_list("projects")) }
+  let mut out = output.none()
   for p in projects.items {
     let mut team = p.expand.team.key
     if team == "" { team = "workspace" }
-    fmt.Println(f"{display.table_cell(p.name)}\t{display.table_cell(p.status)}\t{display.table_cell(team)}")
+    out = out.line(f"{display.table_cell(p.name)}\t{display.table_cell(p.status)}\t{display.table_cell(team)}")
   }
-  Ok(())
+  Ok(out)
 }
 
 fn project_list_spec() -> Slice<flags.Flag> {
@@ -143,7 +144,7 @@ fn check_status(val: string) -> Result<string, pb.CliError> {
   Ok(val)
 }
 
-fn project_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn project_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -162,15 +163,11 @@ fn project_create(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created project: {e}"))
   }
-  if p.given("--json") {
-    fmt.Println(contract_json(body.bytes() as json.RawMessage, 0) as string)
-    return Ok(())
-  }
-  fmt.Println(f"Created project {created.name} ({created.status})")
-  Ok(())
+  if p.given("--json") { return Ok(json_body(body)) }
+  Ok(output.line(f"Created project {created.name} ({created.status})"))
 }
 
-fn project_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn project_edit(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -192,21 +189,19 @@ fn project_edit(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("-b") { patch.description = Some(p.one("-b")) }
   if status != "" { patch.status = Some(status) }
   writes.update_project(ctx, project.id, patch)?
-  if p.given("--json") { return print_record_after(ctx, "projects", project.id.string()) }
+  if p.given("--json") { return record_after(ctx, "projects", project.id.string()) }
   // A rename names both, so the line does not report the old name as current
   // (1.0 fleet, case 09).
   if p.given("-n") && p.one("-n") != project.name {
-    fmt.Println(f"Renamed project {project.name} -> {p.one("-n")}")
-  } else {
-    fmt.Println(f"Updated project {name}")
+    return Ok(output.line(f"Renamed project {project.name} -> {p.one("-n")}"))
   }
-  Ok(())
+  Ok(output.line(f"Updated project {name}"))
 }
 
 /// Count shared references before deleting; force explicitly accepts their loss.
 /// `lll project move NAME --to KEY` (LLL-100). See writes/moves.lis for why the
 /// refusal is the right answer rather than dragging the references along.
-fn project_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn project_move(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -217,12 +212,11 @@ fn project_move(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let to = writes.move_destination(ctx, p.one("--to"))?
   let project = records.resolve_project(ctx, from.id, name)?
   let moved = writes.move_to_team(ctx, records.Classifier.Project(project.id), project.name, from, to)?
-  if p.given("--json") { return print_record_after(ctx, "projects", project.id.string()) }
-  fmt.Println(moved)
-  Ok(())
+  if p.given("--json") { return record_after(ctx, "projects", project.id.string()) }
+  Ok(output.line(moved))
 }
 
-fn project_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn project_delete(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -238,11 +232,10 @@ fn project_delete(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(aborted())
   }
   writes.delete_project(ctx, project.id)?
-  fmt.Println(deleted_line("project", name, used))
-  Ok(())
+  Ok(output.line(deleted_line("project", name, used)))
 }
 
-fn project_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn project_view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let name = input.parsed.first()
   if name == "" {
@@ -254,15 +247,8 @@ fn project_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let mut team = p.expand.team.key
   if team == "" { team = "workspace" }
 
-  if !json_mode {
-    fmt.Println(f"Name:    {p.name}")
-    fmt.Println(f"Status:  {p.status}")
-    fmt.Println(f"Team:    {team}")
-    if p.description != "" {
-      fmt.Println("")
-      fmt.Println(p.description)
-    }
-  }
+  let mut out = output.line(f"Name:    {p.name}").line(f"Status:  {p.status}").line(f"Team:    {team}")
+  if p.description != "" { out = out.line("").line(p.description) }
 
   // Every page (LLL-659): one page of 200 silently dropped the rest.
   let filter = url.QueryEscape(f"project={query.quote(p.id.string())}")
@@ -278,13 +264,10 @@ fn project_view(input: flags.CommandInput) -> Result<(), pb.CliError> {
     if let Err(e) = json.Unmarshal(encode_json(p, "project")?, &fields) { return Err(pb.failed(f"decoding project: {e}")) }
     let listed = if issues.items.is_empty() { "[]".bytes() as json.RawMessage } else { encode_json(issues.items, "issues")? }
     fields["issues"] = listed
-    return print_json(fields, "project")
+    return json_value(fields, "project")
   }
   if issues.items.length() > 0 {
-    fmt.Println("")
-    fmt.Println("Issues:")
-    fmt.Println("")
-    print_issue_table(issues.items, Map.new<models.IssueId, models.Claim>())?
+    out = out.line("").line("Issues:").line("").then(issue_table(issues.items, Map.new<models.IssueId, models.Claim>()))
   }
-  Ok(())
+  Ok(out)
 }

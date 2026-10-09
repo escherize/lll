@@ -1,3 +1,5 @@
+import "output"
+
 /// What kind of failure an error is, as far as a caller deciding what to do
 /// next cares. Each kind is one exit code (exit_code), the D1 contract in
 /// docs/cli-contract.md.
@@ -37,6 +39,10 @@ pub struct CliError {
   pub status: int,
   pub code: Option<ServerCode>,
   pub message: string,
+  /// What the command had to say before it failed (LLL-683): main renders
+  /// it, then the error, so a command that stops partway still says what it
+  /// had done. A reference, so a CliError stays comparable with ==.
+  pub said: Option<Ref<output.Output>>,
 }
 
 impl CliError {
@@ -44,6 +50,21 @@ impl CliError {
   /// adding where it happened ("ENG-1: ...") keeps the decision made below.
   pub fn with_message(self, message: string) -> CliError {
     CliError { message, ..self }
+  }
+
+  /// The same failure, coming after `said`: what the command had already
+  /// said is printed before the error.
+  pub fn after(self, said: output.Output) -> CliError {
+    let mut all = said.then(self.output())
+    CliError { said: Some(&all), ..self }
+  }
+
+  /// What the command had said before it failed; none() when nothing.
+  pub fn output(self) -> output.Output {
+    match self.said {
+      Some(said) => said.*,
+      None => output.none(),
+    }
   }
 
   /// True when the server refused with `code`.
@@ -129,7 +150,7 @@ pub fn kind_of_status(status: int, code: Option<ServerCode>, envelope: bool) -> 
 
 /// A command's own failure of a known kind, with no HTTP status behind it.
 pub fn fail(kind: ErrorKind, message: string) -> CliError {
-  CliError { kind, status: 0, code: None, message }
+  CliError { kind, status: 0, code: None, message, said: None }
 }
 
 /// A failure with no more specific kind: exit 1.

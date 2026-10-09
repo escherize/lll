@@ -1,8 +1,8 @@
-import "go:fmt"
 import "go:github.com/escherize/lll/skills"
 import "go:strings"
 
 import "flags"
+import "output"
 import "pb"
 
 // `lll skill list|get` — the operating instructions, from inside the binary
@@ -19,12 +19,11 @@ import "pb"
 // .claude/skills/; scripts/sync_skills.py owns that list and the gate fails
 // when the mirror drifts from it.
 
-pub fn skill(args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn skill(args: Slice<string>) -> Result<output.Output, pb.CliError> {
   // The page already carries its own Usage: block, so --help prints it alone
   // rather than under the generic "usage:" prefix.
   if flags.help_requested([], args, 2) {
-    fmt.Println(skill_usage())
-    return Ok(())
+    return Ok(output.line(skill_usage()))
   }
   // parse_n, not parse: `get NAME` is two bare words and parse caps at one.
   let parsed = flags.parse_n(
@@ -37,25 +36,24 @@ pub fn skill(args: Slice<string>) -> Result<(), pb.CliError> {
   let verb = parsed.first()
   match verb {
     "" => {
-      fmt.Println(skill_usage())
-      Ok(())
+      Ok(output.line(skill_usage()))
     },
     "list" => {
       if parsed.positional_count() != 1 {
         return Err(flags.usage_error("usage: lll skill list (no arguments); use 'lll skill get NAME' to read one skill"))
       }
+      let mut out = output.none()
       for name in skills.Names() {
-        fmt.Println(f"{name}\t{skills.Description(name)}")
+        out = out.line(f"{name}\t{skills.Description(name)}")
       }
-      Ok(())
+      Ok(out)
     },
     "get" => {
       let name = parsed.nth(1)
       if name == "" { return Err(flags.usage_error(f"usage: lll skill get NAME\n\n{known()}")) }
       let body = skills.Body(name)
       if body == "" { return Err(pb.fail(pb.ErrorKind.NotFound, f"no skill named '{name}'\n\n{known()}")) }
-      fmt.Print(body)
-      Ok(())
+      Ok(output.text(body))
     },
     other => Err(flags.usage_error(f"unknown command: 'lll skill {other}' (expected list or get)")),
   }
