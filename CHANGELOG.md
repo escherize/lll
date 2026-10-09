@@ -159,11 +159,16 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   name with a comma; `lll api METHOD` without a PATH (it printed help and
   exited 0).
 - `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
-- An expired or rejected token from a repo `.lll.toml` says to remove that
-  file's token line, as does a password change. It said to run `lll login`, which saves to the home
-  config the repo file outranks (LLL-687).
+- An expired or rejected token from a repo `.lll.toml`, and the notice
+  after a password change, say to remove that file's token line. They said
+  to run `lll login`, which saves to the home config the repo file
+  outranks (LLL-687).
 - A refused superuser login names where the url came from (`LLL_URL`, the
   config file, or `--url`). It said `--url` whatever set the url (LLL-687).
+- `lll config list` and the hints attribute a key to the repo `.lll.toml`
+  whenever it names that key. When it repeated the home config's value,
+  the key was attributed to the home config, whose edits the repo file
+  overrides (LLL-687).
 
 ## [1.0.0] - 2026-10-08
 
