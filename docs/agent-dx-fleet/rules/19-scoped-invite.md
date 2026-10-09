@@ -32,7 +32,9 @@ Exact forms, so the password is never displayed, typed or copied:
   colleague-NN@example.com --team FLEET > invite-NN.txt`. Run it exactly
   once; a second run cannot recover the password.
 - Log in by piping the password straight from that file, in a tiny script:
-  `sed -n 's/^ *temporary password: //p' invite-NN.txt | LLL_CONFIG_HOME="$PWD/colleague" ./lll login --email colleague-NN@example.com`
+  `sed -n 's/^ *temporary password: //p' invite-NN.txt | LLL_CONFIG_HOME="$PWD/colleague" ./lll login --url "$(sed -n 's/.*lll login --url \([^ ]*\).*/\1/p' invite-NN.txt)" --email colleague-NN@example.com`
+  (the wrapper sets LLL_URL, and lll sends credentials only to a server you
+  name, so the login names the invite's url)
 - Never copy the password into a script, a command or your report.
 
 The artifact is one new member limited to FLEET whose own team list shows
