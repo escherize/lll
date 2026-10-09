@@ -83,3 +83,11 @@ fn split_issue_key_refuses_captured_notices() {
   let assert Err(_) = split_issue_key("ClaimedFLEET-4forbot-fleet-worker-09FLEET-4")
   let assert Ok(_) = split_issue_key("eng-dev-12")
 }
+
+/// Final 1.0 replay, case 17: a title typed where the key goes points at search.
+#[test]
+fn a_title_where_the_key_goes_points_at_search() {
+  let assert Err(e) = split_issue_key("Shared release notes (workers 03 and 04)")
+  assert e.message.contains("to find its key: lll search \"Shared release notes (workers 03 and 04)\"")
+  assert !e.message.contains("capture stdout")
+}
