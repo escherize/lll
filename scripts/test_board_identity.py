@@ -69,7 +69,9 @@ with tempfile.TemporaryDirectory(prefix='lll-445-') as directory:
     try:
         output = boot('bootstrap', env, web)
         assert 'member board-owner' in output, output
-        assert 'superuser credentials instead' in output, output
+        # The home token was saved for no url, so it never goes to this one
+        # (LLL-688): the boot uses the superuser without trying it first.
+        assert 'bootstrapping with superuser credentials' in output, output
         assert 'stale.hosted.token' in config.read_text(), 'up overwrote an existing CLI credential'
         effective = cli('config', '--list')
         assert effective.returncode == 0 and '\tme=' not in effective.stdout, effective

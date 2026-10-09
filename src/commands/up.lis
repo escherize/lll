@@ -361,10 +361,13 @@ password in its own data directory's .lll-admin.json."),
     )
   }
   if demo {
-    let token_in_file = match src.token {
+    // A home token held back from this url (LLL-688) is still somebody's
+    // login: the demo must not overwrite it.
+    let token_from_file = match src.token {
       Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) => true,
       Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => false,
     }
+    let token_in_file = token_from_file || ctx.settings.withheld().is_some()
     seed_demo(ctx, team, member.name, db_url, token_in_file)?
   }
   let chosen = free_port(web_port)
