@@ -29,8 +29,8 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   ]
 }
 
-/// `search` is the title filter's text, "" for a verb without --search
-/// ('issue next'): a verb reads only the flags it declares (LLL-684).
+/// The filters 'issue list' and 'watch' declare; `search` is the title
+/// filter's text, which each spells its own way.
 fn filters_from(p: flags.Parsed, search: string) -> Result<query.Criteria, pb.CliError> {
   // Explicit --state "" is a mistake; absence is an unrestricted filter.
   if p.given("--state") && p.one("--state") == "" { let _ = query.state("")? }

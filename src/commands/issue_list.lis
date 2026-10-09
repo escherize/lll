@@ -336,7 +336,9 @@ fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let agent = if p.given("--claim") { agent_label(ctx, p)? } else { "" }
-  let filters = filters_from(p, "")?
+  // Only --label and --project: state and assignee are fixed by "ready,
+  // unclaimed", so next does not declare them (LLL-684).
+  let filters = query.Filters { label: p.all("--label"), project: p.one("--project"), .. }.parse()?
   let scope = configured_scope(ctx)?
   // Names resolve before any fetch, so a typo fails naming the fix instead of
   // reporting an empty agenda.
