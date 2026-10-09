@@ -7,13 +7,19 @@ and it decides the streams: data to stdout, notices to stderr, and under
 one by one (the 1.0 fleet: notices on stdout, --env on stderr, "Error:" for
 nothing to do), and each fix was a patch on one verb.
 
-This test keeps it that way. In src/commands and src/main.lis it finds every
-fmt.Print*, fmt.Fprint*, os.Stdout and os.Stderr outside `//` comments, and
-fails on any not inside a function ALLOW names. ALLOW is {(path, fn): reason}
-for output that cannot wait for a return value: a stream that runs until
-interrupted, an interactive prompt that needs its answer first, a child
-process whose output passes straight through, and the renderer itself. An
-entry that no longer writes fails too, so the list only shrinks.
+This test keeps it that way. In every non-test .lis file under src/ it finds
+every fmt.Print*, fmt.Fprint*, log.Print*/Fatal*/Panic*, os.NewFile,
+os.Stdout and os.Stderr outside `//` comments, and fails on any not inside a
+function ALLOW names. A helper in another module that prints is the same
+bypass as a verb that prints, so the scan is not limited to src/commands.
+ALLOW is {(path, fn): reason} for output that cannot wait for a return value:
+a stream that runs until interrupted, progress of a long run, an interactive
+prompt that needs its answer first, a child process whose output passes
+straight through, and the renderer itself. An entry that no longer writes
+fails too, so the list only shrinks.
+
+SERVER is the board: src/serve is the HTTP server 'lll up' runs, and its
+lines are the server's log, not a command's output.
 """
 from pathlib import Path
 import re
@@ -21,7 +27,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
-WRITES = re.compile(r'\bfmt\.(?:Print|Println|Printf|Fprint|Fprintln|Fprintf)\s*\(|\bos\.(?:Stdout|Stderr)\b')
+WRITES = re.compile(
+    r'\bfmt\.(?:Print|Println|Printf|Fprint|Fprintln|Fprintf)\s*\('
+    r'|\blog\.(?:Print|Fatal|Panic)\w*\s*\('
+    r'|\bos\.NewFile\s*\('
+    r'|\bos\.(?:Stdout|Stderr)\b'
+)
+
+SERVER = {'src/serve': 'the board server: its lines are the server log of a running lll up'}
 FN = re.compile(r'^(?:pub )?fn (\w+)', re.M)
 
 ALLOW: dict[tuple[str, str], str] = {
@@ -43,6 +56,9 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/commands/issue_write.lis', 'pr_cmd'): 'lll issue pr: gh pr create output passes straight through',
     ('src/commands/import.lis', 'gh_issue_list'): 'lll import github: gh issue list stderr passes straight through',
     ('src/commands/import.lis', 'progress'): 'lll import github: one line per created issue as it lands, so a long import shows progress',
+    ('src/secret/secret.lis', 'prompted'): 'interactive password prompt, written before the answer is read',
+    ('src/secret/secret.lis', 'hidden_line'): 'interactive password prompt without echo',
+    ('src/realtime/realtime.lis', 'reconnect'): 'reconnect notices on stderr while a watch stream or the board runs',
     ('src/commands/upgrade.lis', 'run_upgrade'): 'lll upgrade: notes before Homebrew runs, then its output passes through',
 }
 
@@ -88,10 +104,11 @@ def writes(rel, source):
 
 
 def sources():
-    yield ROOT / 'src' / 'main.lis'
-    for path in sorted((ROOT / 'src' / 'commands').glob('*.lis')):
-        if not path.name.endswith('.test.lis'):
-            yield path
+    for path in sorted((ROOT / 'src').rglob('*.lis')):
+        rel = path.relative_to(ROOT).as_posix()
+        if path.name.endswith('.test.lis') or any(rel.startswith(d + '/') for d in SERVER):
+            continue
+        yield path
 
 
 def all_writes():
@@ -131,6 +148,13 @@ pub fn b() -> int {
             [(line, fn, call) for _, line, fn, call in writes('src/commands/x.lis', planted)],
             [(2, 'a', 'fmt.Println'), (4, 'a', 'fmt.Fprintln'), (4, 'a', 'os.Stderr'), (7, 'b', 'os.Stdout')],
         )
+        # The bypasses a review found (LLL-683): the log package, a file
+        # opened on fd 1, and a printing helper outside src/commands.
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  log.Println("x")\n}\n')], ['log.Println'])
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  log.Fatalf("%s", x)\n}\n')], ['log.Fatalf'])
+        self.assertEqual([c for *_, c in writes('src/commands/x.lis', 'fn a() {\n  os.NewFile(1, "out").WriteString("x")\n}\n')], ['os.NewFile'])
+        self.assertIn(ROOT / 'src' / 'display' / 'display.lis', list(sources()))
+        self.assertNotIn(ROOT / 'src' / 'serve' / 'serve.lis', list(sources()))
 
 
 if __name__ == '__main__':
