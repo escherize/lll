@@ -146,6 +146,19 @@ Output and the board.
 
 ### Changed
 
+- Commands return their output and one renderer prints it (LLL-683).
+  A failed write of a command's output exits 1
+  with `Error: writing output: ...` on stderr, for text, `--json` and
+  `--env` alike; it exited 0 with a truncated file. `bot create --env`,
+  `bot rotate` and `token create` name the command that mints a fresh token
+  when the one-time token could not be written. A broken stderr costs only
+  notices, never data. These notices moved from stdout to stderr: the
+  `config set` override note, `issue update --assignee`'s "assigned, not
+  claimed", the `issue comment KEY` pointer, `finding near`'s "No findings",
+  the `config list`/`config check` committed-token warning, and `login`'s
+  LLL_TOKEN note. When a command fails, output it already produced prints
+  first, then the error. (Entry added after the v1.0.0 tag; the behaviour
+  shipped in v1.0.0.)
 - `issue update --priority` confirms the name it set (`priority=high`), not
   the wire number.
 - Recovery hints from the final 1.0 fleet replay name the next command:
