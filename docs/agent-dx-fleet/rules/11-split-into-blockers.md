@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 11: split an issue into blockers (tier 3)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,19 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+1. Find `Ship offline mode (worker NN)` in team FLEET and read it.
+2. Create three issues, each priority urgent, titled exactly:
+   - `Offline mode: cache schema (worker NN)`
+   - `Offline mode: sync queue (worker NN)`
+   - `Offline mode: conflict banner (worker NN)`
+3. Record that the parent cannot start until each of the three is done (the
+   three block the parent).
+4. Ask lll what to work on next (its "what next" command, without taking it).
+   It must now offer one of the three, not the parent.
+5. Read back the parent and confirm its three blockers.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+The artifact is three new issues blocking the parent, and lll's next pick
+being one of them. Do not claim anything; change nothing else.
 
 ## Environment
 
@@ -69,9 +70,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"next": "FLEET-1"}
 }
 ```
+
+`answer.next` is the key lll offered in step 4.
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

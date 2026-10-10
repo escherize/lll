@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 07: claim, comment, close (tier 2)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,17 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+1. Find the issue `Flush the export queue` in team FLEET and read it in full.
+2. Claim it, so nobody else takes it while you work.
+3. Add exactly one comment with this exact body:
+   `fleet-07-NN: flushed the export queue; closing.`
+4. Close the issue.
+5. Read it back and confirm: state done, your bot still the assignee, your
+   comment present, and no claim left on it. If a claim remains, find out why
+   from lll and remove it without losing the assignee.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+The artifact is that issue done, assigned to `bot-fleet-worker-NN`, with your
+one comment and no claim. Touch no other issue.
 
 ## Environment
 

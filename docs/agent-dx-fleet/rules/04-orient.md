@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 04: orient yourself (tier 1)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,19 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+This is a read-only case: change nothing on the board. Do not claim anything.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+You have just been handed this board. Answer four questions using lll:
+
+1. Who are you acting as (member name)?
+2. Which team are you working in (key)?
+3. What should you work on next? Use lll's own "what next" command with its
+   machine-readable output; do not pick by eye. Do not take the issue.
+4. Which exit code does that command use to mean "nothing to do"? Find it
+   in lll's help, not by guessing.
+
+The artifact is your report's `answer`. Any write to the board, including a
+claim, fails the case.
 
 ## Environment
 
@@ -69,9 +70,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"identity": "", "team": "", "next": "FLEET-1", "nothing_to_do_exit": 0}
 }
 ```
+
+Fill all four `answer` fields: your member name, the team key, the issue key and the exit code (a number).
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

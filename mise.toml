@@ -125,6 +125,18 @@ depends = ["build"]
 dir = "{{config_root}}"
 run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/e2e.sh"
 
+# The agent-dx fleet's twenty cases against real scratch boards: for each, a
+# scripted correct worker must pass the judge and a scripted wrong worker must
+# fail it for the named reason. About a minute, so it is its own task rather
+# than part of `test`; the fast harness checks still run inside `e2e`.
+# `-- --dry-run` makes every worker correct and prints the dry-run table.
+[tasks.fleet-test]
+description = "Agent-dx fleet: seed and judge every case with scripted workers"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+depends = ["build"]
+dir = "{{config_root}}"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; python3 scripts/test_agent_dx_fleet.py --cases target/.lisette/bin/lll"
+
 # TASK-79: a board with data on it, for looking at. Boots its own throwaway
 # server on free ports under .lll-demo/ and leaves it running, so `mise run dev`
 # (port 8100, pb/pb_data) is untouched and two people can seed at once.

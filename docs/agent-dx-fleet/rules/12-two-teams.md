@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 12: work across two teams (tier 3)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,27 +14,32 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+This board has two teams, FLEET and OPS. Each has a label called `bug`.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+1. First, try to create an issue titled `fleet-12-NN rollout checklist`
+   WITHOUT naming any team. lll must refuse because no team is configured.
+   Record the exit code and message. Check that nothing was created. This
+   refusal is the expected result: put it in `answer.no_team_exit` and the
+   call log, not in `failures`.
+2. Create `fleet-12-NN rollout checklist` in team OPS with OPS's label `bug`.
+3. Create `fleet-12-NN rollout notes` in team FLEET with FLEET's label `bug`.
+4. Read both back and confirm each sits in its own team with its own team's
+   label.
+
+The artifact is exactly two new issues, one per team, each labelled with its
+own team's `bug`. Do not create labels, teams or saved configuration.
 
 ## Environment
 
 Your instance is already running. Do not open `conn.txt`: it holds your credentials, and the wrapper reads it
-for you. Never type, paste, print or quote a token. The controller-provided wrapper reads it without shell eval,
-clears inherited LLL/XDG settings, sets HOME/config to your own directory and
-runs the pinned binary there. All CLI calls must use that wrapper: run it as
-`./lll` from your worker directory. Your bot `bot-fleet-worker-NN` is already
-provisioned; no login or token creation is needed.
+for you. Never type, paste, print or quote a token. The controller-provided wrapper reads the URL and token from
+it without shell eval, clears inherited LLL/XDG settings, sets HOME/config to
+your own directory and runs the pinned binary there. In this case the wrapper
+deliberately configures NO team: every command that needs one must name it.
+Do not attach a directory or save a default team. All CLI calls must use the
+wrapper: run it as `./lll` from your worker directory. Your bot
+`bot-fleet-worker-NN` is already provisioned; no login or token creation is
+needed.
 
 This harness allows environment variables scoped to child processes; older
 fleet lessons about refusing HOME/source are historical, not lll failures.
@@ -69,9 +74,12 @@ Use this JSON shape:
   "guesses": [],
   "papercuts": [],
   "api_thoughts": "",
-  "report": ""
+  "report": "",
+  "answer": {"no_team_exit": 0}
 }
 ```
+
+`answer.no_team_exit` is the exit code lll gave in step 1 (a number).
 
 Each failure has `command`, `error`, `expected` and boolean
 `help_would_have_told_me`. Set `done` true only after reading back the exact

@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 08: record a finding (tier 2)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,20 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+1. Record one finding in team FLEET with:
+   - slug `fleet-08-NN-upload-lock`
+   - title `Upload retry holds the cache lock (worker NN)`
+   - area `storage`
+   - paths `src/upload` and `src/retry`
+   - body `The retry path takes the cache lock before the upload finishes.`
+   - confidence `suspected` (you are not sure yet).
+2. Read it back and check every field.
+3. You have now verified it: mark the finding confirmed with lll.
+4. Read it back again and confirm its confidence is confirmed and nothing
+   else changed.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+The artifact is exactly one finding with those fields, confidence confirmed,
+authored by your bot. Do not create a second copy.
 
 ## Environment
 

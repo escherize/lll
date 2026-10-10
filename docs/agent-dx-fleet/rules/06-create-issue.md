@@ -1,4 +1,4 @@
-# lll case 01: read and restate (tier 1)
+# lll case 06: create an issue (tier 2)
 
 You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
@@ -14,18 +14,19 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+Using only the controller-provided lll wrapper, create exactly one issue in team
+FLEET with title `Repair flaky upload retry (worker NN)`, description
+`Retry a dropped upload once and preserve the saved attachment.`, state `todo`,
+priority 2, label `bug`, and project `Fleet sandbox`. Replace NN with your worker
+number. Discover command forms through the CLI's help; no source or raw HTTP.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+Read the complete resulting issue back and check all six fields and your bot
+creator identity. If a write fails, inspect before retrying. Leave seeded issues,
+labels, projects and members unchanged. Do not create a second copy or a new
+project/label to satisfy lookup failures.
+
+The independently checked artifact is exactly one worker-title issue with the
+specified fields and the existing bot as creator.
 
 ## Environment
 

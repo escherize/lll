@@ -1,9 +1,19 @@
-# lll case 01: read and restate (tier 1)
+# lll case 16: claim handoff (tier 4)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
-call, guess, failure and surprise. Truthful friction is more useful than a
-claimed success. Your controller supplies your two-digit worker number NN,
-absolute worker directory and the `lll` wrapper path when launching you.
+You are one of ten fresh agents trying lll, a CLI issue tracker, working in
+pairs. Record every call, guess, failure and surprise. Truthful friction is
+more useful than a claimed success. Your controller supplies your two-digit
+worker number NN, your partner's number PP (always two digits: write
+`09`, never `9`), your absolute worker directory and
+the `lll` wrapper path when launching you. You and your partner share one
+board; each of you has your own bot and your own wrapper.
+
+Your role comes from your worker number:
+
+| NN | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 |
+|----|----|----|----|----|----|----|----|----|----|----|
+| role | A | B | A | B | A | B | A | B | A | B |
+Do not change your mind about your role.
 
 ## Task
 
@@ -14,18 +24,35 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 
 Read every object in full before you change it.
 
-1. Find the issue about retrying a comment after a socket reset in team FLEET.
-2. Read the full issue before writing anything. There are decoy issues.
-3. Add exactly one comment to that target, with this exact body, replacing NN
-   with your worker number:
-   `fleet-01-NN: A socket reset made the retry skip the comment; preserve one comment and report the saved result.`
-4. Read back the comment and confirm its body and your author identity. Do not
-   change any issue fields or comment on a decoy.
+You and your partner hand one issue from A to B. Shared issue:
+`Migrate the upload worker (workers AA and BB)`, where AA is role A's number
+and BB is role B's.
 
-The artifact is exactly one matching comment on the target, authored by your
-existing bot identity `bot-fleet-worker-NN`. If a write fails, inspect before
-retrying; duplicates fail the independent check. Do not create identities,
-start servers, change machine configuration or claim production issues.
+Role A:
+1. Read the issue, then claim it.
+2. Add exactly one comment:
+   `fleet-16-NN: handing off to bot-fleet-worker-PP; the queue drain is next.`
+3. Release your claim. Read back: no claim, your comment present.
+   Then you are done: set `done` true after this readback. Do not wait for B.
+
+Role B:
+1. Wait until A's comment is on the issue AND the issue has no claim. Poll
+   with `issue view` at most every 5 seconds, for at most 10 minutes, or use
+   a bounded watch. If you poll in a script, have it log each `issue view` call,
+   its exit code and first line to your report: one script run is not one
+   invocation. Do not take the issue early, and never force it.
+2. Claim it.
+3. Add exactly one comment: `fleet-16-NN: picked up from bot-fleet-worker-PP.`
+4. Read back: you hold the claim and are the assignee; both comments present.
+
+Your role is the one the table gives your number. Do not change your
+mind.
+
+The artifact is the issue held by and assigned to B, with A's comment then
+B's. Touch nothing else.
+
+Look your number up in the table above; 09 is role A.
+Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
 
