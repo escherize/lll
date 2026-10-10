@@ -24,3 +24,46 @@ fn unknown_command_keeps_the_plural_and_generic_branches() {
   assert unknown_command("issues", "list").contains("'lll issue list'")
   assert unknown_command("wibble", "create").contains("see 'lll --help'")
 }
+
+/// 1.0 fleet case 20: five of ten agents typed 'lll read KEY', one 'lll FLEET-4'.
+#[test]
+fn an_issue_alias_or_key_as_the_command_names_the_issue_verb() {
+  assert unknown_command("read", "FLEET-4").contains("it is an issue verb: 'lll issue view FLEET-4'")
+  assert unknown_command("show", "FLEET-4").contains("'lll issue view FLEET-4'")
+  assert unknown_command("FLEET-4", "").contains("is an issue ID; to see it use 'lll issue view FLEET-4'")
+  assert unknown_command("frobnicate", "") == "unknown command: 'frobnicate' (see 'lll --help')"
+}
+
+/// 1.0 fleet case 20, run 3: 'lll send KEY' and 'lll note KEY' ask the issue
+/// verb hint table too.
+#[test]
+fn an_issue_synonym_as_the_command_names_the_issue_form() {
+  assert unknown_command("send", "FLEET-4").contains("--state in-review")
+  assert unknown_command("note", "FLEET-4").contains("lll issue comment KEY-123")
+}
+
+/// Case 20: 'lll comment add KEY' must not suggest the refused 'issue comment add'.
+#[test]
+fn a_non_key_second_word_is_not_carried_into_the_suggestion() {
+  let msg = unknown_command("comment", "add")
+  assert msg.contains("'lll issue comment ...'")
+}
+
+/// Final 1.0 replay, case 20: `lll FLEET-4 status review` wants update.
+#[test]
+fn a_key_then_status_names_update() {
+  assert unknown_command("FLEET-4", "status").contains("lll issue update FLEET-4 --state in-review")
+  assert unknown_command("FLEET-4", "").contains("lll issue view FLEET-4")
+}
+
+/// Final 1.0 replay, case 20 rerun: the word after a key, and the form of a
+/// redirected verb.
+#[test]
+fn a_key_first_command_names_the_meant_verb() {
+  assert unknown_command("FLEET-4", "review").contains("lll issue update FLEET-4 --state in-review")
+  assert unknown_command("FLEET-4", "comment").contains("lll issue comment FLEET-4 \"text\"")
+  assert unknown_command("FLEET-4", "frob").contains("put the verb first")
+  assert unknown_command("comment", "FLEET-4").contains("'lll issue comment FLEET-4 \"text\"'")
+  assert unknown_command("update", "FLEET-4").contains("'lll issue update FLEET-4 --state <name>'")
+  assert unknown_command("mark", "FLEET-4").contains("--state in-review")
+}

@@ -91,6 +91,11 @@ def discover(directory, env):
             if found and found.group(1) != verb and found.group(1) in verbs \
                     and not re.search(rf'lll {noun} {re.escape(verb)}\b', found.group(2)):
                 verb_alias[(noun, verb)] = found.group(1)
+        # Hidden verb aliases (flags.Command.hidden_alias) are not completed,
+        # so probe the one lll has: its refusal names the canonical verb.
+        found = re.search(rf'usage: lll {noun} (\S+)', run(directory, env, noun, 'read', PROBE))
+        if found and found.group(1) != 'read' and found.group(1) in table[noun]:
+            verb_alias[(noun, 'read')] = found.group(1)
     return table, verb_alias
 
 

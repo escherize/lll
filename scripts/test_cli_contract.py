@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -161,6 +162,27 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         assert updated['key'] == 'CON-3' and updated['title'] == 'third b'
         nxt = as_json('issue', 'next', '--json')
         assert nxt['key'] == 'CON-3' and 'comments' in nxt and 'claim' in nxt
+        # 1.0 fleet case 13: with --json, stdout is one JSON value and stderr
+        # is empty, the claim included; --ready is accepted.
+        claimed = code(0, 'issue', 'next', '--claim', '--json', '--ready')
+        assert claimed.stderr == '', claimed.stderr
+        assert json.loads(claimed.stdout)['claim']['holder'] == 'contract-owner', claimed.stdout
+        text = code(0, 'issue', 'release', 'CON-3')
+        assert text.stdout.startswith('Released CON-3'), text.stdout
+        assert 'Capture stdout only' in code(0, 'issue', 'next', '--help').stdout
+        # An assigned ready issue is not offered, and the refusal says so.
+        code(0, 'issue', 'update', 'CON-3', '--assignee', 'contract-owner')
+        empty = code(5, 'issue', 'next')
+        assert '1 ready issue matches but is assigned (CON-3 to contract-owner)' in empty.stderr, empty.stderr
+        unheld = code(4, 'issue', 'release', 'CON-3')
+        assert "'lll issue update CON-3 --assignee none' offers it" in unheld.stderr, unheld.stderr
+        code(0, 'issue', 'update', 'CON-3', '--assignee', '')
+        assert as_json('issue', 'view', 'CON-3', '--json')['assignee'] == ''
+        # A token is saved by logging in; config says how (case 14).
+        refused = code(2, 'config', 'set', 'token', 'x')
+        # LLL_URL chose the url here, so the hint names it (LLL-688).
+        assert "'lll login --url http://" in refused.stderr and " --token -'" in refused.stderr, refused.stderr
+        assert "lll login --token -" in code(0, 'config', '--help').stdout
 
         made = as_json('issue', 'comment', 'CON-3', '-b', 'json comment', '--json')
         assert made['body'] == 'json comment' and RFC3339.match(made['created']), made
@@ -171,6 +193,17 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         # --- --raw names the holder (LLL-638) ---
         raw = code(0, 'issue', 'view', 'CON-2', '--raw').stdout
         assert '- **Claimed:** contract-owner (agent wt-a) (since ' in raw, raw
+        # Unclaimed is said, not omitted (1.0 fleet, case 16).
+        assert '- **Claimed:** none' in code(0, 'issue', 'view', 'CON-3', '--raw').stdout
+        assert 'Claimed:   none' in code(0, 'issue', 'view', 'CON-3').stdout
+        # A stale stamp's refusal prints the retry with the current stamp; it runs.
+        stale = code(4, 'issue', 'update', 'CON-3', '-t', 'third r', '--if-unchanged-since', '2020-01-01T00:00:00.000Z')
+        retry = [l for l in stale.stderr.splitlines() if 'retry with the current stamp: ' in l]
+        assert retry, stale.stderr
+        code(0, *shlex.split(retry[0].split('retry with the current stamp: ', 1)[1])[1:])
+        assert as_json('issue', 'view', 'CON-3', '--json')['title'] == 'third r'
+        refused = code(2, 'issue', 'update', 'CON-3', '--claim')
+        assert 'to claim, run: lll issue claim CON-3' in refused.stderr and 'usage:' not in refused.stderr, refused.stderr
 
         # --- time flags take both forms and compare instants ---
         stamp = as_json('issue', 'view', 'CON-3', '--json')['updated']

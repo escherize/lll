@@ -1,9 +1,7 @@
 import "records"
 import "claims"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
-import "go:os"
 import "go:regexp"
 import "go:strconv"
 import "go:strings"
@@ -12,6 +10,7 @@ import "go:time"
 import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "writes"
@@ -27,7 +26,7 @@ fn empty_search_hint(search: string) -> string {
   f"no issues with '{search}' in the title; --search matches titles only: 'lll search {search}' also looks in descriptions, comments and docs"
 }
 
-fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let filters = filters_from(p)?
@@ -75,7 +74,7 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let clause = f"updated >= {query.quote(since)}"
     filter = if filter == "" { clause } else { f"{filter} && {clause}" }
   }
-  let mut tail = "&expand=team,assignee,labels,blocked_by,project"
+  let mut tail = "&expand=team,assignee,labels,blocked_by,project,creator"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
 
   // LLL-382: PocketBase can only sort priority as the number it stores, and
@@ -125,7 +124,7 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     for i in items {
       out = out.append(issue_json(raw_records.get(i.id).unwrap_or("null".bytes() as json.RawMessage), held.get(i.id))?)
     }
-    return print_list_json(out, at, "issues")
+    return list_json(out, at, "issues")
   }
   // LLL-484 (fleet case 01): --search matches TITLES, and seven of ten fresh
   // workers read the bare "no issues" as "the term is nowhere on the board"
@@ -134,10 +133,9 @@ fn list(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // plain empty message, so stdout stays empty for pipes and --json is
   // untouched.
   if items.is_empty() && filters.search != "" {
-    let _ = fmt.Fprintln(os.Stderr, empty_search_hint(filters.search))
-    return Ok(())
+    return Ok(output.notice(empty_search_hint(filters.search)))
   }
-  print_issue_table(items, held)
+  Ok(issue_table(items, held))
 }
 
 /// How `issue list` reads: one server page, or every page when the order or
@@ -259,16 +257,13 @@ fn rfc3339_of(value: string) -> string {
 /// shared by `issue list` and `project view`. `held` is the claims by issue
 /// id: a claimed issue names its holder, agent label and claim age where the
 /// assignee goes (LLL-651).
-fn print_issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, models.Claim>) -> Result<(), pb.CliError> {
+fn issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, models.Claim>) -> output.Output {
   // An empty board printed zero bytes, which a newcomer cannot tell apart
   // from a silently broken read — the exact doubt the not-logged-in refusal
   // warns about, landing one command later. Says so on STDERR: stdout stays
   // empty so pipes and `| wc -l` are unchanged, and --json returns before
   // ever reaching here.
-  if issues.is_empty() {
-    let _ = fmt.Fprintln(os.Stderr, "no issues")
-    return Ok(())
-  }
+  if issues.is_empty() { return empty_list("issues") }
   let mut rows: Slice<Slice<string>> = []
   for item in issues {
     let key = item.expand.team.key
@@ -280,8 +275,7 @@ fn print_issue_table(issues: Slice<models.Issue>, held: Map<models.IssueId, mode
     if item.emoji != "" { row = row.append(item.emoji) }
     rows = rows.append(row)
   }
-  if let Err(e) = fmt.Fprint(os.Stdout, display.table(rows)) { return Err(pb.failed(f"writing output: {e}")) }
-  Ok(())
+  output.text(display.table(rows))
 }
 
 fn issue_next_spec() -> Slice<flags.Flag> {
@@ -314,7 +308,23 @@ fn issue_next_spec() -> Slice<flags.Flag> {
       help: "self-asserted session label, for agents sharing one member token\n(default: LLL_AGENT)",
       ..,
     },
+    // Hidden: next only offers ready issues, so --ready (a 1.0 fleet guess,
+    // carried over from 'issue list --ready') changes nothing.
+    flags.Flag { name: "--ready", hidden: true, help: "accepted; next only offers ready issues", .. },
   ]...))
+}
+
+/// `lll issue next --help`: the generated usage and flags, then the output
+/// contract. Nine of ten 1.0 fleet agents captured `2>&1` and fed the claim
+/// notice on to the next command as a key.
+fn issue_next_page() -> string {
+  let spec = issue_next_spec()
+  f"usage: {flags.usage("lll issue next", spec, "")}{flags.section(spec)}
+
+stdout: the key (or, with --json, one JSON object) and nothing else.
+stderr: notices. Exit 5 when nothing can be offered: no ready issue, or
+every ready one assigned or claimed.
+Capture stdout only: key=$(lll issue next --claim)"
 }
 
 /// Dispatch `lll issue next` (LLL-395) — the agenda verb. Prints ONE key so a
@@ -322,7 +332,7 @@ fn issue_next_spec() -> Slice<flags.Flag> {
 /// ready issue, ranked by rank_agenda. An empty agenda is an error, the same
 /// bargain `claim` makes: the command either hands out work or says there is
 /// none. With --claim the printed key is always secured first.
-fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let agent = if p.given("--claim") { agent_label(ctx, p)? } else { "" }
@@ -334,21 +344,26 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
   for name in p.all("--exclude-label") {
     excluded = excluded.append(records.label_ids(ctx, scope, name)?...)
   }
-  let candidates = ready_issues(ctx, resolve_filter_query(ctx, scope, filters)?)?
+  let matched = matching_issues(ctx, resolve_filter_query(ctx, scope, filters)?)?
     .filter(|i| !i.labels.any(|l| excluded.contains(l)))
+  let candidates = matched.filter(|i| records.is_ready(i, i.expand.blocked_by))
   let unblocks = unblocks_map(ctx, scope, candidates)?
   // A claimed ready issue is someone's work in progress, not an invitation -
   // including my own claims. The agenda is what an agent can pick up NOW.
   // The claims themselves are read, not only the assignee (LLL-662): the
   // holder may set the assignee to someone else or clear it, and an issue
   // offered here that 'claim' then refuses is a lie to the loop.
-  let held = claims.for_team(ctx, scope)?.map(|c| c.issue)
-  let agenda = rank_agenda(candidates, unblocks).filter(|i| i.assignee == "" && !held.contains(i.id))
+  let team_claims = claims.for_team(ctx, scope)?
+  let held = team_claims.map(|c| c.issue)
+  let ranked = rank_agenda(candidates, unblocks).filter(|i| !held.contains(i.id))
+  let agenda = ranked.filter(|i| i.assignee == "")
   if agenda.is_empty() {
-    return Err(pb.fail(pb.ErrorKind.NothingToDo, "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work"))
+    let idle = nothing_to_do(matched, candidates, ranked, team_claims, records.token_member(ctx.token()))
+    return Err(pb.fail(pb.ErrorKind.NothingToDo, nothing_to_do_message(idle)))
   }
   let best = agenda[0]
   let key = f"{best.expand.team.key}-{best.number}"
+  let mut out = output.none()
   if p.given("--claim") {
     let Some(member) = records.find_actor(ctx)? else {
       return Err(
@@ -362,7 +377,8 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
         e.with_message(f"{key}: {e.message}; {held_elsewhere_hint(key)}")
       } else { e }
     })?
-    fmt.Fprintln(os.Stderr, f"Claimed {key} for {result.member_name}")
+    // --json carries the claim, so the renderer drops this notice under it.
+    out = out.notice(f"Claimed {key} for {result.member_name}")
   }
   if p.given("--json") {
     // One packet replaces next-then-view: the 'lll issue view --json' object,
@@ -374,28 +390,116 @@ fn issue_next(input: flags.CommandInput) -> Result<(), pb.CliError> {
       return Err(pb.failed(f"decoding issue: {e}"))
     }
     let reads = begin_issue_view_reads(ctx, full, true, false)
-    fmt.Println(issue_view_json(
+    return Ok(out.then(output.json(issue_view_json(
       record,
       await_issue_view(reads.comments, "comments")?,
       await_issue_view(reads.claim, "claim")?,
       await_issue_view(reads.docs, "docs")?,
       await_issue_view(reads.findings, "findings")?,
-    )?)
-    return Ok(())
+    )?)))
   }
-  fmt.Println(key)
-  Ok(())
+  Ok(out.line(key))
 }
 
-/// The `list --ready` candidate set (LLL-175), reused as the `issue next`
-/// agenda input: open, every blocker done or cancelled, within `scope` (a PB
-/// filter: the configured team plus any --project/--label). PocketBase cannot
-/// filter on an expanded relation's state, so readiness is decided here,
-/// after the fetch.
-fn ready_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, pb.CliError> {
+/// Why `issue next` offers nothing (LLL-685). Four 1.0 fleet agents read
+/// "the agenda is empty" as "no ready issues" while every ready issue was
+/// assigned; one spent forty calls on it. So the reason is decided once, by
+/// nothing_to_do, and worded once, by nothing_to_do_message.
+enum Idle {
+  /// Nothing matches that anyone could pick up, now or later.
+  Empty,
+  /// Ready matches exist, but someone else holds every one.
+  AllClaimed(Slice<string>),
+  /// Ready, unclaimed matches exist, but every one is assigned: an assigned
+  /// issue (close keeps the assignee) is not offered.
+  AllAssigned(Slice<Assigned>),
+  /// Open matches exist, but every one waits on a blocker.
+  AllBlocked(Slice<string>),
+}
+
+struct Assigned {
+  key: string,
+  to: string,
+}
+
+/// The reason, and the ready matches the caller itself holds: `issue next`
+/// skips those, so a loop that stranded one would otherwise see only
+/// "nothing to do" (two 1.0 fleet agents, case 13).
+struct NothingToDo {
+  reason: Idle,
+  mine: Slice<string>,
+}
+
+/// Why the agenda is empty. `matched` is every issue the filters match,
+/// `ready` the ready ones, `unclaimed` the ready ones nobody holds, in
+/// agenda order, and `holds` every claim in scope. The first reason that applies wins: an assigned issue is
+/// the nearest to offerable, a blocked one the furthest.
+fn nothing_to_do(
+  matched: Slice<models.Issue>,
+  ready: Slice<models.Issue>,
+  unclaimed: Slice<models.Issue>,
+  holds: Slice<models.Claim>,
+  me: Option<models.MemberId>,
+) -> NothingToDo {
+  let key = |i: models.Issue| f"{i.expand.team.key}-{i.number}"
+  let held_by_me = holds.filter(|c| me == Some(c.member)).map(|c| c.issue)
+  let held_by_others = holds.filter(|c| me != Some(c.member)).map(|c| c.issue)
+  let mine = ready.filter(|i| held_by_me.contains(i.id)).map(key)
+  let claimed = ready.filter(|i| held_by_others.contains(i.id)).map(key)
+  let blocked = matched
+    .filter(|i| i.state().map_or(false, |s| s.is_open()) && !i.expand.team.archived && records.blockers_of(i, i.expand.blocked_by).any())
+    .map(key)
+  let reason = if !unclaimed.is_empty() {
+    Idle.AllAssigned(unclaimed.map(|i| Assigned { key: key(i), to: i.expand.assignee.name }))
+  } else if !claimed.is_empty() {
+    Idle.AllClaimed(claimed)
+  } else if !blocked.is_empty() {
+    Idle.AllBlocked(blocked)
+  } else {
+    Idle.Empty
+  }
+  NothingToDo { reason, mine }
+}
+
+/// The one wording of an empty agenda.
+fn nothing_to_do_message(idle: NothingToDo) -> string {
+  let why = match idle.reason {
+    Idle.Empty => "no unclaimed ready issues: the agenda is empty; 'lll issue list --ready' shows what is claimed, 'lll issue create' makes new work",
+    Idle.AllAssigned(assigned) => {
+      let n = assigned.length()
+      let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
+      f"no unassigned, unclaimed ready issues; {n} {are} assigned ({first_three(assigned.map(|a| f"{a.key} to {a.to}"))}): 'lll issue update KEY --assignee none' offers one"
+    },
+    Idle.AllClaimed(keys) => {
+      let n = keys.length()
+      let are = if n == 1 { "ready issue matches but is" } else { "ready issues match but are" }
+      f"no unclaimed ready issues; {n} {are} claimed by someone else ({first_three(keys)}): 'lll issue list --ready' shows who holds them, 'lll issue create' makes new work"
+    },
+    Idle.AllBlocked(keys) => {
+      let n = keys.length()
+      let are = if n == 1 { "open issue matches but is" } else { "open issues match but are" }
+      // A ready issue the caller holds is still ready.
+      let other = if idle.mine.is_empty() { "" } else { "other " }
+      f"no {other}ready issues; {n} {are} blocked ({first_three(keys)}): 'lll issue list --blocked' shows what they wait on"
+    },
+  }
+  if idle.mine.is_empty() { return why }
+  f"{why}; you hold claims on {strings.Join(idle.mine, ", ")}: close them, or 'lll issue release KEY' to offer them"
+}
+
+/// Up to three names, then "..." for the rest.
+fn first_three(names: Slice<string>) -> string {
+  if names.length() <= 3 { return strings.Join(names, ", ") }
+  strings.Join(names[..3].append("..."), ", ")
+}
+
+/// Every issue `scope` matches (a PB filter: the configured team plus any
+/// --project/--label), expanded for the readiness rule. `issue next` picks
+/// the `list --ready` set (LLL-175) from it with records.is_ready, after
+/// the fetch: PocketBase cannot filter on an expanded relation's state.
+fn matching_issues(ctx: pb.Client, scope: string) -> Result<Slice<models.Issue>, pb.CliError> {
   let filter = url.QueryEscape(scope)
-  let items = records.fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")?
-  Ok(items.filter(|i| records.is_ready(i, i.expand.blocked_by)))
+  records.fetch_all_issues(ctx, f"&sort=created,id&expand=team,assignee,labels,blocked_by,project&filter={filter}")
 }
 
 /// Triage order (LLL-382). prio_rank is the house answer to "how urgent is

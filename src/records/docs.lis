@@ -32,9 +32,9 @@ pub fn fetch_team_docs(
 /// as bare words in grep.
 pub fn check_slug(val: string) -> Result<string, pb.CliError> {
   let slug = strings.TrimSpace(val)
-  if slug == "" { return Err(pb.failed("slug cannot be empty (e.g. port-notes)")) }
+  if slug == "" { return Err(pb.fail(pb.ErrorKind.Usage, "slug cannot be empty (e.g. port-notes)")) }
   if slug.length() > 80 {
-    return Err(pb.failed(f"slug must be at most 80 characters, got {slug.length()}"))
+    return Err(pb.fail(pb.ErrorKind.Usage, f"slug must be at most 80 characters, got {slug.length()}"))
   }
   let shaped = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
   let matched = match regexp.MatchString(shaped, slug) {
@@ -43,7 +43,7 @@ pub fn check_slug(val: string) -> Result<string, pb.CliError> {
   }
   if !matched {
     return Err(
-      pb.failed(f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)"),
+      pb.fail(pb.ErrorKind.Usage, f"invalid slug '{slug}' (use lowercase letters, digits and hyphens, starting and ending with a letter or digit, e.g. port-notes)"),
     )
   }
   Ok(slug)
@@ -111,7 +111,8 @@ pub fn unknown_doc(team: models.Team, slug: string) -> pb.CliError {
 /// supply domain filters before URL encoding; page size is a transport detail.
 /// A failed later page fails the read instead of returning a partial brief.
 pub fn fetch_docs(ctx: pb.Client, filter: string, sort: string, fields: string) -> Result<Slice<models.Doc>, pb.CliError> {
-  let params = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}"
+  // author and last_editor expand so --json can name them (fleet case 08).
+  let params = f"filter={url.QueryEscape(filter)}&sort={url.QueryEscape(sort + ",id")}&fields={url.QueryEscape(fields)}&expand=author,last_editor"
   let mut out: Slice<models.Doc> = []
   let mut page = 1
   loop {

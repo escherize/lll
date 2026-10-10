@@ -10,6 +10,7 @@ import "go:time"
 
 import "config"
 import "flags"
+import "output"
 import "pb"
 import "buildinfo"
 import "serve"
@@ -79,12 +80,14 @@ pub fn up_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+/// `lll up` writes its banner as it boots and then serves until stopped: a
+/// stream, so everything after --help prints directly (the banner has to be
+/// on screen while the server runs).
+pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = up_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll up", spec, ""))?
   if p.given("--help") {
-    print_up_usage()
-    return Ok(())
+    return Ok(output.line(up_usage()))
   }
   let scratch = p.given("--scratch")
   let share_bind = p.one("--bind")
@@ -93,7 +96,7 @@ pub fn up(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
   }
   if share_bind == "0.0.0.0" || share_bind == "::" {
     return Err(
-      pb.failed("--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address"),
+      flags.usage_error("--bind needs the actual LAN or Tailscale IP teammates can reach, not a wildcard address"),
     )
   }
   if scratch && p.one("--pb-dir") != "" {
@@ -194,6 +197,13 @@ check what is configured with 'lll config list'"),
       .map_or(ctx, |admin| ctx.with_settings(ctx.settings.with_admin(admin)))
   } else {
     ctx
+  }
+
+  if !starting {
+    let home = ctx.settings.load_home().map_err(pb.failed)?
+    if let Some(why) = adopt_refusal(db_url, src.url, home.url) {
+      return Err(pb.fail(pb.ErrorKind.Refused, why))
+    }
   }
 
   let mut api_line = f"api    {db_url} (already running)"
@@ -298,10 +308,10 @@ check what is configured with 'lll config list'"),
           )
         } else if cfg.token != "" {
           fmt.Println(
-            f"auth   the token from {src.token} is not valid for {db_url}; booting on the superuser credentials instead; the cli line below says what the CLI does",
+            f"auth   the token from {config.origin(src.token)} is not valid for {db_url}; booting on the superuser credentials instead; the cli line below says what the CLI does",
           )
         }
-        ctx = ctx.with_token(tok, "")
+        ctx = ctx.with_token(tok, None)
         fmt.Println(
           "auth   rules are authenticated-only; bootstrapping with superuser credentials before signing in the board as a member",
         )
@@ -340,7 +350,7 @@ password in its own data directory's .lll-admin.json."),
     Ok(team) => team,
     Err(e) => {
       let credential = if member_token_ok {
-        f"token from {src.token}"
+        f"token from {config.origin(src.token)}"
       } else {
         "superuser token generated for this startup"
       }
@@ -361,7 +371,14 @@ password in its own data directory's .lll-admin.json."),
     )
   }
   if demo {
-    seed_demo(ctx, team, member.name, db_url, strings.HasPrefix(src.token, "file:"))?
+    // A home token held back from this url (LLL-688) is still somebody's
+    // login: the demo must not overwrite it.
+    let token_from_file = match src.token {
+      Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) => true,
+      Some(config.Source.Flag(_)) | Some(config.Source.Env(_)) | Some(config.Source.Default) | None => false,
+    }
+    let token_in_file = token_from_file || ctx.settings.withheld().is_some()
+    seed_demo(ctx, team, member.name, db_url, token_in_file)?
   }
   let chosen = free_port(web_port)
   if chosen != web_port {
@@ -392,11 +409,10 @@ password in its own data directory's .lll-admin.json."),
         token_source: src.token,
         home_token: home.token,
         home_url: home.url,
-        home_path: ctx.settings.home_path().map_err(pb.failed)?,
         db_url,
       },
     )
-    for line in log_cli_in(ctx, member.name, db_url, plan, src.token)? {
+    for line in log_cli_in(ctx, member.name, db_url, plan, src.token, (cfg.url, src.url))? {
       fmt.Println(line)
     }
   }
@@ -467,7 +483,7 @@ password in its own data directory's .lll-admin.json."),
       fmt.Println(f"could not open a browser: {e.message}")
     }
   }
-  serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"))
+  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui")))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no
@@ -522,6 +538,28 @@ fn server_key(url: string) -> string {
   u
 }
 
+/// Pure. Why `lll up` must not adopt the server already answering at
+/// `db_url`, or None (LLL-688). Adopting sends it the administrator pair
+/// and the boot's tokens. A url a repo file chose may be anything listening
+/// on this machine, and a data-dir marker cannot vouch for it: a repo can
+/// ship its own ./pb/pb_data with a marker and a pair. A repo url that is
+/// the home config's url was chosen by the home file too, so it is adopted.
+///
+/// The way out leads with removing the repo's url: the listener may be
+/// someone else's, and adopting it hands over the admin credentials.
+fn adopt_refusal(db_url: string, source: Option<config.Source>, home_url: string) -> Option<string> {
+  if config.same_url(db_url, home_url) { return None }
+  match source {
+    Some(config.Source.RepoFile(path)) => Some(
+      f"{path} points lll up at {db_url}, where a server is already running, and nothing else here chose that url
+if you did not choose this url: remove the url line from {path}
+only if that server is yours: LLL_URL={db_url} lll up (this sends your admin credentials to it)",
+    ),
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => None,
+  }
+}
+
 fn loopback_bind(settings: config.Settings) -> bool {
   let bind = settings.bind()
   bind == "localhost" || net.ParseIP(bind).IsLoopback()
@@ -536,12 +574,10 @@ struct CliState {
   /// The board listens on loopback only.
   loopback: bool,
   /// Where the configured token came from (config.Sources.token).
-  token_source: string,
+  token_source: Option<config.Source>,
   /// The token and url in the home config file, "" when absent.
   home_token: string,
   home_url: string,
-  /// The home config file's path, to tell its token from a repo file's.
-  home_path: string,
   /// This boot's API url.
   db_url: string,
 }
@@ -575,22 +611,25 @@ fn cli_login_plan(s: CliState) -> CliLogin {
       "a board bound beyond this machine leaves the CLI's login alone",
     )
   }
-  if s.token_source == "env:LLL_TOKEN" && s.home_token != "" {
-    return CliLogin.Keep(
-      "LLL_TOKEN in this shell is not valid for this server: unset it (the home config keeps its own token)",
-    )
-  }
-  // A repo file's token outranks the home config's, and 'lll logout' clears
-  // only the home one, so the repo line is named first.
-  if let Some(path) = strings.CutPrefix(s.token_source, "file:") {
-    if path != s.home_path {
+  match s.token_source {
+    Some(config.Source.Env(name)) => {
+      if s.home_token != "" {
+        return CliLogin.Keep(
+          f"{name} in this shell is not valid for this server: unset it (the home config keeps its own token)",
+        )
+      }
+    },
+    // A repo file's token outranks the home config's, and 'lll logout' clears
+    // only the home one, so the repo line is named first.
+    Some(config.Source.RepoFile(path)) => {
       let home = if s.home_token != "" {
         "; if the home config's token is not valid here either, also run 'lll logout'"
       } else { "" }
       return CliLogin.Keep(
         f"the token in {path} is not valid for this server: remove that line{home}, then restart lll up",
       )
-    }
+    },
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => (),
   }
   if s.home_token != "" {
     return CliLogin.Keep(
@@ -606,35 +645,45 @@ fn cli_login_plan(s: CliState) -> CliLogin {
 }
 
 /// Carry out the plan and return the banner lines. The member token to save
-/// is the one board_identity handed `ctx`.
+/// is the one board_identity handed `ctx`. `configured` is the url this boot
+/// started with and where it came from: one set above the home config still
+/// wins after the save (LLL-688).
 fn log_cli_in(
   ctx: pb.Client,
   name: string,
   db_url: string,
   plan: CliLogin,
-  token_source: string,
+  token_source: Option<config.Source>,
+  configured: (string, Option<config.Source>),
 ) -> Result<Slice<string>, pb.CliError> {
   match plan {
-    CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {token_source}"]),
+    CliLogin.Already => Ok([f"cli    unchanged: the CLI uses its token from {config.origin(token_source)}"]),
     CliLogin.Untouched(why) => Ok([f"cli    unchanged: {why}"]),
     CliLogin.Keep(how) => Ok([f"cli    not logged in to this board: {how}"]),
     CliLogin.Save => {
       let _ = set_home_key(ctx.settings, "url", db_url)?
       let path = set_home_key(ctx.settings, "token", ctx.token())?
       let mut lines = [f"cli    logged in as {name}; url and token saved to {path}"]
-      if token_source == "env:LLL_TOKEN" {
-        lines = lines.append(
-          "cli    LLL_TOKEN in this shell overrides that login, and this server does not accept it: unset LLL_TOKEN",
-        )
+      match token_source {
+        Some(config.Source.Env(name)) => {
+          lines = lines.append(
+            f"cli    {name} in this shell overrides that login, and this server does not accept it: unset {name}",
+          )
+        },
+        Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) |
+          Some(config.Source.Default) | None => (),
+      }
+      let (url, url_source) = configured
+      if let Some(notice) = shadowed_url_notice(db_url, url, url_source) {
+        lines = lines.append(f"cli    {notice}")
       }
       Ok(lines)
     },
   }
 }
 
-fn print_up_usage() {
-  fmt.Println(
-    "lll up - start the lll server and web board together
+fn up_usage() -> string {
+  "lll up - start the lll server and web board together
 
 Usage:
   lll up [--port 8100] [--pb-dir pb/pb_data] [--no-open] [--demo] [--admin-ui]
@@ -717,7 +766,6 @@ Environment:
   LLL_ADMIN_PASSWORD  neither generates one, kept in the data directory)
   LLL_ALLOWED_ORIGINS  browser origins, besides the board, the API answers
 
---scratch ignores every one of these.",
-  )
+--scratch ignores every one of these."
 }
 

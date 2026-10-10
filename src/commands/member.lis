@@ -1,23 +1,33 @@
-import "display"
+import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
-import "go:fmt"
 import "go:os"
 import "go:strings"
 
 import "config"
+import "display"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "records"
-import "writes"
+import "secret"
 import "tokens"
+import "writes"
 
 /// Dispatch `lll member <verb>` through the noun's Command table (TASK-307).
 /// The table is the one place a verb is declared: dispatch, `lll member
 /// --help` and shell completions all read it, so none of the three can drift.
-pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
-  flags.dispatch(ctx,
+pub fn member(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
+  // 1.0 fleet: one member's details live under access.
+  // `read` and `get` too: two final-replay agents (case 15) looked for one.
+  if ["view", "show", "read", "get"].contains(args.get(2).unwrap_or("")) {
+    return Err(flags.usage_error(
+      f"unknown member command: '{args.get(2).unwrap_or("")}'; did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)",
+    ))
+  }
+  flags.dispatch(
+    ctx,
     "member",
     "work with members",
     member_intro(),
@@ -40,16 +50,17 @@ pub fn member_commands() -> Slice<flags.Command> {
       summary: "list members (name, email, access)",
       spec: member_list_spec(),
       run: member_list,
-      ..
+      ..,
     },
     flags.Command {
-      name: "create", alias: "add",
+      name: "create",
+      alias: "add",
       summary: "add a member",
       page: member_add_page(),
       spec: member_add_spec(),
       positional: "[\"name\"]",
       run: member_add,
-      ..
+      ..,
     },
     flags.Command {
       name: "invite",
@@ -58,7 +69,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       spec: member_invite_spec(),
       positional: "NAME",
       run: member_invite,
-      ..
+      ..,
     },
     flags.Command {
       name: "passes",
@@ -66,16 +77,17 @@ pub fn member_commands() -> Slice<flags.Command> {
       page: member_passes_page(),
       spec: member_passes_spec(),
       run: member_passes,
-      ..
+      ..,
     },
     flags.Command {
-      name: "delete", alias: "remove",
+      name: "delete",
+      alias: "remove",
       summary: "delete a member record ('remove' is the same command); to revoke access and keep it: member access NAME --no-teams",
       page: member_remove_page(),
       spec: member_remove_spec(),
       positional: "NAME",
       run: member_remove,
-      ..
+      ..,
     },
     flags.Command {
       name: "access",
@@ -84,7 +96,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       spec: member_access_spec(),
       positional: "NAME",
       run: member_access_cmd,
-      ..
+      ..,
     },
     flags.Command {
       name: "set-password",
@@ -93,7 +105,7 @@ pub fn member_commands() -> Slice<flags.Command> {
       spec: set_password_spec(),
       positional: "NAME",
       run: member_set_password,
-      ..
+      ..,
     },
   ]
 }
@@ -124,26 +136,45 @@ member can tell that wider access exists; it cannot tell which other teams
 exist ('lll team --help')."
 }
 
-fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
-  let members = models.MemberList { items: records.fetch_members(ctx)? }
+  let mut members = models.MemberList { items: records.fetch_members(ctx)? }
   // Team ids become keys. Ids of teams the caller cannot see stay hidden
   // and are only counted.
   let keys: mut Map<models.TeamId, string> = Map.new()
-  for team in records.list_teams(ctx)?.items { keys[team.id] = team.key }
+  for team in records.list_teams(ctx)?.items {
+    keys[team.id] = team.key
+  }
+  // --team narrows to who can reach that team; two 1.0 fleet agents (case 19)
+  // reached for it to find the colleague they had just scoped.
+  if p.given("--team") {
+    let wanted = records.normalize_team_key(p.one("--team"))
+    let Some(team) = records.find_team(ctx, wanted)? else {
+      return Err(pb.fail(
+        pb.ErrorKind.NotFound,
+        f"team {wanted} not found; 'lll team list' shows the teams you can see",
+      ))
+    }
+    members = models.MemberList {
+      items: members.items.filter(|m| reaches_team(m.access(), team.id)),
+    }
+  }
   if p.given("--json") {
     // team_keys beside the ids, for the teams the caller can see
     // (fleet case 12, LLL-552); the ids stay as PocketBase sent them.
     let mut items: Slice<models.Member> = []
     for m in members.items {
       let mut withkeys = m
-      withkeys.team_keys = m.teams.filter(|id| keys.get(id).is_some()).map(|id| keys.get(id).unwrap_or(""))
+      withkeys.team_keys = m.teams
+        .filter(|id| keys.get(id).is_some())
+        .map(|id| keys.get(id).unwrap_or(""))
       items = items.append(withkeys)
     }
-    return print_list_json(items, whole_list(items.length()), "member list")
+    return list_json(items, whole_list(items.length()), "member list")
   }
-  if members.items.is_empty() { return say_empty("members") }
+  if members.items.is_empty() { return Ok(empty_list("members")) }
+  let mut out = output.none()
   for listed in members.items {
     // A bot shows what it can do now: within its owner's access (LLL-543).
     let (effective, cap) = records.effective_access_in(listed, members.items)
@@ -152,12 +183,16 @@ fn member_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     let access = member_access(effective, keys)
     let access = if access == "" { access } else { access + capped }
     if access == "" {
-      fmt.Println(f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}")
+      out = out.line(
+        f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}",
+      )
     } else {
-      fmt.Println(f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}\t{access}")
+      out = out.line(
+        f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}\t{access}",
+      )
     }
   }
-  Ok(())
+  Ok(out)
 }
 
 /// A member's email as the caller may read it. Every member has one, so an
@@ -170,8 +205,13 @@ fn shown_email(m: models.Member) -> string {
 /// "rw every team (server-wide)", "ro ALPHA", "rw ALPHA, GAMMA +1 hidden", or "" when the
 /// server does not report access (fleet case 03: 7 of 10 agents went to
 /// 'lll api' to see a member's teams).
-fn member_access(access: Option<models.Access>, keys: Map<models.TeamId, string>) -> string {
-  let Some(a) = access else { return "" }
+fn member_access(
+  access: Option<models.Access>,
+  keys: Map<models.TeamId, string>,
+) -> string {
+  let Some(a) = access else {
+    return ""
+  }
   if a.every_team() { return f"{a.mode.wire()} every team (server-wide)" }
   let mut named: Slice<string> = []
   let mut hidden = 0
@@ -181,13 +221,35 @@ fn member_access(access: Option<models.Access>, keys: Map<models.TeamId, string>
       None => hidden += 1,
     }
   }
-  let mut shown = if named.is_empty() { "no teams" } else { strings.Join(named, ", ") }
+  let mut shown = if named.is_empty() {
+    "no teams"
+  } else {
+    strings.Join(named, ", ")
+  }
   if hidden > 0 { shown = f"{shown} +{hidden} hidden" }
   f"{a.mode.wire()} {shown}"
 }
 
 fn member_list_spec() -> Slice<flags.Flag> {
-  [flags.Flag { name: "--json", help: "print the raw record list as JSON", .. }]
+  [
+    flags.Flag {
+      name: "--team",
+      value: true,
+      hint: "KEY",
+      help: "only members who can reach this team (server-wide members included)",
+      ..,
+    },
+    flags.Flag { name: "--json", help: "print the raw record list as JSON", .. },
+  ]
+}
+
+/// Whether a member's access covers `team`. A member with no recorded scope
+/// predates scoped access and reaches every team.
+fn reaches_team(access: Option<models.Access>, team: models.TeamId) -> bool {
+  match access {
+    None => true,
+    Some(a) => a.every_team() || a.team_ids().contains(team),
+  }
 }
 
 fn member_add_spec() -> Slice<flags.Flag> {
@@ -212,7 +274,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
       name: "--password",
       value: true,
       hint: "pw",
-      help: "set a usable login password with a real --email; otherwise creates a record only",
+      help: "set a usable login password with a real --email ('-' reads it from stdin);\notherwise creates a record only",
       ..,
     },
   ]
@@ -229,7 +291,7 @@ fn member_add_spec() -> Slice<flags.Flag> {
 /// Superuser-gated like set-password, because it is destructive and because
 /// deleting an auth record is not something one member should do to another
 /// on a shared board.
-fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_remove(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -243,21 +305,25 @@ fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // Env credentials count only when no token is configured (D7): otherwise
   // superuser_auth would use the member token and the server would answer a
   // bare 403.
-  let login = given_admin_login(ctx.settings, p)?
+  let login = given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?
   let usable = match login {
     AdminLogin.Explicit(_) => true,
     AdminLogin.Env(_) => ctx.settings.config().map_err(pb.failed)?.token == "",
     AdminLogin.Absent => false,
   }
   if !usable {
-    return Err(
-      pb.failed("removing a member needs the server's admin credentials
-" + tokens.admin_hint()),
-    )
+    return Err(pb.failed(
+      "removing a member needs the server's admin credentials
+" +
+      tokens.admin_hint(),
+    ))
   }
   let su = superuser_auth(ctx, login)?
   let Some(member) = records.find_member_as(ctx, su, name)? else {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
+    return Err(pb.fail(
+      pb.ErrorKind.NotFound,
+      f"no member named '{name}'; see 'lll member list'",
+    ))
   }
 
   let references = records.count_member_references(ctx, member.id, su)?
@@ -265,24 +331,24 @@ fn member_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let authored = references.authored
   let created = references.created
   if (assigned > 0 || authored > 0 || created > 0) && !p.given("--force") {
-    return Err(
-      pb.failed(f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored, and created {created} issue(s)
+    return Err(pb.failed(
+      f"{member.name} has {assigned} issue(s) assigned and {authored} comment(s) authored, and created {created} issue(s)
 reassign first: lll issue update <KEY> --assignee <somebody>
-or use --force to clear assignments, comment authorship and issue creator references; issue and comment bodies are kept"),
-    )
+or use --force to clear assignments, comment authorship and issue creator references; issue and comment bodies are kept",
+    ))
   }
 
   if !confirmed_on_terminal(p.given("--yes"), f"delete member {member.name}?") {
     return Err(aborted())
   }
   writes.delete_member(ctx, pb.Caller.Member(su), member.id)?
-  fmt.Println(f"removed member {member.name}")
+  let mut out = output.line(f"removed member {member.name}")
   if assigned > 0 || authored > 0 || created > 0 {
-    fmt.Println(
+    out = out.line(
       f"cleared {assigned} issue assignment(s) and {authored} comment author reference(s), plus {created} issue creator reference(s); issue and comment bodies kept",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
 fn member_remove_spec() -> Slice<flags.Flag> {
@@ -366,18 +432,24 @@ fn member_create_error(e: pb.CliError) -> pb.CliError {
   // 10 got nothing more). A validation failure carries field data, and a
   // gopb refusal (the bot- prefix) its own message; both pass through.
   if e.status == 400 && e.message == "Failed to create record." {
-    return pb.fail(pb.ErrorKind.Refused, "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
-for your own agent, a read-write member runs 'lll bot create bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you")
+    return pb.fail(
+      pb.ErrorKind.Refused,
+      "your token cannot add members: only a member with read-write access to every team, or administrator credentials ('lll member invite NAME --email E' with LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD), can
+for your own agent, a read-write member runs 'lll bot create bot-NAME' (a bot it owns); a read-only member cannot, so ask whoever invited you",
+    )
   }
   if e.status == 401 {
-    return pb.fail(pb.ErrorKind.Auth, "creating a member needs a member token: the one configured here is missing or was refused
+    return pb.fail(
+      pb.ErrorKind.Auth,
+      "creating a member needs a member token: the one configured here is missing or was refused
 administrator credentials (LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD) do not authenticate member creation
-paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member")
+paths forward: 'lll login --create' makes a first member login with the admin credentials; 'lll member invite NAME --email EMAIL' creates the member from the admin side; 'lll token create NAME' mints an agent token for an existing member",
+    )
   }
   e
 }
 
-fn member_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_add(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let args = input.args
   let spec = member_add_spec()
@@ -393,10 +465,10 @@ fn member_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
   // scoped member trying this got a bare 400 (fleet case 09). Name the
   // command that makes one before any server call.
   if strings.HasPrefix(name, "bot-") {
-    return Err(
-      pb.failed(f"'{name}' is a bot name: the bot- prefix is reserved to bot members
-a read-write member creates it with 'lll bot create {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you"),
-    )
+    return Err(pb.failed(
+      f"'{name}' is a bot name: the bot- prefix is reserved to bot members
+a read-write member creates it with 'lll bot create {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
+    ))
   }
 
   // LLL-500 (fleet case B03/B06): a first-time LAN operator's only
@@ -409,18 +481,24 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
     Err(e) => return Err(member_create_error(e)),
   }
   if let Some(existing) = found {
-    return Err(
-      pb.failed(f"a member named '{name}' already exists <{existing.email}>; pick another name"),
-    )
+    return Err(pb.failed(
+      f"a member named '{name}' already exists <{existing.email}>; pick another name",
+    ))
   }
-  let password = p.one("--password")
-  if p.given("--password") && (password == "" || !real_email(email)) {
-    return Err(
-      pb.failed("--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff"),
-    )
+  let password = if p.given("--password") {
+    let mut input = bufio.NewReader(os.Stdin)
+    let typed = secret.Secret.read(p, "--password", f"Password for {name}: ", input)?
+    Some(typed.confirmed(p, "--password", input)?)
+  } else {
+    None
   }
-  let created = if p.given("--password") {
-    match create_member_as(ctx, ctx.token(), name, email, password, [], None) {
+  if password.map_or(false, |pw| pw.is_empty() || !real_email(email)) {
+    return Err(flags.usage_error(
+      "--password requires a nonempty password and a real --email; use 'lll member invite NAME --email EMAIL' for a generated login handoff",
+    ))
+  }
+  let created = if let Some(pw) = password {
+    match create_member_as(ctx, ctx.token(), name, email, pw.reveal(), [], None) {
       Ok(created) => created,
       Err(e) => return Err(member_create_error(e)),
     }
@@ -430,17 +508,17 @@ a read-write member creates it with 'lll bot create {name}' (owned by you, never
       Err(e) => return Err(member_create_error(e)),
     }
   }
-  fmt.Println(f"Added member {created.name}")
+  let mut out = output.line(f"Added member {created.name}")
   if p.given("--password") {
-    fmt.Println(
+    out = out.line(
       f"login enabled: lll login --email {email} --url {(ctx.settings.config().map_err(pb.failed)?).url} (use the supplied password)",
     )
   } else {
-    fmt.Println(
+    out = out.line(
       f"record only: no known login password. An administrator can enable login with 'lll member set-password {name} --email EMAIL --password PASSWORD'. For a new colleague, use 'lll member invite NAME --email EMAIL' instead.",
     )
   }
-  Ok(())
+  Ok(out)
 }
 
 /// Create a member. Names are unique server-side, so callers that may race
@@ -471,7 +549,11 @@ fn create_member_as(
   teams: Slice<models.TeamId>,
   mode: Option<models.Mode>,
 ) -> Result<models.Member, pb.CliError> {
-  let member_email = if email == "" { records.synthesize_email(name) } else { email }
+  let member_email = if email == "" {
+    records.synthesize_email(name)
+  } else {
+    email
+  }
   // Unscoped creates send no scope and get the creator's ("all").
   let scope = if teams.is_empty() { "" } else { "teams" }
   let new_member = models.NewMember {
@@ -521,7 +603,9 @@ pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, pb.CliError> 
     Err(_) => {
       let raced = records.find_member(ctx, name)?
       if raced.is_some() { return Ok(false) }
-      Err(pb.failed(f"could not create member '{name}' and none exists to reuse"))
+      Err(pb.failed(
+        f"could not create member '{name}' and none exists to reuse",
+      ))
     },
   }
 }
@@ -539,13 +623,47 @@ fn describe_access(access: models.Access, keys: Slice<string>) -> string {
 
 fn member_access_spec() -> Slice<flags.Flag> {
   with_admin_flags([
-    flags.Flag { name: "--team", value: true, hint: "KEY", repeat: true, help: "limit them to exactly these teams (repeat for more); replaces their teams", .. },
-    flags.Flag { name: "--add-team", value: true, hint: "KEY", repeat: true, help: "also give them this team, keeping the others", .. },
-    flags.Flag { name: "--remove-team", value: true, hint: "KEY", repeat: true, help: "take this team away, keeping the others; removing the last leaves them seeing nothing", .. },
+    flags.Flag {
+      name: "--team",
+      value: true,
+      hint: "KEY",
+      repeat: true,
+      help: "limit them to exactly these teams (repeat for more); replaces their teams",
+      ..,
+    },
+    flags.Flag {
+      name: "--add-team",
+      value: true,
+      hint: "KEY",
+      repeat: true,
+      help: "also give them this team, keeping the others",
+      ..,
+    },
+    flags.Flag {
+      name: "--remove-team",
+      value: true,
+      hint: "KEY",
+      repeat: true,
+      help: "take this team away, keeping the others; removing the last leaves them seeing nothing",
+      ..,
+    },
     flags.Flag { name: "--all-teams", help: "let them see every team", .. },
-    flags.Flag { name: "--no-teams", help: "revoke: they see nothing, and their comments and issues stay", .. },
-    flags.Flag { name: "--read-only", alias: "--ro", help: "they can read but not change anything", .. },
-    flags.Flag { name: "--read-write", help: "they can change things in the teams they see", .. },
+    flags.Flag {
+      name: "--no-teams",
+      help: "revoke: they see nothing, and their comments and issues stay",
+      ..,
+    },
+    flags.Flag {
+      name: "--read-only",
+      alias: "--ro",
+      help: "they can read but not change anything",
+      ..,
+    },
+    flags.Flag {
+      name: "--read-write",
+      help: "they can change things in the teams they see",
+      ..,
+    },
   ])
 }
 
@@ -566,48 +684,73 @@ credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
 LLL_ADMIN_PASSWORD when no token is configured), the same gate as 'lll member invite': no member or bot
 token can change anyone's access, its own included. Revoking keeps the member
 and everything they wrote; 'lll member delete' deletes the member instead.
-" + flags.section(member_access_spec())
+" +
+  flags.section(member_access_spec())
 }
 
 /// `lll member access NAME [changes]`. Fleet case 04: 10 of 10 agents could
 /// not make a member read-only with any lll command, and 7 patched the
 /// record through 'lll api' instead. Cases 06-08 (narrow, widen, revoke)
 /// need the same verb.
-fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let name = p.first()
-  if name == "" { return Err(flags.usage_error("usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]")) }
+  if name == "" {
+    return Err(flags.usage_error(
+      "usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]",
+    ))
+  }
   let Some(m) = records.find_member(ctx, name)? else {
-    return Err(pb.fail(pb.ErrorKind.NotFound, f"no member named '{name}'; see 'lll member list'"))
+    return Err(pb.fail(
+      pb.ErrorKind.NotFound,
+      f"no member named '{name}'; see 'lll member list'",
+    ))
   }
   let teams = records.list_teams(ctx)?.items
-  let key_of = |id: models.TeamId| teams.find(|t| t.id == id).map_or(id.string(), |t| t.key)
-  let before = describe_access(recorded_access(m), recorded_access(m).team_ids().map(key_of))
-  let set_teams = p.given("--team") || p.given("--all-teams") || p.given("--no-teams")
+  let key_of = |id: models.TeamId| teams
+    .find(|t| t.id == id)
+    .map_or(id.string(), |t| t.key)
+  let before = describe_access(
+    recorded_access(m),
+    recorded_access(m).team_ids().map(key_of),
+  )
+  let set_teams = p.given("--team") || p.given("--all-teams") ||
+  p.given("--no-teams")
   let edit_teams = p.given("--add-team") || p.given("--remove-team")
   let set_mode = p.given("--read-only") || p.given("--read-write")
+  let mut out = output.none()
   if !set_teams && !edit_teams && !set_mode {
-    fmt.Println(f"{m.name}: {before}")
-    print_owner_cap(ctx, m, key_of)?
-    return Ok(())
+    out = out.line(f"{m.name}: {before}")
+    return Ok(out.then(owner_cap(ctx, m, key_of)?))
   }
-  let given = [p.given("--team"), p.given("--all-teams"), p.given("--no-teams"), edit_teams].filter(|g| g)
+  let given = [
+      p.given("--team"),
+      p.given("--all-teams"),
+      p.given("--no-teams"),
+      edit_teams,
+    ].filter(
+    |g| g,
+  )
   if given.length() > 1 {
-    return Err(pb.failed("give one of --team, --all-teams, --no-teams, or --add-team/--remove-team"))
+    return Err(flags.usage_error(
+      "give one of --team, --all-teams, --no-teams, or --add-team/--remove-team",
+    ))
   }
   if p.given("--read-only") && p.given("--read-write") {
-    return Err(pb.failed("give --read-only or --read-write, not both"))
+    return Err(flags.usage_error("give --read-only or --read-write, not both"))
   }
   let id_of = |key: string| -> Result<models.TeamId, pb.CliError> {
     let k = records.normalize_team_key(key)
-    let Some(t) = teams.find(|t| t.key == k) else { return Err(records.unknown_team(ctx, k)) }
+    let Some(t) = teams.find(|t| t.key == k) else {
+      return Err(records.unknown_team(ctx, k))
+    }
     Ok(t.id)
   }
   // Administrator credentials only: the members rules refuse every member
   // and bot token, so an agent on someone's token cannot widen a guest or
   // narrow its owner.
-  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p)?)?
+  let su = superuser_auth(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
   // The record as the administrator reads it: a team-scoped configured token
   // reads a member without the teams it cannot see (LLL-551), and editing
   // that copy would drop them.
@@ -621,11 +764,15 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
     reach = models.Reach.Teams([])
   } else if p.given("--team") {
     let mut ids: Slice<models.TeamId> = []
-    for k in p.all("--team") { ids = ids.append(id_of(k)?) }
+    for k in p.all("--team") {
+      ids = ids.append(id_of(k)?)
+    }
     reach = models.Reach.Teams(ids)
   } else if edit_teams {
     if current.every_team() {
-      return Err(pb.failed(f"{m.name} sees every team; limit them first with --team KEY, then add or remove"))
+      return Err(pb.failed(
+        f"{m.name} sees every team; limit them first with --team KEY, then add or remove",
+      ))
     }
     let mut ids = current.team_ids()
     for k in p.all("--add-team") {
@@ -642,56 +789,71 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if p.given("--read-only") { mode = models.Mode.ReadOnly }
   if p.given("--read-write") { mode = models.Mode.ReadWrite }
   let wanted = models.Access { reach, mode }
-  let patch = writes.MemberPatch { scope: Some(wanted.scope_wire()), teams: Some(wanted.team_ids()), mode: Some(wanted.mode.wire()), .. }
+  let patch = writes.MemberPatch {
+    scope: Some(wanted.scope_wire()),
+    teams: Some(wanted.team_ids()),
+    mode: Some(wanted.mode.wire()),
+    ..,
+  }
   if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), m.id, patch) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
     if e.has_code(pb.ServerCode.BotExceedsOwner) { return Err(e) }
     let status = e.status
     if status == 400 || status == 403 || status == 404 {
-      return Err(
-        pb.fail(pb.ErrorKind.Refused, "changing access needs administrator credentials: " + tokens.admin_hint() + ". A member or bot token cannot change anyone's access, its own included."),
-      )
+      return Err(pb.fail(
+        pb.ErrorKind.Refused,
+        "changing access needs administrator credentials: " +
+        tokens.admin_hint() +
+        ". A member or bot token cannot change anyone's access, its own included.",
+      ))
     }
     return Err(e)
   }
   let after = describe_access(wanted, wanted.team_ids().map(key_of))
   if after == before {
-    fmt.Println(f"{m.name}: {after} (unchanged)")
+    out = out.line(f"{m.name}: {after} (unchanged)")
   } else {
-    fmt.Println(f"{m.name}: {after} (was {before})")
+    out = out.line(f"{m.name}: {after} (was {before})")
   }
-  print_owner_cap(ctx, m.with_access(wanted), key_of)
+  Ok(out.then(owner_cap(ctx, m.with_access(wanted), key_of)?))
 }
 
 /// A member's recorded access. A record from a server before scoped
 /// members (LLL-542) carries none, which that server meant as read-write
 /// with no team list to show.
 fn recorded_access(m: models.Member) -> models.Access {
-  m.access().unwrap_or(models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadWrite })
+  m
+    .access()
+    .unwrap_or(
+      models.Access {
+        reach: models.Reach.Teams([]),
+        mode: models.Mode.ReadWrite,
+      },
+    )
 }
 
 /// For a bot whose owner's access is narrower than its own, the access it
 /// actually has and why (LLL-543). Prints nothing otherwise.
 /// A team-scoped caller may see a bot but not its owner (LLL-551): the owner
 /// then reads as missing, and the cap is not this caller's to know.
-fn print_owner_cap(ctx: pb.Client, m: models.Member, key_of: fn(models.TeamId) -> string) -> Result<(), pb.CliError> {
+fn owner_cap(
+  ctx: pb.Client,
+  m: models.Member,
+  key_of: fn(models.TeamId) -> string,
+) -> Result<output.Output, pb.CliError> {
   let (eff, cap) = match records.effective_access(ctx, m) {
     Ok(found) => found,
     Err(e) => {
-      if e.status == 404 { return Ok(()) }
+      if e.status == 404 { return Ok(output.none()) }
       return Err(e)
     },
   }
+  let mut out = output.none()
   if let (Some(owner), Some(e)) = (cap, eff) {
-    fmt.Println(f"  effective: {describe_access(e, e.team_ids().map(key_of))} (capped by its owner, {owner.name})")
+    out = out.line(
+      f"  effective: {describe_access(e, e.team_ids().map(key_of))} (capped by its owner, {owner.name})",
+    )
   }
-  Ok(())
+  Ok(out)
 }
 
-/// A line for the inviter, not the colleague: stderr, so that
-/// 'lll member invite ... > handoff.txt' captures exactly what to send
-/// (fleet case 11: 8 of 10 agents retyped the handoff, password included,
-/// because the status lines were mixed into it).
-fn status(line: string) {
-  let _ = fmt.Fprintln(os.Stderr, line)
-}

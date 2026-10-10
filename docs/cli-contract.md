@@ -1,5 +1,7 @@
 # The lll CLI contract
 
+`lll help contract` prints this page.
+
 This is the surface lll 1.0.0 promises under SemVer. Changing one of these
 parts in a way that breaks a script needs a new major version; anything not
 listed here can change in a minor release.
@@ -9,6 +11,7 @@ Covered:
 - exit codes;
 - the JSON that `--json` prints, for the fields this page names;
 - the list envelope;
+- which stream carries what (below);
 - command, verb and flag spellings, including the permanent aliases below.
 
 Not covered:
@@ -47,8 +50,20 @@ names its `status`): 401 is 6, 403, 409 and 412 are 4, 404 is 3, anything
 else is 1. Any other error body, such as a proxy's or gateway's, exits 1. The
 body still prints.
 
-Errors print on stderr as `Error: ` and a message. The message is for people:
+Errors print on stderr as `Error: ` and a message; exit 5 prints `Nothing to do: `
+instead, because it is an outcome, not an error. The message is for people:
 it names the cause and the fix, and it can change in any release.
+
+## Output streams
+
+Data goes to stdout: a key, a record, a list. Notices go to stderr. Capture
+stdout only: `key=$(lll issue next --claim)`, not `2>&1`.
+
+With `--json`, stdout is exactly one JSON value (`lll watch --json`: one per
+line). `lll issue next --claim --json` and `lll issue start --json` print no
+notice at all: the JSON carries the claim and the branch. `lll bot create
+--env` and `lll bot rotate --env` print the two export lines and nothing
+else, on either stream.
 
 ## JSON output
 
@@ -112,6 +127,9 @@ Every issue `--json` prints the same object: `issue list` per item,
 | `refs` | string | external references |
 | `attachments` | array of string | stored file names |
 | `creator` | string | member record id |
+| `creator_name`, `assignee_name` | string | the member's name; `"hidden member"` when you cannot see the member; `""` when the relation is empty |
+| `project_name` | string | `""` when none |
+| `label_names` | array of string | the names of the labels in `labels` |
 | `created`, `updated` | string | RFC3339 |
 | `claim` | object or null | see below |
 
@@ -134,7 +152,7 @@ record, below), `docs` and `findings` (each a doc record, below).
 | Record | Covered fields |
 |---|---|
 | comment | `id`, `issue`, `author`, `author_kind`, `agent`, `body`, `created`, `updated` |
-| doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `created`, `updated` |
+| doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `author_name`, `last_editor_name`, `created`, `updated` |
 | team | `id`, `key`, `name`, `accent`, `emoji`, `archived` |
 | member | `id`, `name`, `email`, `kind`, `owner`, `scope`, `teams`, `mode`, `team_keys` |
 | label | `id`, `name`, `color`, `team` |
@@ -150,6 +168,10 @@ changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
 by the server: the author until another member edits it. Linking an issue,
 confirming or refuting a finding, and a write that changes no content leave it
 unchanged. It is `""` on a doc with no author (absent in `issue view --json`).
+`author_name` and `last_editor_name` name those members as the issue object
+names its members: `"hidden member"` when you cannot see one, `""` when the
+field is empty. The docs and findings inside `issue view --json` do not carry
+them.
 `project view --json` lists its `issues` as records without `key` or
 `claim`; use `issue list --project NAME --json` for the issue object.
 
@@ -171,6 +193,8 @@ These aliases are permanent:
 |---|---|---|
 | `new` | `create` | `issue`, `doc`, `finding` |
 | `show` | `view` | `issue`, `doc` |
+| `read` | `view` | `issue`, `doc`, `finding` (hidden: no help row, no completion) |
+| `show` | `list` | `config` (hidden: no help row, no completion) |
 | `add` | `create` | `member` |
 | `remove` | `delete` | `member` |
 | `edit`, `update` | each other | `issue`, `doc`, `project`, `label` |

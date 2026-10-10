@@ -1,11 +1,11 @@
 import "attachments"
 import "flags"
+import "output"
 import "pb"
 import "records"
-import "go:fmt"
 import "go:os"
 
-fn issue_attach(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn issue_attach(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let path = input.parsed.nth(1)
@@ -16,23 +16,21 @@ fn issue_attach(input: flags.CommandInput) -> Result<(), pb.CliError> {
   defer file.Close()
   let data = attachments.read_upload(file)?
   let name = attachments.upload(ctx, pb.Caller.Process, issue, path, data)?
-  fmt.Println(f"Attached to {issue.expand.team.key}-{issue.number}: {name}")
-  Ok(())
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  issue_ending(ctx, input.parsed, key, f"Attached to {key}: {name}")
 }
 
-fn issue_detach(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn issue_detach(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let name = input.parsed.nth(1)
   attachments.remove(ctx, pb.Caller.Process, issue, name)?
-  fmt.Println(f"Removed attachment from {input.parsed.first()}: {name}")
-  Ok(())
+  issue_ending(ctx, input.parsed, f"{issue.expand.team.key}-{issue.number}", f"Removed attachment from {input.parsed.first()}: {name}")
 }
 
-fn issue_download(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn issue_download(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let issue = records.fetch_issue(ctx, deslug(input.parsed.first()))?
   let data = attachments.read_file(ctx, issue, input.parsed.nth(1))?
-  let Partial.Ok(_) = os.Stdout.Write(data.bytes()) else { return Err(pb.failed("writing attachment to stdout failed")) }
-  Ok(())
+  Ok(output.text(data))
 }

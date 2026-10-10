@@ -92,6 +92,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	registerFilterNameGuards(app)
 	registerIssuePrecondition(app)
 	registerClaimedAssigneeGuard(app)
+	registerFinishRelease(app)
 	registerArchivedTeamGuard(app)
 	registerAssigneeTeamGuard(app)
 	registerClaimedIssueDeleteGuard(app)

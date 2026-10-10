@@ -6,7 +6,7 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-10-08
+## [1.0.0] - 2026-10-09
 
 1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,
 the `--json` fields it names, the list envelope, and command, verb and flag
@@ -22,6 +22,13 @@ they arrive, and no credential or scope travels through the environment.
 
 Read this list before you upgrade a server, a script or an agent prompt.
 Details are in the sections below.
+
+**Your saved login is now tied to its server.** The token in your home
+config is sent only to the url saved beside it. If a repo `.lll.toml`,
+`LLL_URL` or `--url` points a command at another server, the command exits 6
+and names where that url came from. `lll login` without `--url` refuses a
+url that only a repo file or `LLL_URL` chose (exit 2). Scripts that pair
+`LLL_URL` with `LLL_TOKEN` are unaffected. See Security (LLL-688).
 
 **Deploy the server before the clients.** The server runs five migrations
 on its first boot: per-team issue counters, the board's link viewers,
@@ -79,6 +86,46 @@ Output and the board.
 
 ### Added
 
+- `issue comments KEY` is a hidden alias of `issue comment`: it lists the
+  comments. A final-replay agent's poll loop never saw the old hint.
+- `read` is a permanent hidden alias of `view` on `issue`, `doc` and
+  `finding`: it dispatches, but has no help row and no completion. Five of
+  twenty agents in the 1.0 fleet typed `lll issue read KEY`. This reverses
+  the 1.0 retirement of `read`.
+- `lll help contract` prints the CLI contract (docs/cli-contract.md),
+  carried in the binary. `lll --help` points at it.
+- `--json` on the write verbs that lacked it: `issue attach`, `detach`,
+  `release`, `ref`, `block`, `unblock` (the issue), `issue link` and
+  `unlink`, `doc edit`, `finding confirm` and `refute` (the doc),
+  `project create`, `edit` and `move`, `label edit` and `move`, `team
+  rename`, `set-accent`, `set-emoji`, `archive` and `unarchive` (the
+  record). A test lists every verb that still has none, with the reason.
+- `doc create -k finding` takes `--confidence suspected|confirmed`, as
+  `finding create` does (LLL-641). On another kind it exits 2.
+- `--assignee ''` means `none` on `issue update`. It exited 2.
+- `doc edit --confidence suspected|confirmed` on a finding, the write
+  `finding confirm` makes (the note is cleared). `--confidence refuted` is
+  refused with the verb that refutes, `finding refute SLUG -b WHY`; on a
+  doc that is not a finding, `--confidence` exits 2.
+- Issue `--json` names its members and catalogues beside the ids:
+  `creator_name`, `assignee_name`, `project_name`, `label_names`. Doc and
+  finding `--json` add `author_name` and `last_editor_name`. A member you
+  cannot see is `"hidden member"`. The ids and `expand` are unchanged.
+- `issue view` (and `--raw`, which now lists labels) prints a label's team
+  beside a name another team you can see also uses: `Labels: bug (OPS)`.
+- `issue update --keep-claim`, with `--state done|cancelled`, keeps your
+  claim (see Changed).
+- `config show` is a permanent hidden alias of `config list`.
+- Every noun's `--help` ends with the exit-code legend `lll --help` has.
+  The `issue next` row says the key is alone on stdout, notices go to
+  stderr, and exit 5 means nothing is ready.
+- `--admin-password -` reads stdin, as the other password flags do. Only
+  one password flag per command can read stdin.
+- `issue next --ready` is accepted, hidden: next only offers ready issues.
+- `lll issue next --help` states its output contract: stdout is the key (or
+  one JSON object), stderr the notices, exit 5 when nothing is ready.
+- The contract covers which stream carries what: data on stdout, notices on
+  stderr, and with `--json` exactly one JSON value on stdout.
 - Docs record who last edited them. `last_editor` is set by the server from
   the caller: the author on create, then the member whose update changes the
   doc's content (slug, title, kind, body, area or paths). Linking an issue
@@ -99,6 +146,143 @@ Output and the board.
 
 ### Changed
 
+- Commands return their output and one renderer prints it (LLL-683).
+  A failed write of a command's output exits 1
+  with `Error: writing output: ...` on stderr, for text, `--json` and
+  `--env` alike; it exited 0 with a truncated file. `bot create --env`,
+  `bot rotate` and `token create` name the command that mints a fresh token
+  when the one-time token could not be written. A broken stderr costs only
+  notices, never data. These notices moved from stdout to stderr: the
+  `config set` override note, `issue update --assignee`'s "assigned, not
+  claimed", the `issue comment KEY` pointer, `finding near`'s "No findings",
+  the `config list`/`config check` committed-token warning, and `login`'s
+  LLL_TOKEN note. When a command fails, output it already produced prints
+  first, then the error. (Entry added after the v1.0.0 tag; the behaviour
+  shipped in v1.0.0.)
+- `issue update --priority` confirms the name it set (`priority=high`), not
+  the wire number.
+- Recovery hints from the final 1.0 fleet replay name the next command:
+  - a read verb a noun lacks (`view`, `show`, `read`, `ls`) points at
+    `lll <noun> list` (`config view`);
+  - `member read/get` and `bot show/read` point at `lll member access`;
+  - a second issue key on a one-key verb says "one key per call";
+  - a title typed where the key goes points at `lll search "<title>"`;
+  - after a key typed as the command, the next word picks the verb:
+    `review`/`--status`/`mark` name `issue update KEY --state in-review`,
+    `comment`/`note` name `issue comment KEY "text"`;
+  - `issue set`, `mark` and any word containing `review` name the state
+    change; a stray `status` after `issue update KEY` names `--state`;
+  - a redirected `comment` or `update` shows its full form.
+- `issue next` says why it has nothing to offer when the reason is not an
+  empty board (LLL-685): ready issues all claimed by someone else are named
+  as claimed, and open issues all waiting on blockers are named as blocked,
+  pointing at `lll issue list --blocked` ("no other ready issues" when
+  you hold a ready one yourself). Both used to read "the agenda is
+  empty". The all-assigned and own-claims wordings are unchanged.
+- Breaking, toward less surprise: one rule for finishing a claimed issue.
+  When the holder moves it to done or cancelled by any path (`issue close`,
+  `issue update --state done|cancelled`, the board's state picker, a native
+  PATCH or `/assignment`), the server releases the claim in the same
+  transaction and keeps the assignee, as close already did. `--keep-claim`
+  (`keep_claim` on the routes, `?keep_claim=true` on a PATCH) opts out.
+  Before, only close released, so workers followed `update --state done`
+  with `issue release`, which also cleared the assignee. Text output says
+  so: `Updated FLEET-4: state=done; released your claim (assignee kept)`.
+  A move by anyone else (another member, or another agent label on your
+  token) leaves the claim as before, and update's output now names who
+  still holds it. The board signs in as its operator's member, so a drag to
+  Done there releases a claim that member holds under any agent label.
+- `issue release` on a done or cancelled issue that clears the assignee
+  names the repair on the same line, `issue update KEY --assignee NAME`,
+  and the finish that would have kept it (`issue close KEY` on a done
+  issue).
+- Exit 5 (nothing to do) prints `Nothing to do: ` on stderr, not
+  `Error: `. The exit code is unchanged.
+- A password flag given `-` on a terminal prompts with echo off; it read a
+  plain line and echoed the secret. Piped empty stdin is a usage error (exit
+  2), `--password -: stdin was empty`, for `login` and `member set-password`
+  alike.
+- `lll version`, `--version` and `-v`: `--help` prints help, and any other
+  argument exits 2. They printed the version and exited 0.
+- `bot create|rotate --env --team KEY` exits 2: `--env` prints no prompt, so
+  `--team` had been ignored unchecked.
+- An unsupported `--url` names what sets the url: LLL_URL or a repo
+  `.lll.toml` outranks `lll config set url`, so it is only suggested when it
+  would take effect. The server-wide `--team` refusal names `lll api`, not
+  `lll api METHOD`.
+- `lll --help` shows `lll issue claim KEY` in its examples.
+- `issue update KEY --assignee <yourself>` adds one line to its text
+  output: assigned is not claimed, and `lll issue claim KEY` holds the
+  issue. `--json` output is unchanged.
+- `doc view` and `finding view` print `Confidence: <word>` for every
+  finding, confirmed included; `finding list` and `finding near` tag every
+  line with its confidence, `[confirmed]` included.
+- A rename names the old and new names: `Renamed label regresion ->
+  regression`, `Renamed project A -> B`, `Renamed team ENG -> PLAT`.
+- `finding create --help` describes `-k` as defaulting to finding.
+- `issue next --claim --json` prints no "Claimed" notice, and `issue start
+  --branch --json` no Git lines: the JSON carries both.
+- `bot create --env` and `bot rotate --env` print nothing on stderr, so a
+  `2>&1` capture sources cleanly. Four of ten fleet agents captured that
+  way; the expiry line broke `source` and the next command ran as the owner.
+- `issue next` with nothing to offer names the ready issues it skipped for
+  being assigned, and how to offer one (`--assignee none`). `issue release`
+  of an assigned, unclaimed issue says the same.
+- An expired or rejected token's message adds `lll login --token -` for a
+  caller who holds a valid token, then `lll config check`. `whoami` with an
+  expired token also reports a server that does not answer.
+- A refused connection names where the url came from and the fix for that
+  source: `lll config set url URL` or `lll login --url URL` for the machine
+  file, the url line for a repo `.lll.toml`, the variable for LLL_URL. A
+  token from LLL_TOKEN is told to fix the variable, since a login would not
+  outrank it.
+- `lll config --help` names `lll login --token -` for saving a token, and
+  `lll config set token` refuses with that pointer (exit 2).
+- `lll bot WORD`, where WORD is another noun's verb (`list`, `read`), is an
+  unknown command (exit 2) that names create, rotate and `lll member list`.
+  It suggested creating a bot named after the verb.
+- An unknown verb that is a top-level command names it: `lll member whoami`
+  says "did you mean 'lll whoami'?".
+- `issue view` always prints the claim row, `Claimed:   none` when nothing
+  is held, and `--raw` prints `- **Claimed:** none`. Two fleet agents read
+  a missing row as claimed.
+- A refused `--if-unchanged-since` update prints the same command with the
+  issue's current stamp, ready to rerun. `--description-append` help says it
+  applies at write time and needs no stamp beside concurrent appends.
+- `lll issue priority` (or `state`, `assignee`, `label`, `project`) names
+  `lll issue update KEY --priority <name>`.
+- `lll login --password -`, `member set-password --password -` and
+  `--old-password -` read the password from stdin. `-` was taken as the
+  password itself.
+- `--help` answers on every verb before a required flag is checked: `lll
+  invite create --help` exited 2. A test drives `--help` on every noun and
+  verb from the command table and checks no page lists a flag twice.
+- `lll member view` names `lll member access NAME`.
+- `--team` on a server-wide command (`member`, `team`, `token`, ...) says the
+  command is server-wide; it offered an LLL_TEAM override that filters
+  nothing. `member list` adds that its last column shows each member's teams.
+- A rejected `--old-password` says only an administrator can reset a
+  password you do not know.
+- Usage lines list enum values, generated from the enums: `--state
+  backlog|todo|...`, `--priority none|urgent|...|0-4`, `--sort`, project
+  `--status` and doc `-k`.
+- `lll issue --help` lists `--reason` once; its help says `issue release`
+  also takes it as `-b`.
+- `issue update --claim` exits 2 with "to claim, run: lll issue claim KEY"
+  instead of the update usage.
+- Every secret flag reads `-` the same way (LLL-686): `--password`,
+  `--old-password`, `--admin-password`, `--token` and `webhook add
+  --secret`. On a terminal it prompts with echo off; otherwise it reads one
+  line from stdin, and an empty one exits 2 naming the flag. `member create
+  --password -` and `webhook add --secret -` took `-` as the value.
+  `login --token -` printed `Token: ` into a pipe and, on empty stdin, said
+  the token was missing.
+- Ctrl-C at a hidden password or token prompt restores terminal echo and
+  exits 130; it left the shell with echo off. `member create --password -`
+  on a terminal asks twice and refuses a mismatch. `--admin-password -`
+  followed by a prompt (`member set-password` without `--password`, `login
+  --create` without `--password`) reads the prompt's answer from the same
+  stdin; the answer was lost and the command said there was no password.
 - Issue numbers are never reused. Deleting a team's highest-numbered issue
   used to hand its number, and so its key, to the next issue created; a key
   in a commit message or PR then named a different issue. An upgrade starts
@@ -139,6 +323,41 @@ Output and the board.
 
 ### Security
 
+- `member invite` printed the temporary password twice: on its own line
+  and inside the set-password hint, so redacting the first line still
+  leaked it. The hint now says `--old-password -`, which prompts with echo
+  off, and the password appears once.
+- A token goes only to the server it was saved for (LLL-688). The config
+  layers combine key by key, so a `.lll.toml` naming only `url = B`, or
+  `LLL_URL=B`, paired B with the home config's token for A: every command
+  run there, and the team check after `lll login --url A`, sent A's token
+  to B. A cloned repo could collect tokens that way. Now:
+  - the home config's token is sent only when the effective url is the
+    home config's url (a trailing slash aside; `localhost` and `127.0.0.1`
+    differ), or the default when it names none. Otherwise a command that
+    needs it exits 6, names the file, variable or flag that chose the url,
+    and leads with removing it; logging in there is offered last, with what
+    it sends and replaces. A token from `LLL_TOKEN` or a repo file still
+    goes to the url configured with it;
+  - `lll login` sends every request after it holds a token to the server it
+    logged in to, and says when a repo file or `LLL_URL` will send later
+    commands elsewhere. `lll up` says the same after it saves its CLI login;
+  - `lll login` without `--url` exits 2 when a repo file or `LLL_URL` chose
+    the url, instead of sending the password or token there;
+  - `lll member invite` sends the superuser token to, and prints, only a
+    `web_url` saved in the home config for this server, or given by flag;
+  - `lll board` (and `--team`, `-w`) no longer puts the board token in a
+    link to a repo file's `web_url`: that `web_url` counts as none;
+  - `lll up` no longer adopts a server already running at a url a repo file
+    chose, which received the administrator pair (including the generated
+    one in `./pb/pb_data`), unless the home config names the same url. It
+    exits 4, leads with removing the repo's url line, and offers
+    `LLL_URL=<url> lll up` only for a server that is yours, saying it sends
+    the admin credentials. With nothing running there it starts its own
+    server, as before;
+  - requests no longer follow redirects. Go's default client kept the
+    `Authorization` header for the same host on another port and re-sent a
+    login POST body on 307. A redirect is now an error naming its target.
 - lll no longer writes its environment. `--team`, tokens, the board
   token and the administrator pair used to be set as environment variables
   for the rest of the process, so child processes (`gh` for
@@ -185,6 +404,32 @@ Output and the board.
 
 ### Fixed
 
+- Every bad command line exits 2, as the contract says. These exited 1: an
+  unknown argument to `whoami` or `logout`; an unknown `skill` verb,
+  `completions` shell, `help` topic or `config get` key; `doc link` and
+  `doc unlink`; a `bot` name without the `bot-` prefix; `config set`
+  without its two arguments; an `issue` verb with no ID and no branch to
+  infer one from; `issue create` with no title; a malformed value: `doc
+  create -k` or `--confidence`, `project --status`, a `team set-accent`
+  colour, a `webhook add` URL, `login --url`, `--web-url` and `config set`
+  URLs, `issue comment` numbers, `up --bind 0.0.0.0`, `member create
+  --password ""`, and `member access --read-only --read-write`; `config set`
+  of an unknown key; two `member access` team selectors at once; `login
+  --token` with `--email`, or with an empty token; a malformed team key on
+  `team create` or `team rename`; a malformed doc slug; a label or project
+  name with a comma; `lll api METHOD` without a PATH (it printed help and
+  exited 0).
+- `lll skill get NAME` for an unknown skill exits 3 (not found). It exited 1.
+- An expired or rejected token from a repo `.lll.toml`, and the notice
+  after a password change, say to remove that file's token line. They said
+  to run `lll login`, which saves to the home config the repo file
+  outranks (LLL-687).
+- A refused superuser login names where the url came from (`LLL_URL`, the
+  config file, or `--url`). It said `--url` whatever set the url (LLL-687).
+- `lll config list` and the hints attribute a key to the repo `.lll.toml`
+  whenever it names that key. When it repeated the home config's value,
+  the key was attributed to the home config, whose edits the repo file
+  overrides (LLL-687).
 - `lll issue update KEY --assignee NAME` (or `--assignee none`) on an issue
   another session's claim holds, refused for needing force, exits 4
   (refused) like every other claim refusal. It exited 1: the refusal's kind

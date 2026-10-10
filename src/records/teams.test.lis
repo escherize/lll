@@ -1,3 +1,5 @@
+import "config"
+
 // LLL-235: a team key is uppercase, and the same rule decides what is WRITTEN
 // and what a lookup asks for. Two spellings of one team is the bug; a key
 // that normalises on write but not on read is the same bug with an extra
@@ -30,4 +32,21 @@ fn a_team_key_must_match_the_key_rule() {
   assert team_key_problem("ÉQUIPE").is_some()
   let Some(msg) = team_key_problem("A B") else { return }
   assert msg.contains("^[A-Z][A-Z0-9_-]{0,15}$")
+}
+
+// LLL-687: an unknown configured team says where its key came from, one
+// row per source.
+#[test]
+fn an_unknown_configured_team_names_each_source() {
+  let rows: Slice<(Option<config.Source>, string)> = [
+    (Some(config.Source.Flag("--team")), " (from --team)"),
+    (Some(config.Source.Env("LLL_TEAM")), " (from LLL_TEAM)"),
+    (Some(config.Source.RepoFile(".lll.toml")), " (from .lll.toml)"),
+    (Some(config.Source.HomeFile("/h/lll/lll.toml")), " (from /h/lll/lll.toml)"),
+    (Some(config.Source.Default), ""),
+    (None, ""),
+  ]
+  for (source, from) in rows {
+    assert team_named(source) == from
+  }
 }

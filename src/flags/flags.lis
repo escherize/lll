@@ -1,5 +1,8 @@
+import "go:regexp"
 import "go:strings"
 
+import "config"
+import "output"
 import "pb"
 
 /// One source of truth for a CLI flag (TASK-127). The verb's parser loop,
@@ -117,7 +120,7 @@ pub fn parse_n(
   while i < args.length() {
     let arg = args[i]
     if options_ended {
-      if pos.length() >= max_positional { return Err(usage_error(f"unexpected argument: '{arg}'")) }
+      if pos.length() >= max_positional { return Err(usage_error(extra_argument(arg, pos))) }
       pos = pos.append(arg)
       i += 1
       continue
@@ -156,7 +159,7 @@ pub fn parse_n(
         return Err(usage_error(unknown_flag(arg, usage, spec)))
       }
       if pos.length() >= max_positional {
-        return Err(usage_error(f"unexpected argument: '{arg}'"))
+        return Err(usage_error(extra_argument(arg, pos)))
       }
       pos = pos.append(arg)
       i += 1
@@ -174,6 +177,10 @@ pub fn parse_n(
       i += 1
     }
   }
+  // A verb that declares --help prints its own page after parse; a missing
+  // required flag must not answer that request (1.0 fleet: 'lll invite
+  // create --help' exited 2).
+  if declares_help && help_requested(spec, args, start) { return Ok(Parsed { spec, vals, pos }) }
   for fl in spec {
     if fl.required && vals.get(fl.name).is_none() {
       return Err(usage_error(f"usage: {usage}"))
@@ -204,8 +211,21 @@ pub fn shell_argument(value: string) -> string {
 }
 
 fn team_scope_error(arg: string, key: string, usage: string) -> string {
+  let head = unknown_flag(arg, usage, [])
+  // A server-wide command: LLL_TEAM would not filter it either, so the
+  // override hint would mislead (1.0 fleet: 'lll member list --team FLEET').
+  let words = strings.Fields(usage)
+  let noun = words.get(1).unwrap_or("")
+  // A verb is a lowercase word; 'lll api METHOD PATH' has none, so its
+  // METHOD placeholder must not be named as one.
+  let second = words.get(2).unwrap_or("")
+  let verb = if regexp.MustCompile(r"^[a-z][a-z-]*$").MatchString(second) { second } else { "" }
+  if ["member", "team", "token", "api", "skill", "upgrade", "logout"].contains(noun) {
+    let cmd = if verb == "" || verb.starts_with("[") || verb.starts_with("-") { f"lll {noun}" } else { f"lll {noun} {verb}" }
+    return head + f"\n'{cmd}' is server-wide: no team applies to it"
+  }
   let value = shell_argument(key)
-  unknown_flag(arg, usage, []) + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
+  head + f"\nFor a one-command team override, prefix your command with LLL_TEAM={value}.\nThis leaves the saved attachment unchanged (see 'lll config --help')."
 }
 
 /// The same teaching for a guessed --url: a command that takes one declares
@@ -214,7 +234,35 @@ fn team_scope_error(arg: string, key: string, usage: string) -> string {
 /// default, in that order of commitment.
 fn url_scope_error(arg: string, url: string, usage: string) -> string {
   let value = shell_argument(url)
-  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; to change the default, run 'lll config set url URL'."
+  // Where the url comes from decides what changes it (the round-2 rule the
+  // unreachable hint follows): 'config set url' writes the home file, which
+  // LLL_URL and a repo .lll.toml both outrank.
+  let origin = config.resolve(config.read_env(), config.no_overrides()).traced().map_or(None, |t| t.1.url)
+  unknown_flag(arg, usage, []) + f"\nThis command takes no --url: the endpoint is the configured one. For one command, prefix your command with LLL_URL={value}; {url_default_hint(origin)}."
+}
+
+/// How to change the default url, given where it came from.
+fn url_default_hint(origin: Option<config.Source>) -> string {
+  match origin {
+    Some(config.Source.Env(name)) => f"the default comes from {name} in the environment; correct or unset it",
+    Some(config.Source.RepoFile(path)) => f"the default comes from {path}; edit its url line",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => "to change the default, run 'lll config set url URL'",
+  }
+}
+
+/// One positional too many. A second issue key after a first is the guess
+/// `issue view FLEET-4 FLEET-5` (1.0 fleet, cases 13 and 09): say each verb
+/// takes one key.
+fn extra_argument(arg: string, pos: Slice<string>) -> string {
+  // `issue update KEY status review`: a field typed as a word (final replay, case 20).
+  if arg == "status" || arg == "state" {
+    return f"unexpected argument: '{arg}'; to change the state use --state <name> (states: backlog, todo, in-progress, in-review, done, cancelled)"
+  }
+  let key = regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$")
+  if key.MatchString(arg) && pos.any(|p| key.MatchString(p)) {
+    return f"unexpected argument: '{arg}'; this takes one issue key: run it once per key, or 'lll issue list --json' to read several"
+  }
+  f"unexpected argument: '{arg}'"
 }
 
 /// A bad command line: exit 2 (LLL-645). Commands that refuse their own
@@ -298,11 +346,6 @@ fn retired_flag(arg: string, spec: Slice<Flag>) -> Option<string> {
     }
   }
   None
-}
-
-/// Verbs lll no longer accepts, each with the verb that replaced it.
-fn retired_verbs() -> Slice<(string, string)> {
-  [("read", "view")]
 }
 
 /// The declared spelling closest to an unknown flag, when it is close:
@@ -434,11 +477,15 @@ pub struct Command {
   /// neither does its alias (LLL-505). It keeps a spelling agents guess
   /// working when the documented operation lives under another noun.
   pub hidden: bool,
+  /// A spelling that dispatches but is never shown: no help row, no
+  /// completion, and usage lines name `name`. Empty means none. It keeps a
+  /// verb agents guess working (`read` for `view`: 5 of 20 fleet workers).
+  pub hidden_alias: string,
   pub summary: string,
   pub page: string,
   pub spec: Slice<Flag>,
   pub positional: string,
-  pub run: fn(CommandInput) -> Result<(), pb.CliError>,
+  pub run: fn(CommandInput) -> Result<output.Output, pb.CliError>,
 }
 
 /// Route `lll <noun> <verb> ...` through a noun's Command table.
@@ -460,7 +507,7 @@ pub fn dispatch(
   intro: string,
   cmds: Slice<Command>,
   args: Slice<string>,
-) -> Result<(), pb.CliError> {
+) -> Result<output.Output, pb.CliError> {
   let Some(verb) = args.get(2) else {
     return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
@@ -468,12 +515,13 @@ pub fn dispatch(
     return Err(pb.help(noun_help(noun, tagline, intro, cmds)))
   }
   let Some(c) = resolve_command(cmds, verb) else {
-    for (old, new) in retired_verbs() {
-      if old == verb && resolve_command(cmds, new).is_some() {
-        return Err(
-          usage_error(f"unknown {noun} command: '{verb}' - did you mean 'lll {noun} {new}'? (see 'lll {noun} --help')"),
-        )
-      }
+    if !verb.starts_with("-") && top_level_commands().contains(verb) {
+      return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {verb}'? (see 'lll {noun} --help')"))
+    }
+    // A read verb this noun lacks, beside a list it has: two final-replay
+    // agents guessed `config view` (1.0 fleet case 04).
+    if ["view", "show", "read", "ls"].contains(verb) && cmds.any(|c| c.name == "list") {
+      return Err(usage_error(f"unknown {noun} command: '{verb}'; did you mean 'lll {noun} list'? (see 'lll {noun} --help')"))
     }
     return Err(usage_error(f"unknown {noun} command: '{verb}' (see 'lll {noun} --help')"))
   }
@@ -491,6 +539,43 @@ pub fn dispatch(
   (c.run)(CommandInput { ctx, args, parsed, usage })
 }
 
+/// Every top-level command, the first word after `lll`. Completions offer
+/// them, and dispatch names one when it is typed as a noun's verb ('lll
+/// member whoami', 1.0 fleet).
+pub fn top_level_commands() -> Slice<string> {
+  [
+    "issue",
+    "search",
+    "bot",
+    "team",
+    "member",
+    "invite",
+    "project",
+    "label",
+    "api",
+    "doc",
+    "finding",
+    "config",
+    "import",
+    "export",
+    "attach",
+    "watch",
+    "up",
+    "board",
+    "login",
+    "logout",
+    "token",
+    "webhook",
+    "skill",
+    "completions",
+    "upgrade",
+    "whoami",
+    "help",
+    "--version",
+    "-v",
+  ]
+}
+
 /// `lll <noun> --help`: every verb's usage line and summary, aligned, then the
 /// noun's intro. Generated from the table so a verb cannot be missing from it.
 fn noun_help(noun: string, tagline: string, intro: string, cmds: Slice<Command>) -> string {
@@ -506,7 +591,15 @@ fn noun_help(noun: string, tagline: string, intro: string, cmds: Slice<Command>)
     out += f"\n  {l}\n      {c.summary}"
   }
   if intro != "" { out += f"\n\n{intro}" }
+  // Fleet case 13: two workers read only a noun's help and guessed the
+  // exit codes, so every noun page carries the legend 'lll --help' does.
+  out += "\n\n" + exit_code_legend()
   out
+}
+
+/// The one-line exit-code legend every noun's --help ends with.
+pub fn exit_code_legend() -> string {
+  "Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict, 5 nothing to do, 6 not authenticated"
 }
 
 /// A usage line fragment: "lll issue create -t \"title\" [-d desc] ...".
@@ -650,7 +743,8 @@ pub fn command_spec(cmds: Slice<Command>, verb: string) -> Slice<Flag> {
 
 /// Resolve both advertised verbs and accepted aliases to the same command.
 pub fn resolve_command(cmds: Slice<Command>, verb: string) -> Option<Command> {
-  cmds.find(|c| c.name == verb || (!c.alias.is_empty() && c.alias == verb))
+  if verb.is_empty() { return None }
+  cmds.find(|c| c.name == verb || c.alias == verb || c.hidden_alias == verb)
 }
 
 /// Shell completion offers every accepted spelling without duplicating help,

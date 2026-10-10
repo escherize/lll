@@ -9,6 +9,7 @@ import "go:time"
 
 import "display"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "realtime"
@@ -30,13 +31,16 @@ pub fn watch_spec() -> Slice<flags.Flag> {
   ]...))
 }
 
-pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn watch(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = watch_spec()
   let p = flags.parse(spec, args, 2, false, flags.usage("lll watch", spec, ""))?
-  if p.given("--help") {
-    print_watch_usage()
-    return Ok(())
-  }
+  if p.given("--help") { return Ok(output.line(watch_usage())) }
+  streamed(watch_stream(ctx, p))
+}
+
+/// The stream `lll watch` writes, one line per event as it arrives, until
+/// interrupted.
+fn watch_stream(ctx: pb.Client, p: flags.Parsed) -> Result<(), pb.CliError> {
   let filters = filters_from(p)?
   let json_mode = p.given("--json")
   if p.given("--ready") { return watch_ready(ctx, filters, p.given("--json")) }
@@ -102,9 +106,8 @@ fn issue_change(ev: realtime.RecordEvent) -> Result<models.Issue, pb.CliError> {
   }
 }
 
-fn print_watch_usage() {
-  fmt.Println(
-    "lll watch - live event stream for a query
+fn watch_usage() -> string {
+  "lll watch - live event stream for a query
 
 Usage:
   " + flags.usage("lll watch", watch_spec(), "") + "
@@ -182,7 +185,6 @@ not ready are suppressed. With --json, a transition is an NDJSON event object
 with action 'ready' and the full issue record.
 
 " + flags.section(watch_spec())
-  )
 }
 
 /// Dispatch `lll issue watch [KEY-123]` — a live event stream for one issue

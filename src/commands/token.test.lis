@@ -266,3 +266,18 @@ fn shell_word_quotes_anything_a_shell_would_interpret() {
   let prompt = tokens.agent_prompt("http://h/`id`", "ALPHA", "t")
   assert prompt.contains("export LLL_URL='http://h/`id`'\n")
 }
+
+/// The 1.0 fleet: 'lll bot list' suggested creating a bot named "list". A
+/// word some noun has as a verb is an unknown bot verb; another word still
+/// gets the bot- prefix refusal.
+#[test]
+fn a_bot_verb_guess_is_an_unknown_command_not_a_bot_name() {
+  for verb in ["list", "read"] {
+    let assert Err(e) = bot(test_client("http://127.0.0.1:1", "", ""), ["lll", "bot", verb, "bot-x"])
+    assert pb.exit_code(e.kind) == 2
+    assert e.message.contains(f"unknown bot command '{verb}'; bot has create and rotate; see one bot with 'lll member access bot-NAME', all of them with 'lll member list'")
+    assert !e.message.contains("bot create bot-")
+  }
+  let assert Err(named) = bot(test_client("http://127.0.0.1:1", "", ""), ["lll", "bot", "claude-main"])
+  assert named.message.contains("reserved to the bot- prefix")
+}

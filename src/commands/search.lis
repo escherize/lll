@@ -1,6 +1,5 @@
 import "display"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
 import "go:strconv"
 import "go:strings"
@@ -10,6 +9,7 @@ import "go:os"
 import "config"
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "search"
@@ -20,7 +20,7 @@ import "records"
 /// lines around the match (LLL-96). `lll issue list --search` stays the
 /// cheap title filter; this is the one that finds a word buried in a
 /// comment from last month.
-pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let spec = search_spec()
   let usage = flags.usage("lll search", spec, "TEXT...")
   let p = flags.parse_n(spec, args, 2, 64, usage)?
@@ -42,10 +42,9 @@ pub fn search_cmd(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError
   let team = current_team(ctx)?
   let corpus = cached_corpus(ctx, team.id, team.key, p.given("--refresh"), !only_docs, !only_issues)?
   let hits = search.rank(corpus, q, limit)
-  if p.given("--json") { return print_list_json(hits, whole_list(hits.length()), "hits") }
-  if hits.is_empty() { return say_empty(f"match for '{q}' in {team.key}'s issues, comments or docs") }
-  print_hits(hits)
-  Ok(())
+  if p.given("--json") { return list_json(hits, whole_list(hits.length()), "hits") }
+  if hits.is_empty() { return Ok(empty_list(f"match for '{q}' in {team.key}'s issues, comments or docs")) }
+  Ok(hits_output(hits))
 }
 
 pub fn search_spec() -> Slice<flags.Flag> {
@@ -78,17 +77,19 @@ fn fetch_team_issues_light(ctx: pb.Client, team_id: models.TeamId, where: string
 
 /// One hit: the record on its own line, then each matched passage under
 /// its source, the matching line marked '>' like grep -B1 -A1.
-fn print_hits(hits: Slice<search.Hit>) {
+fn hits_output(hits: Slice<search.Hit>) -> output.Output {
+  let mut out = output.none()
   for h in hits {
     let state = if h.state == "" { "" } else { f"  {h.state}" }
     let kind = if h.kind == "doc" { "doc " } else { "" }
-    fmt.Println(f"{kind}{h.group}{state}  {display.table_cell(h.title)}")
+    out = out.line(f"{kind}{h.group}{state}  {display.table_cell(h.title)}")
     for s in h.snippets {
-      fmt.Println(f"    [{s.label}]")
-      for l in s.lines { fmt.Println(f"    {l}") }
+      out = out.line(f"    [{s.label}]")
+      for l in s.lines { out = out.line(f"    {l}") }
     }
-    fmt.Println("")
+    out = out.line("")
   }
+  out
 }
 
 // --- the local corpus cache ----------------------------------------------

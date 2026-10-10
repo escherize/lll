@@ -21,8 +21,9 @@ fn an_unchanged_patch_is_empty_and_sends_nothing() {
 
 #[test]
 fn only_the_given_fields_are_sent() {
+  let done = models.transition(models.Ask.Move { to: models.IssueState.Done, keep_claim: false })
   let patch = IssuePatch {
-    state: Some(models.IssueState.Done),
+    state: Some(done),
     priority: Some(models.Priority.None),
     ..IssuePatch.unchanged(),
   }

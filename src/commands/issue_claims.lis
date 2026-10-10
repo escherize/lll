@@ -1,6 +1,5 @@
 import "records"
 import "claims"
-import "go:fmt"
 import "go:os"
 import "go:regexp"
 import "go:strconv"
@@ -9,6 +8,7 @@ import "display"
 import "flags"
 import "gitctx"
 import "models"
+import "output"
 import "pb"
 import "writes"
 
@@ -37,7 +37,7 @@ fn issue_start_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn start(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -51,6 +51,7 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let key = f"{issue.expand.team.key}-{issue.number}"
   let branch = gitctx.branch_name(issue.expand.team.key, issue.number, issue.title)
 
+  let mut out = output.none()
   // Git is a local prerequisite for the explicit combined operation. Do it
   // before the remote write so a refused switch cannot start the issue.
   if with_branch {
@@ -58,17 +59,23 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
       Ok(created) => created,
       Err(reason) => return Err(pb.failed(f"{reason}\nIssue {key} state unchanged; branch setup failed.")),
     }
-    // Under --json stdout is the issue alone; the Git lines move to stderr.
-    let out = if p.given("--json") { os.Stderr } else { os.Stdout }
-    fmt.Fprintln(out, f"Branch: {branch}")
-    if created {
-      fmt.Fprintln(out, f"Created and switched to branch '{branch}'")
-    } else {
-      fmt.Fprintln(out, f"Switched to existing branch '{branch}'")
+    // Under --json the issue is the whole output (the contract's stream
+    // rule): its record carries the work branch, so the Git lines are not
+    // printed anywhere.
+    if !p.given("--json") {
+      out = out.line(f"Branch: {branch}")
+      if created {
+        out = out.line(f"Created and switched to branch '{branch}'")
+      } else {
+        out = out.line(f"Switched to existing branch '{branch}'")
+      }
     }
   }
+  // A move like every state change (LLL-685); a start is no finish, so it
+  // leaves any claim where it is.
+  let effects = models.transition(models.Ask.Move { to: models.IssueState.InProgress, keep_claim: false })
   let started = writes.update_issue(ctx, issue,
-    writes.IssuePatch { state: Some(models.IssueState.InProgress), ..writes.IssuePatch.unchanged() },
+    writes.IssuePatch { state: Some(effects), ..writes.IssuePatch.unchanged() },
     writes.UpdateOptions.as_caller(pb.Caller.Process),
   )
   if let Err(failure) = started {
@@ -81,14 +88,14 @@ fn start(input: flags.CommandInput) -> Result<(), pb.CliError> {
     }
     return Err(reason)
   }
-  if !p.given("--json") { fmt.Println(f"Started {key}: {issue.title} (◐ in-progress)") }
+  if !p.given("--json") { out = out.line(f"Started {key}: {issue.title} (◐ in-progress)") }
   if with_branch {
     if let Err(reason) = record_work_site(ctx, issue, branch, agent) {
       return Err(reason.with_message(f"{key} is in-progress and Git is on '{branch}', but recording the work site could not be confirmed: {reason.message}\nInspect with 'lll issue view {key}' before retrying."))
     }
   }
-  if p.given("--json") { return print_issue_after(ctx, key) }
-  Ok(())
+  if p.given("--json") { return issue_after(ctx, key) }
+  Ok(out)
 }
 
 /// TASK-205: stamp the work-site slot (work_branch/work_host/work_path) onto
@@ -147,7 +154,7 @@ fn held_elsewhere_hint(key: string) -> string {
 /// together; the unique issue index also protects against duplicate hold rows.
 /// Assignment edits use their own observed-claim transaction and cannot replace
 /// another holder. See gopb/claims.go and gopb/assignment.go for that policy.
-fn claim(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn claim(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue claim [KEY-123] [--renew]"
   let agent = agent_label(ctx, input.parsed)?
@@ -161,14 +168,15 @@ fn claim(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
 
+  let mut out = output.none()
   if input.parsed.given("--renew") {
     let Some(held) = claims.fetch(ctx, issue.id)? else {
       return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed; 'lll issue claim {key}' takes it"))
     };
     let renewed = writes.renew_claim(ctx, issue.id, held.id, agent).map_err(|e| e.with_message(f"{key}: {e.message}"))?
-    if input.parsed.given("--json") { return print_issue_after(ctx, key) }
-    fmt.Println(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
-    return Ok(())
+    if input.parsed.given("--json") { return issue_after(ctx, key) }
+    out = out.line(f"Renewed {key} for {display.byline(renewed.member_name, renewed.agent)}; the expiry clock restarts now (held since {display.relative(renewed.created)})")
+    return Ok(out)
   }
 
   let result = writes.acquire_claim(ctx, pb.Caller.Process, issue.id, member.id, agent).map_err(|e| {
@@ -176,19 +184,19 @@ fn claim(input: flags.CommandInput) -> Result<(), pb.CliError> {
       e.with_message(f"{key}: {e.message}; {held_elsewhere_hint(key)}")
     } else { e }
   })?
-  if input.parsed.given("--json") { return print_issue_after(ctx, key) }
+  if input.parsed.given("--json") { return issue_after(ctx, key) }
   if result.already_owned {
-    fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)} (already yours since {display.relative(result.created)})")
+    out = out.line(f"Claimed {key} for {display.byline(result.member_name, result.agent)} (already yours since {display.relative(result.created)})")
   } else {
-    fmt.Println(f"Claimed {key} for {display.byline(result.member_name, result.agent)}")
+    out = out.line(f"Claimed {key} for {display.byline(result.member_name, result.agent)}")
   }
-  Ok(())
+  Ok(out)
 }
 
 /// The holder releases an observed hold; anyone else needs --force, and the
 /// server records a forced release as a comment on the issue (LLL-512). The
 /// server atomically removes that exact claim and clears only its assignment.
-fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn release(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue release [KEY-123] [--force [--reason \"why\"]]"
   let p = input.parsed
@@ -198,17 +206,35 @@ fn release(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let reason = forced_reason(p, force, "a forced release")?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
-  let Some(held) = claims.fetch(ctx, issue.id)? else { return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed")) };
+  let Some(held) = claims.fetch(ctx, issue.id)? else {
+    // An assignee without a claim keeps the issue out of 'issue next'; name
+    // the way to offer it (1.0 fleet).
+    let open = !issue.state().map_or(false, |s| s.is_terminal())
+    let hint = if issue.assignee == "" || !open { "" } else { f"; it is assigned to {issue.expand.assignee.name}: 'lll issue update {key} --assignee none' offers it to 'issue next'" }
+    return Err(pb.fail(pb.ErrorKind.Refused, f"{key} is not claimed{hint}"))
+  };
   let by = writes.ClaimAs { caller: pb.Caller.Process, agent, force, reason }
   let result = writes.release_claim(ctx, issue.id, held.id, by).map_err(|e| {
     if e.has_code(pb.ServerCode.NeedsForce) {
       e.with_message(f"{key}: {e.message}; 'lll issue release {key} --force --reason \"why\"' takes it anyway and comments on the issue")
     } else { e }
   })?
-  let assignment = if result.cleared_assignee { "cleared assignee" } else { "assignment unchanged" }
+  // On a finished issue the cleared assignee is usually the record of who
+  // did it (fleet case 07), so the line names the repair, and the finish
+  // that would have kept it. Close is named only on a done issue: on a
+  // cancelled one it would change the state.
+  let state = issue.state()
+  let finished = state.map_or(false, |s| s.is_terminal())
+  let finish = if state == Some(models.IssueState.Done) { f"'lll issue close {key}'" } else { f"'lll issue update {key} --state cancelled'" }
+  let assignment = if !result.cleared_assignee {
+    "assignment unchanged"
+  } else if finished {
+    f"cleared assignee; re-assign with 'lll issue update {key} --assignee NAME' (next time, finish with {finish}: that releases the claim and keeps the assignee)"
+  } else {
+    "cleared assignee"
+  }
   let forced = if result.forced { "; forced, and commented on the issue" } else { "" }
-  fmt.Println(f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
-  Ok(())
+  issue_ending(ctx, p, key, f"Released {key} (was {result.member_name}'s); {assignment}{forced}")
 }
 
 /// Compatibility name for command/page reads; storage ownership is in claims.

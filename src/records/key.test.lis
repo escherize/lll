@@ -75,3 +75,19 @@ fn issue_of_team_asks_the_parser() {
   assert !issue_of_team(" ABC-1", "ABC")
   assert !issue_of_team("ABC -1", "ABC")
 }
+
+#[test]
+fn split_issue_key_refuses_captured_notices() {
+  let assert Err(merged) = split_issue_key("Claimed FLEET-4 for bot-fleet-worker-06\nFLEET-4")
+  assert merged.message.contains("capture stdout only")
+  let assert Err(_) = split_issue_key("ClaimedFLEET-4forbot-fleet-worker-09FLEET-4")
+  let assert Ok(_) = split_issue_key("eng-dev-12")
+}
+
+/// Final 1.0 replay, case 17: a title typed where the key goes points at search.
+#[test]
+fn a_title_where_the_key_goes_points_at_search() {
+  let assert Err(e) = split_issue_key("Shared release notes (workers 03 and 04)")
+  assert e.message.contains("to find its key: lll search \"Shared release notes (workers 03 and 04)\"")
+  assert !e.message.contains("capture stdout")
+}

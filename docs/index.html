@@ -452,6 +452,44 @@ commit .lll.toml: every clone and worktree of this repo is attached from then on
   </section>
 
   <section>
+    <h2>New in 1.0</h2>
+    <p class="body">
+      <strong>A surface you can build on.</strong> 1.0 is SemVer: exit codes, the
+      <code>--json</code> fields, and every command, verb and flag spelling hold until 2.0.
+      <code>lll help contract</code> prints the contract, and
+      <a class="link" href="https://pubshare.escherize.workers.dev/lll-v1-upgrade-8001db/">the upgrade notes</a>
+      list every change from 0.9 a script can see.
+    </p>
+
+    <div class="grid">
+      <div class="feat">
+        <h4>Tokens stay with their server</h4>
+        <p>A saved login goes only to the server it came from. A cloned repo's <code>.lll.toml</code> or a stray <code>LLL_URL</code> gets exit 6 and an explanation, never your token. Redirects are refused.</p>
+      </div>
+      <div class="feat">
+        <h4>Tested on agents, tuned for them</h4>
+        <p>Twenty use cases, ten fresh agents each, judged on the server's own state. A wrong guess like <code>lll read KEY</code> or <code>config view</code> gets the exact command to run next.</p>
+      </div>
+      <div class="feat">
+        <h4>Claims that hand off</h4>
+        <p><code>lll issue claim</code> takes an issue; finishing it by any path releases the claim and keeps the assignee. <code>lll issue next</code> says why there is nothing to offer: all claimed, all assigned, or all blocked.</p>
+      </div>
+      <div class="feat">
+        <h4>Findings with confidence</h4>
+        <p>Record what you learned against the files it concerns. <code>lll finding near PATH</code> brings back every finding that covers it, each marked suspected or confirmed.</p>
+      </div>
+      <div class="feat">
+        <h4>Scoped access</h4>
+        <p>Limit a person or a bot to one team, read-only or read-write (<code>lll member access</code>). The server's own rules decide what each viewer sees, on the CLI and the board alike.</p>
+      </div>
+      <div class="feat">
+        <h4>Output you can pipe</h4>
+        <p>Data on stdout, notices on stderr, one JSON value with <code>--json</code>. A write that fails, a full disk included, exits non-zero instead of leaving a truncated file.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <h2>For the agents</h2>
     <p class="body">
       <strong>The CLI is the API.</strong> Reads take <code>--json</code>. Changes arrive as a

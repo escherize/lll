@@ -1,33 +1,29 @@
-import "go:fmt"
 import "go:strings"
 
 import "flags"
+import "output"
 import "pb"
 
 // `lll completions <shell>` — static completion scripts, all generated from
 // the one command table below (nouns, verbs per noun, flags per verb).
 
-pub fn completions(args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn completions(args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let parsed = flags.parse([], args, 2, true, completions_usage())?
   let shell = parsed.first()
   if shell == "" {
-    fmt.Println(completions_usage())
-    return Ok(())
+    return Ok(output.line(completions_usage()))
   }
   match shell {
     "bash" => {
-      fmt.Print(bash_script())
-      Ok(())
+      Ok(output.text(bash_script()))
     },
     "zsh" => {
-      fmt.Print(zsh_script())
-      Ok(())
+      Ok(output.text(zsh_script()))
     },
     "fish" => {
-      fmt.Print(fish_script())
-      Ok(())
+      Ok(output.text(fish_script()))
     },
-    other => Err(pb.failed(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
+    other => Err(flags.usage_error(f"unknown shell: '{other}' (expected bash, zsh, or fish)")),
   }
 }
 
@@ -45,40 +41,6 @@ Completes nouns, verbs per noun, and flags per verb."
 }
 
 // --- command table ---
-
-fn nouns() -> Slice<string> {
-  [
-    "issue",
-    "search",
-    "bot",
-    "team",
-    "member",
-    "invite",
-    "project",
-    "label",
-    "api",
-    "doc",
-    "finding",
-    "config",
-    "import",
-    "export",
-    "attach",
-    "watch",
-    "up",
-    "board",
-    "login",
-    "logout",
-    "token",
-    "webhook",
-    "skill",
-    "completions",
-    "upgrade",
-    "whoami",
-    "help",
-    "--version",
-    "-v",
-  ]
-}
 
 fn command_table(noun: string) -> Slice<flags.Command> {
   match noun {
@@ -151,7 +113,7 @@ fn noun_flags(noun: string) -> Slice<string> {
 fn shell_cases(assignment: fn(string) -> string) -> (string, string) {
   let mut verb_cases = ""
   let mut flag_cases = ""
-  for n in nouns() {
+  for n in flags.top_level_commands() {
     let vs = verbs(n)
     let own = noun_flags(n)
     let candidates = vs.append(own...)
@@ -176,7 +138,7 @@ fn shell_cases(assignment: fn(string) -> string) -> (string, string) {
 
 fn bash_script() -> string {
   let (verb_cases, flag_cases) = shell_cases(|words| f"words='{words}'")
-  let all_nouns = strings.Join(nouns(), " ")
+  let all_nouns = strings.Join(flags.top_level_commands(), " ")
   "# lll bash completions
 # Add to ~/.bashrc:  eval \"$(lll completions bash)\"
 _lll() {
@@ -207,7 +169,7 @@ complete -F _lll lll
 
 fn zsh_script() -> string {
   let (verb_cases, flag_cases) = shell_cases(|words| f"comps=({words})")
-  let all_nouns = strings.Join(nouns(), " ")
+  let all_nouns = strings.Join(flags.top_level_commands(), " ")
   "# lll zsh completions
 # Add to ~/.zshrc (after compinit):  eval \"$(lll completions zsh)\"
 _lll() {
@@ -236,13 +198,13 @@ compdef _lll lll
 }
 
 fn fish_script() -> string {
-  let all_nouns = strings.Join(nouns(), " ")
+  let all_nouns = strings.Join(flags.top_level_commands(), " ")
   let mut out = "# lll fish completions
 # Add to ~/.config/fish/config.fish:  lll completions fish | source
 complete -c lll -f
 "
   out += f"complete -c lll -n '__fish_use_subcommand' -a '{all_nouns}'\n"
-  for n in nouns() {
+  for n in flags.top_level_commands() {
     let vs = verbs(n)
     let own = noun_flags(n)
     if !vs.is_empty() {

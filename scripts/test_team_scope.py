@@ -505,7 +505,7 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert out.returncode == 0, out.stdout + out.stderr
         lines = out.stdout.splitlines()
         assert len(lines) == 2 and lines[0] == 'export LLL_URL=' + api and lines[1].startswith('export LLL_TOKEN='), out.stdout
-        assert 'created bot member bot-boss-env (kind=bot, owned by boss)' in out.stderr, out.stderr
+        assert out.stderr == '', out.stderr
         fresh = Path(root) / 'fresh-agent-home'
         fresh.mkdir()
         (fresh / 'agent.env').write_text(out.stdout)

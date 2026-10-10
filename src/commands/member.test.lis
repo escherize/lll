@@ -1,8 +1,10 @@
+import "config"
 import "pb"
 
 import "go:strings"
 
 import "flags"
+import "models"
 import "records"
 
 // Unit cover for the pure helpers in member.lis. Everything here is a
@@ -72,7 +74,9 @@ fn invite_lines_are_two_commands_and_the_optional_password_change() {
   let lines = invite_lines("kim", "kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
   let commands = lines.filter(|l| strings.Contains(l, "lll "))
   assert commands.length() == 3
-  assert lines[lines.length() - 1] == "  # to choose your own password: lll member set-password kim --old-password pw"
+  assert lines[lines.length() - 1] == "  # to choose your own password: lll member set-password kim --old-password -"
+  // The temporary password is printed on exactly one line.
+  assert lines.filter(|l| l.contains("pw")).length() == 1
 }
 
 // ------------------------------------------------------------- real_email
@@ -202,4 +206,51 @@ fn own_password_change_passes_auth_failures_through() {
   assert is_auth_failure(pb.fail(pb.ErrorKind.Auth, "the token in LLL_TOKEN was rejected"))
   assert !is_auth_failure(pb.fail(pb.ErrorKind.NotFound, "no such record"))
   assert !is_auth_failure(pb.failed("dial tcp: connection refused"))
+}
+
+/// Two 1.0 fleet agents (case 19) filtered 'member list' by --team: the
+/// filter keeps server-wide members, pre-scope members and those scoped to it.
+#[test]
+fn member_list_team_filter_keeps_who_can_reach_it() {
+  let fleet = models.TeamId("t1")
+  let ops = models.TeamId("t2")
+  assert reaches_team(None, fleet)
+  assert reaches_team(Some(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadOnly }), fleet)
+  assert reaches_team(Some(models.Access { reach: models.Reach.Teams([fleet]), mode: models.Mode.ReadWrite }), fleet)
+  assert !reaches_team(Some(models.Access { reach: models.Reach.Teams([ops]), mode: models.Mode.ReadWrite }), fleet)
+}
+
+// LLL-688: the invite probes web_url with the superuser token, so only a
+// board saved for this server is ever probed or printed.
+#[test]
+fn an_invite_trusts_only_a_board_saved_for_its_server() {
+  let a = "http://127.0.0.1:8090"
+  let board = "http://127.0.0.1:8100"
+  let home = Some(config.Source.HomeFile("/h/lll.toml"))
+  assert board_for_server(board, home, a, a) == board
+  assert board_for_server(board, Some(config.Source.Flag("--web-url")), a, "") == board
+  // The home board while the url is another server's.
+  assert board_for_server(board, home, "http://127.0.0.1:9999", a) == ""
+  assert board_for_server(board, Some(config.Source.RepoFile("/r/.lll.toml")), a, a) == ""
+  assert board_for_server(board, Some(config.Source.Env("LLL_WEB_URL")), a, a) == ""
+  assert invite_base("", a, board_for_server(board, Some(config.Source.RepoFile("/r/.lll.toml")), a, a)) == a
+}
+
+#[test]
+fn a_scoped_board_link_never_names_a_repo_files_host() {
+  let board = "http://127.0.0.1:8100"
+  assert board_for_link(board, Some(config.Source.RepoFile("/r/.lll.toml"))) == ""
+  assert board_for_link(board, Some(config.Source.Env("LLL_WEB_URL"))) == board
+  assert board_for_link(board, Some(config.Source.HomeFile("/h/lll.toml"))) == board
+}
+
+// LLL-688 re-review: `lll board` puts the board token in its link, so a repo
+// file's web_url counts as none and the home config's is used.
+#[test]
+fn the_board_link_never_names_a_repo_files_host() {
+  let home = "http://127.0.0.1:8100"
+  assert board_web_url("https://board.evil.example", Some(config.Source.RepoFile("/r/.lll.toml")), home) == home
+  assert board_web_url("https://board.evil.example", Some(config.Source.RepoFile("/r/.lll.toml")), "") == ""
+  assert board_web_url("http://127.0.0.1:8200", Some(config.Source.Env("LLL_WEB_URL")), home) == "http://127.0.0.1:8200"
+  assert board_web_url(home, Some(config.Source.HomeFile("/h/lll.toml")), home) == home
 }

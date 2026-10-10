@@ -1,10 +1,10 @@
 import "records"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
 
 import "flags"
 import "models"
+import "output"
 import "pb"
 import "query"
 import "writes"
@@ -36,18 +36,18 @@ fn cross_team_link(
   )
 }
 
-fn link(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn link(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue link KEY-123 SLUG"
   let id = input.parsed.first()
   let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  link_issue(ctx, id, slug, usage)
+  link_issue(ctx, input.parsed, id, slug, usage)
 }
 
 /// The write path behind 'lll issue link KEY-123 SLUG'. The relation is
 /// stored once on docs.issues. 'lll doc link' was removed at 1.0 (D5).
-fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), pb.CliError> {
+fn link_issue(ctx: pb.Client, p: flags.Parsed, id: string, slug: string, usage: string) -> Result<output.Output, pb.CliError> {
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -56,25 +56,23 @@ fn link_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result
   cross_team_link(issue, team, d)?
 
   if d.issues.find(|x| x == issue.id).is_some() {
-    fmt.Println(f"{key} is already linked to {d.slug}")
-    return Ok(())
+    return doc_ending(ctx, p, d.id, f"{key} is already linked to {d.slug}")
   }
   writes.link_doc_issue(ctx, d.id, issue.id)?
-  fmt.Println(f"Linked {key} -> {d.slug}")
-  Ok(())
+  doc_ending(ctx, p, d.id, f"Linked {key} -> {d.slug}")
 }
 
-fn unlink(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn unlink(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue unlink KEY-123 SLUG"
   let id = input.parsed.first()
   let slug = input.parsed.nth(1)
   if id == "" || slug == "" { return Err(flags.usage_error(f"usage: {usage}")) }
-  unlink_issue(ctx, id, slug, usage)
+  unlink_issue(ctx, input.parsed, id, slug, usage)
 }
 
 /// The write path behind 'lll issue unlink KEY-123 SLUG'.
-fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Result<(), pb.CliError> {
+fn unlink_issue(ctx: pb.Client, p: flags.Parsed, id: string, slug: string, usage: string) -> Result<output.Output, pb.CliError> {
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -86,8 +84,7 @@ fn unlink_issue(ctx: pb.Client, id: string, slug: string, usage: string) -> Resu
     return Err(pb.failed(f"{key} is not linked to {d.slug}; see 'lll doc view {d.slug}'"))
   }
   writes.unlink_doc_issue(ctx, d.id, issue.id)?
-  fmt.Println(f"Unlinked {key} from {d.slug}")
-  Ok(())
+  doc_ending(ctx, p, d.id, f"Unlinked {key} from {d.slug}")
 }
 
 /// An explicit issue identifies its document namespace outside an attached
@@ -100,7 +97,7 @@ fn issue_link_team(ctx: pb.Client, issue: models.Issue) -> Result<models.Team, p
 /// Refuses a self-block and a cycle (BLOCKER already waits on KEY, at any
 /// depth), since a cycle would make both un-ready forever. The dependency
 /// lives on the blocked issue: one relation field, no second collection.
-fn block(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn block(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue block KEY-123 BLOCKER"
   let id = input.parsed.first()
@@ -112,8 +109,7 @@ fn block(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let bkey = f"{blocker.expand.team.key}-{blocker.number}"
   if issue.id == blocker.id { return Err(pb.failed(f"{key} cannot block itself")) }
   if issue.blocked_by.find(|x| x == blocker.id).is_some() {
-    fmt.Println(f"{key} is already blocked by {bkey}")
-    return Ok(())
+    return issue_ending(ctx, input.parsed, key, f"{key} is already blocked by {bkey}")
   }
   let cyclic = depends_on(ctx, blocker, issue.id, 0)?
   if cyclic {
@@ -122,11 +118,10 @@ fn block(input: flags.CommandInput) -> Result<(), pb.CliError> {
   writes.set_blocked_by(ctx, issue.id, issue.blocked_by.append(blocker.id))?
   let mut note = ""
   if blocker.state().map_or(false, |s| s.is_terminal()) { note = f" ({bkey} is already {display.state_name(blocker.state())}, so this does not hold {key} back)" }
-  fmt.Println(f"{key} is blocked by {bkey}{note}")
-  Ok(())
+  issue_ending(ctx, input.parsed, key, f"{key} is blocked by {bkey}{note}")
 }
 
-fn unblock(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn unblock(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = "lll issue unblock KEY-123 BLOCKER"
   let id = input.parsed.first()
@@ -142,12 +137,10 @@ fn unblock(input: flags.CommandInput) -> Result<(), pb.CliError> {
     if x == blocker.id { found = true } else { remaining = remaining.append(x) }
   }
   if !found {
-    fmt.Println(f"{key} was not blocked by {bkey}")
-    return Ok(())
+    return issue_ending(ctx, input.parsed, key, f"{key} was not blocked by {bkey}")
   }
   writes.set_blocked_by(ctx, issue.id, remaining)?
-  fmt.Println(f"{key} is no longer blocked by {bkey}")
-  Ok(())
+  issue_ending(ctx, input.parsed, key, f"{key} is no longer blocked by {bkey}")
 }
 
 /// True when `issue` waits on `target` at any depth. Bounded at eight

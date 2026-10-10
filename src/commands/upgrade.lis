@@ -6,6 +6,7 @@ import "go:runtime"
 import "go:strings"
 
 import "flags"
+import "output"
 import "pb"
 
 /// How this binary got onto the machine, read from where it lives. The one
@@ -89,10 +90,10 @@ pub fn upgrade_spec() -> Slice<flags.Flag> {
   ]
 }
 
-pub fn upgrade(args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn upgrade(args: Slice<string>) -> Result<output.Output, pb.CliError> {
   let p = flags.parse(upgrade_spec(), args, 2, false, "lll upgrade [--dry-run]")?
   if p.given("--help") {
-    fmt.Println(
+    return Ok(output.line(
       "lll upgrade - upgrade lll the way it was installed
 
 Usage:
@@ -107,8 +108,7 @@ running lll processes keep working until they exit.
 A server ('lll up') migrates its database on the first start of a new
 version: stop it and back up its data directory before upgrading, so the
 backup is the way back. Upgrade the server and its clients together.",
-    )
-    return Ok(())
+    ))
   }
   let exe = os.Executable().map_err(|e| f"cannot locate this lll binary: {e}").map_err(pb.failed)?
   let resolved = filepath.EvalSymlinks(exe).unwrap_or(exe)
@@ -116,12 +116,19 @@ backup is the way back. Upgrade the server and its clients together.",
   let dry_run = p.given("--dry-run")
   // Notes first: Homebrew runs straight after the plan, so advice printed
   // after it could not be followed in time.
-  fmt.Println(upgrade_notes())
-  fmt.Println(upgrade_plan(install, dry_run, runtime.GOOS, runtime.GOARCH))
+  let said = output.line(upgrade_notes()).line(upgrade_plan(install, dry_run, runtime.GOOS, runtime.GOARCH))
   let Some(argv) = upgrade_argv(install) else {
-    return Ok(())
+    return Ok(said)
   }
-  if dry_run { return Ok(()) }
+  if dry_run { return Ok(said) }
+  streamed(run_upgrade(said.data(), argv))
+}
+
+/// Print the notes and the plan, then run the upgrade on this terminal. It
+/// writes as it goes: the advice has to be on screen before Homebrew starts,
+/// and Homebrew's own output is a stream.
+fn run_upgrade(said: string, argv: Slice<string>) -> Result<(), pb.CliError> {
+  fmt.Print(said)
   let mut cmd = exec.Command(argv[0], argv[1..]...)
   cmd.Stdin = Some(os.Stdin)
   cmd.Stdout = Some(os.Stdout)

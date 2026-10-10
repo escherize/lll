@@ -1,4 +1,5 @@
 import "go:net/url"
+import "go:strings"
 import "models"
 import "pb"
 import "query"
@@ -35,6 +36,15 @@ pub fn label_ids(ctx: pb.Client, scope: query.TeamScope, name: string) -> Result
       Ok(ids)
     },
   }
+}
+
+/// The names among `names` that more than one team the caller can see uses
+/// (fleet case 12): 'Labels: bug' alone does not say whose bug.
+pub fn shared_label_names(ctx: pb.Client, names: Slice<string>) -> Result<Slice<string>, pb.CliError> {
+  if names.is_empty() { return Ok([]) }
+  let filter = url.QueryEscape(strings.Join(names.map(|n| f"name={query.quote(n)}"), " || "))
+  let found = fetch_all_records<models.Label>(ctx, f"/api/collections/labels/records?sort=id&fields=id,name,team&filter={filter}", "labels")?
+  Ok(names.filter(|n| found.filter(|l| l.name == n).length() > 1))
 }
 
 /// One team's labels. Labels belong to exactly one team (TASK-173), so

@@ -1,9 +1,12 @@
 import "go:fmt"
+import "go:github.com/escherize/lll/docs"
 import "go:os"
+import "go:regexp"
 import "go:strings"
 
 import "commands"
 import "config"
+import "output"
 import "pb"
 import "query"
 import "buildinfo"
@@ -14,7 +17,7 @@ fn main() {
   // carry state, so a child process sees only what lll's parent gave it.
   let env = config.read_env()
   let Some(noun) = os.Args.get(1) else {
-    print_usage(pb.Client.new(config.resolve(env, config.no_overrides())))
+    render(output.none(), Ok(usage(pb.Client.new(config.resolve(env, config.no_overrides())))), None)
     return
   }
 
@@ -26,12 +29,14 @@ fn main() {
     Ok((_, team)) => team,
     Err(_) => None,
   }
-  let mut settings = config.resolve(env, config.Overrides { team: team_flag, .. })
+  let resolved = config.resolve(env, config.Overrides { team: team_flag, .. })
   // LLL-441: before anything reads the token, renew a login token near
   // expiry - only for nouns that talk to the server anyway, so --help,
   // version and completions never wait on the network.
-  if commands.talks_to_server(noun) {
-    settings = commands.renew_login_token(settings)
+  let (settings, renewal) = if commands.talks_to_server(noun) {
+    commands.renew_login_token(resolved)
+  } else {
+    (resolved, output.none())
   }
   let ctx = pb.Client.new(settings)
   let skew = commands.version_skew_check(ctx, noun)
@@ -39,8 +44,36 @@ fn main() {
     Ok((args, _)) => dispatch(ctx, noun, args),
     Err(msg) => Err(msg),
   }
-  if let Some(Some(line)) = skew.receive() {
-    fmt.Fprintln(os.Stderr, line)
+  render(renewal, result, skew.receive().unwrap_or(None))
+}
+
+/// The one place lll writes a command's outcome (LLL-683): what came before
+/// the command (a login renewal's note), then the command's data to stdout
+/// and its notices to stderr (none under --json or --env) in the order it
+/// gave them, then the version-skew line, then any error with its exit code.
+/// A failed command's output is what it had said before failing.
+///
+/// Data that fails to write (a full disk, stdout closed) is an error of its
+/// own, exit 1: a truncated download or a --json document cut short must not
+/// read as success. A command that had already failed keeps its own message
+/// and exit code. Notices are best effort: a broken stderr must not cost a
+/// script the data on stdout (the key 'issue next --claim' just claimed).
+fn render(before: output.Output, result: Result<output.Output, pb.CliError>, skew: Option<string>) {
+  let out = match result {
+    Ok(out) => out,
+    Err(err) => err.output(),
+  }
+  let wrote = match write(before) {
+    Ok(_) => write(out),
+    Err(e) => Err(e),
+  }
+  let unwritten = wrote.is_err()
+  if let Err(e) = wrote {
+    let lost = if out.lost == "" { "" } else { f"\n{out.lost}" }
+    let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}{lost}")
+  }
+  if let Some(line) = skew {
+    let _ = fmt.Fprintln(os.Stderr, line)
   }
 
   if let Err(err) = result {
@@ -48,17 +81,37 @@ fn main() {
     // it can act (flags.parse, TASK-237). It is not a failure: print it bare
     // and exit 0, or `lll issue list -h` in a script reads as a broken command.
     if let pb.ErrorKind.Help = err.kind {
-      fmt.Println(err.message)
+      if let Err(e) = fmt.Println(err.message) {
+        let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}")
+        os.Exit(pb.exit_code(pb.ErrorKind.Failed))
+      }
+      if unwritten { os.Exit(pb.exit_code(pb.ErrorKind.Failed)) }
       return
     }
     // Every failing exit is decided here, by the error's kind (LLL-645,
     // docs/cli-contract.md): scripts branch on the code, not the text.
-    fmt.Fprintln(os.Stderr, f"Error: {err.message}")
+    // Exit 5 is an outcome, not a failure (fleet case 13): "Error:" belongs
+    // only to real errors.
+    let prefix = if let pb.ErrorKind.NothingToDo = err.kind { "Nothing to do" } else { "Error" }
+    let _ = fmt.Fprintln(os.Stderr, f"{prefix}: {err.message}")
     os.Exit(pb.exit_code(err.kind))
   }
+  if unwritten { os.Exit(pb.exit_code(pb.ErrorKind.Failed)) }
 }
 
-fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.CliError> {
+/// Write `out`'s parts in order. Only a data write can fail it; a notice
+/// that cannot be written is dropped and the data still goes out.
+fn write(out: output.Output) -> Result<(), error> {
+  for part in out.written() {
+    match part {
+      output.Part.Data(s) => { fmt.Print(s)?; },
+      output.Part.Notice(s) => { let _ = fmt.Fprintln(os.Stderr, s); },
+    }
+  }
+  Ok(())
+}
+
+fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   match noun {
     "issue" => commands.issue(ctx, args),
     "team" => commands.team(ctx, args),
@@ -86,36 +139,42 @@ fn dispatch(ctx: pb.Client, noun: string, args: Slice<string>) -> Result<(), pb.
     "skill" => commands.skill(args),
     "completions" => commands.completions(args),
     "upgrade" => commands.upgrade(args),
-    "--help" => {
-      print_usage(ctx)
-      Ok(())
-    },
-    "-h" => {
-      print_usage(ctx)
-      Ok(())
-    },
-    "help" => {
-      print_usage(ctx)
-      Ok(())
-    },
-    "--version" => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
-    "-v" => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
-    "version" => {
-      fmt.Println(f"lll {buildinfo.version()}")
-      Ok(())
-    },
+    "--help" | "-h" => Ok(usage(ctx)),
+    "help" => help(ctx, args),
+    "--version" | "-v" | "version" => version(noun, args),
     other => Err(pb.fail(pb.ErrorKind.Usage, unknown_command(other, os.Args.get(2).unwrap_or("")))),
   }
 }
 
-fn print_usage(ctx: pb.Client) {
-  fmt.Println(
+/// `lll version`, `--version` and `-v`: the version, `--help` the usage, and
+/// anything else a usage error (exit 2) like every other command line.
+fn version(noun: string, args: Slice<string>) -> Result<output.Output, pb.CliError> {
+  match args.get(2) {
+    None => Ok(output.line(f"lll {buildinfo.version()}")),
+    Some("--help") | Some("-h") => Err(pb.fail(pb.ErrorKind.Help, "lll version - print the version\n\nUsage:\n  lll version    (also: lll --version, lll -v)")),
+    Some(extra) => Err(pb.fail(pb.ErrorKind.Usage, f"lll {noun} takes no arguments; got '{extra}'")),
+  }
+}
+
+/// `lll help [contract]`. The contract is a help topic rather than a noun: it
+/// is reference text, like --help, and `help` already answers with the usage
+/// page. It ships in the binary because installed users have no docs/ (1.0
+/// fleet: a worker tried 'lll skill get cli-contract').
+fn help(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
+  match (args.get(2), args.get(3)) {
+    (None, _) | (Some("--help"), None) | (Some("-h"), None) => Ok(usage(ctx)),
+    (Some("contract"), None) => Ok(output.text(docs.Contract())),
+    _ => Err(
+      pb.fail(
+        pb.ErrorKind.Usage,
+        f"unknown help topic: '{strings.Join(args[2..], " ")}'; 'lll help contract' prints the CLI contract, 'lll --help' the commands, 'lll NOUN --help' one noun",
+      ),
+    ),
+  }
+}
+
+fn usage(ctx: pb.Client) -> output.Output {
+  let page = output.line(
     f"lll - a Linear-style issue tracker
 
 Every verb lives under a noun: 'lll issue list', 'lll issue comment KEY \"body\"',
@@ -190,11 +249,11 @@ Usage:
                           (see 'lll upgrade --help')
   lll --version, -v       print the version
   lll --help              show this help
+  lll help contract       the CLI contract: exit codes, --json fields, spellings
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict,
 5 nothing to do, 6 not authenticated. They and the --json fields scripts may
-rely on are the CLI contract:
-https://github.com/escherize/lll/blob/main/docs/cli-contract.md
+rely on are the CLI contract: 'lll help contract' prints it.
 
 Scoped commands (issue, project, label, doc, finding, import, export, watch,
 search, webhook) accept --team KEY.
@@ -204,6 +263,8 @@ Explicit issue IDs still target their own team.
 Examples:
   lll issue list --team ENG --search checkout
   lll issue update ENG-1 --assignee alice --state in-review
+  lll issue claim ENG-1   take it so no other agent does; 'lll issue release
+                          ENG-1' gives it back, and close releases it too
   next=$(lll issue next)  the one issue to work next: ready, unclaimed,
                           priority, age, unblocks; add --claim to take it
 
@@ -215,7 +276,7 @@ layer, each supplying the keys it names; 'lll config list' shows which won):
   LLL_WEB_URL  web board base URL for 'board', 'issue url', 'view -w' (set with 'lll config set web_url URL')",
   )
   let hint = commands.setup_hint(ctx)
-  if hint != "" { fmt.Println(hint) }
+  if hint == "" { page } else { page.line(hint) }
 }
 
 /// An issue verb typed as a noun ('lll comment ...') is the most common
@@ -233,13 +294,39 @@ fn unknown_command(noun: string, verb: string) -> string {
     }
   }
   for c in commands.issue_commands() {
-    if c.name == noun {
+    // An accepted alias counts too: 'lll read KEY' (five of ten 1.0 fleet
+    // agents, case 20) names 'issue view', which also takes 'read'.
+    if c.name == noun || (noun != "" && (c.alias == noun || c.hidden_alias == noun)) {
       // 'lll comment create' is the common shape of this mistake; dropping
       // the typed verb here, as the plural branch once did, hid the half
       // the user had right. So the verb rides along (LLL-313).
       let rest = if verb == "" || verb.starts_with("-") { "" } else { f" {verb}" }
-      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {noun} ...' (see 'lll issue {noun} -h')"
+      // Only a key is carried into the suggestion: 'lll comment add' must not
+      // become 'lll issue comment add', which is refused too (case 20).
+      let is_key = regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(verb)
+      // The rest of the form rides along, so the suggestion can be run as is
+      // (six of ten final-replay agents typed `lll comment KEY "text"`).
+      let tail = if c.name == "comment" { " \"text\"" } else if c.name == "update" { " --state <name>" } else { "" }
+      let carried = if is_key { f" {verb}{tail}" } else { " ..." }
+      return f"unknown command: '{noun}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}' (see 'lll issue {c.name} -h')"
     }
+  }
+  // 'lll FLEET-4': a key where the noun goes (case 20).
+  if regexp.MustCompile(r"^[A-Za-z][A-Za-z0-9_-]*-[0-9]+$").MatchString(noun) {
+    // `lll FLEET-4 status review` wants a change, not a view (final replay, case 20).
+    // The word after the key says what was meant (final replay, case 20).
+    let change = f"to change its state use 'lll issue update {noun} --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"
+    let note = f"to comment use 'lll issue comment {noun} \"text\"'"
+    if ["status", "state", "--status", "--state", "review", "move", "mark"].contains(verb) {
+      return f"unknown command: '{noun}' is an issue ID; {change}"
+    }
+    if ["comment", "note", "-m", "reply"].contains(verb) {
+      return f"unknown command: '{noun}' is an issue ID; {note}"
+    }
+    if verb != "" {
+      return f"unknown command: '{noun}' is an issue ID; put the verb first: 'lll issue view {noun}', {change}, or {note}"
+    }
+    return f"unknown command: '{noun}' is an issue ID; to see it use 'lll issue view {noun}'"
   }
   // A member verb typed as a noun, the same mistake shape (fleet case 11 was
   // 'lll invite', which is now its own noun and points back at member invite).
@@ -247,6 +334,9 @@ fn unknown_command(noun: string, verb: string) -> string {
     if c.name == noun {
       return f"unknown command: '{noun}'; it is a member verb: 'lll member {noun} ...' (see 'lll member {noun} -h')"
     }
+  }
+  if let Some(hint) = commands.issue_verb_hint(noun) {
+    return f"unknown command: '{noun}'; {hint} (see 'lll issue -h')"
   }
   f"unknown command: '{noun}' (see 'lll --help')"
 }

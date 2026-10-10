@@ -1,19 +1,22 @@
 import "records"
+import "go:bufio"
 import "go:crypto/rand"
 import "go:encoding/json"
-import "go:fmt"
 import "go:net/url"
+import "go:os"
 import "go:strings"
 
 import "models"
+import "output"
 import "pb"
 import "flags"
 import "query"
+import "secret"
 import "writes"
 
 /// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
 /// dispatch, `lll webhook --help` and shell completions all read the table.
-pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<(), pb.CliError> {
+pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
   flags.dispatch(ctx,
     "webhook",
     "outbound webhooks for issue events",
@@ -76,7 +79,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
 fn webhook_add_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
-    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header (default: generated and printed once)", .. },
+    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
   ])
 }
 
@@ -90,7 +93,7 @@ fn webhook_remove_spec() -> Slice<flags.Flag> {
   ])
 }
 
-fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn webhook_add(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let raw = p.first()
@@ -106,8 +109,12 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   // The server never returns the secret (LLL-661), so one the caller did
   // not choose is generated here and printed once, below.
-  let generated = !p.given("--secret")
-  let secret = if generated { rand.Text() } else { p.one("--secret") }
+  let chosen = if p.given("--secret") {
+    let mut input = bufio.NewReader(os.Stdin)
+    Some(secret.Secret.read(p, "--secret", "Webhook secret: ", input)?)
+  } else {
+    None
+  }
 
   // One registration per scope and URL: a duplicate would double every
   // delivery, which reads downstream as a server bug rather than a mistake.
@@ -121,25 +128,30 @@ fn webhook_add(input: flags.CommandInput) -> Result<(), pb.CliError> {
     return Err(pb.failed(f"webhook {target} is already registered for {scope}; remove it first: 'lll webhook remove {target}'"))
   }
 
-  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret })?
+  let value = match chosen {
+    Some(s) => s.reveal(),
+    None => rand.Text(),
+  }
+  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret: value })?
   let mut created = models.Webhook { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created webhook: {e}"))
   }
-  // `generated` is checked first: a server older than LLL-661 returns no
-  // secret_set, and the generated secret must still be shown once.
-  if generated {
-    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {secret}")
-    fmt.Println("Save this secret now: lll will not show it again.")
-  } else if secret == "" {
-    fmt.Println(f"Registered webhook {target} ({scope})")
+  let mut out = output.none()
+  // The generated case is checked first: a server older than LLL-661
+  // returns no secret_set, and the generated secret must still be shown once.
+  if chosen.is_none() {
+    out = out.line(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret: {value}")
+    out = out.line("Save this secret now: lll will not show it again.")
+  } else if chosen.map_or(false, |s| s.is_empty()) {
+    out = out.line(f"Registered webhook {target} ({scope})")
   } else {
-    fmt.Println(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret")
+    out = out.line(f"Registered webhook {target} ({scope}); deliveries carry X-LLL-Secret")
   }
-  Ok(())
+  Ok(out)
 }
 
-fn webhook_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn webhook_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let team = team_flag_or_current(ctx, p.one("--team"))?
@@ -151,15 +163,16 @@ fn webhook_list(input: flags.CommandInput) -> Result<(), pb.CliError> {
     )?,
     ..
   }
-  if p.given("--json") { return print_list_json(hooks.items, whole_list(hooks.items.length()), "webhook list") }
-  if hooks.items.is_empty() { return say_empty("webhooks") }
+  if p.given("--json") { return list_json(hooks.items, whole_list(hooks.items.length()), "webhook list") }
+  if hooks.items.is_empty() { return Ok(empty_list("webhooks")) }
+  let mut out = output.none()
   for h in hooks.items {
-    fmt.Println(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret_set)}")
+    out = out.line(f"{scope_label(h)}\t{h.url}\t{secret_state(h.secret_set)}")
   }
-  Ok(())
+  Ok(out)
 }
 
-fn webhook_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
+fn webhook_remove(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let usage = input.usage
   let p = input.parsed
@@ -191,8 +204,7 @@ fn webhook_remove(input: flags.CommandInput) -> Result<(), pb.CliError> {
   }
   let victim = matches.items[0]
   writes.delete_webhook(ctx, victim.id)?
-  fmt.Println(f"Removed webhook {target} ({scope})")
-  Ok(())
+  Ok(output.line(f"Removed webhook {target} ({scope})"))
 }
 
 /// The filter naming one registration exactly: team, URL, and project when
@@ -209,13 +221,13 @@ fn dup_filter(team_id: models.TeamId, project_id: Option<models.ProjectId>, targ
 /// stricter than url.Parse, which happily accepts "not a url" as a path.
 fn validate_target(raw: string) -> Result<string, pb.CliError> {
   if strings.TrimSpace(raw) == "" {
-    return Err(pb.failed("a webhook needs a target URL: 'lll webhook add URL'"))
+    return Err(flags.usage_error("a webhook needs a target URL: 'lll webhook add URL'"))
   }
   let Ok(parsed) = url.Parse(raw) else {
-    return Err(pb.failed(f"'{raw}' is not a URL; webhook targets are http(s) URLs"))
+    return Err(flags.usage_error(f"'{raw}' is not a URL; webhook targets are http(s) URLs"))
   }
   if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-    return Err(pb.failed(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs"))
+    return Err(flags.usage_error(f"'{raw}' is not an http(s) URL with a host; webhook targets are http(s) URLs"))
   }
   Ok(raw)
 }

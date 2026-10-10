@@ -1,5 +1,6 @@
 import "go:strconv"
 import "go:strings"
+import "go:unicode/utf8"
 
 import "pb"
 
@@ -16,7 +17,20 @@ import "pb"
 pub fn split_issue_key(id: string) -> Result<(string, int), pb.CliError> {
   // Names the shape AND the position: three of thirty fleet agents typed
   // 'lll issue comment add KEY ...' and read this as the key being wrong.
-  let bad_id = pb.fail(pb.ErrorKind.Usage, f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); the ID comes right after the verb; 'lll issue <verb> -h' shows the form")
+  // The hint follows what the argument looks like: a newline is captured
+  // notices (case 13), a space is a title typed where the key goes (final
+  // replay, case 17), anything else is the key in the wrong position.
+  let hint = if strings.Contains(id, "\n") {
+    "if it came from $(...), capture stdout only: key=$(lll issue next --claim)"
+  } else if strings.Contains(id, " ") {
+    f"to find its key: lll search {strconv.Quote(id)}"
+  } else {
+    "the ID comes right after the verb; 'lll issue <verb> -h' shows the form"
+  }
+  let bad_id = pb.fail(
+    pb.ErrorKind.Usage,
+    f"'{id}' is not an issue ID (expected KEY-123, e.g. ENG-1); {hint}",
+  )
   // Split, not LastIndex + substring: index arithmetic mixes byte offsets with
   // rune indices and panics on non-ASCII input. See realtime.split_field.
   let parts = strings.Split(id, "-")
@@ -24,6 +38,16 @@ pub fn split_issue_key(id: string) -> Result<(string, int), pb.CliError> {
   let number_part = parts[parts.length() - 1]
   let team_key = strings.TrimSuffix(id, f"-{number_part}")
   if team_key == "" || number_part == "" { return Err(bad_id) }
+  // A team part no team could have (whitespace, or longer than the 16 the
+  // server allows) is not a key, so a lookup would only say "not found" and
+  // blame the team config. Three of ten fleet agents passed
+  // `$(lll issue next --claim 2>&1)`, notice and key together (case 13).
+  // ponytail: not team_key_problem, which would refuse pre-LLL-628 keys.
+  if strings.ContainsAny(team_key, " \t\r\n") || utf8.RuneCountInString(
+    team_key,
+  ) > 16 {
+    return Err(bad_id)
+  }
   if strings.Trim(number_part, "0123456789") != "" { return Err(bad_id) }
   let Ok(number) = strconv.Atoi(number_part) else {
     return Err(bad_id)
@@ -35,7 +59,9 @@ pub fn split_issue_key(id: string) -> Result<(string, int), pb.CliError> {
 /// uppercase key). Team keys may contain hyphens, so "ABC-X-1" belongs to
 /// team "ABC-X", not "ABC"; a key that does not parse belongs to no team.
 pub fn issue_of_team(issue: string, key: string) -> bool {
-  let Ok((team, _)) = split_issue_key(issue) else { return false }
+  let Ok((team, _)) = split_issue_key(issue) else {
+    return false
+  }
   // ToUpper, not normalize_team_key: a key with stray spaces names no team.
   strings.ToUpper(team) == key
 }
