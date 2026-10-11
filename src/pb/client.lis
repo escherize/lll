@@ -3,6 +3,7 @@ import "go:encoding/base64"
 import "go:crypto/sha256"
 import "go:encoding/hex"
 import "go:encoding/json"
+import "go:errors"
 import "go:io"
 import "go:net"
 import "go:net/http"
@@ -796,7 +797,7 @@ pub fn refresh_token(base: string, tok: string) -> Result<string, CliError> {
     Ok(r) => r,
     Err(e) => return Err(failed(f"{what}: {e}")),
   }
-  let body = read_body(resp, what)?
+  let body = read_body(resp, base, what, Budget.Request)?
   let mut auth = TokenOnly { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
     return Err(failed(f"decoding the refreshed token: {e}"))
@@ -996,7 +997,7 @@ fn request_options(
     Ok(r) => r,
     Err(e) => return Err(unreachable_hint(base, url_origin, e)),
   }
-  read_body(resp, f"{method} {base}{path}")
+  read_body(resp, base, f"{method} {base}{path}", budget)
 }
 
 /// How long one request may take (LLL-623). Go's default client has no
@@ -1009,9 +1010,10 @@ pub enum Budget {
   Request,
   /// An upload, a download or a realtime stream: no total limit, because a
   /// big file on a slow link and a stream that stays open are both
-  /// legitimately long. Connecting must finish within DIAL_SECONDS, and the
+  /// legitimately long. Connecting must finish within DIAL_SECONDS, the
   /// server must start its answer within ANSWER_SECONDS of receiving the
-  /// whole request.
+  /// whole request, and the answer must not stall for STALL_SECONDS
+  /// (read_progressing; the realtime stream has its own idle limit).
   Transfer,
 }
 
@@ -1021,6 +1023,9 @@ pub const ANSWER_SECONDS: int = 30
 
 /// The seconds a transfer gets to connect, and then for its TLS handshake.
 const DIAL_SECONDS: int = 10
+
+/// The seconds a transfer's answer may go without a byte arriving.
+const STALL_SECONDS: int = 60
 
 /// The HTTP client for `budget`. Every request to the lll server goes through
 /// one of these, so it is also the one place that refuses redirects
@@ -1060,15 +1065,18 @@ pub fn http_client(budget: Budget) -> http.Client {
   }
 }
 
-fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, CliError> {
+fn read_body(resp: Ref<http.Response>, base: string, what: string, budget: Budget) -> Result<string, CliError> {
   let Some(stream) = resp.Body else {
     return Err(fail(ErrorKind.Network, f"{what}: empty response body"))
   }
   defer stream.Close()
-  let body = match io.ReadAll(stream) {
-    Partial.Ok(b) => b,
-    // A complete JSON prefix does not make an incomplete HTTP body valid.
-    Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
+  let body = match budget {
+    Budget.Request => match io.ReadAll(stream) {
+      Partial.Ok(b) => b,
+      // A complete JSON prefix does not make an incomplete HTTP body valid.
+      Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
+    },
+    Budget.Transfer => read_progressing(stream, base, what)?,
   }
   if resp.StatusCode >= 300 && resp.StatusCode < 400 {
     let location = resp.Header.map_or("", |h| h.Get("Location"))
@@ -1079,6 +1087,39 @@ if that is the lll server, use its address as the url"))
     return Err(http_error(what, resp.StatusCode, resp.Status, body as string))
   }
   Ok(body as string)
+}
+
+/// A transfer's answer, read while it keeps arriving: a server that sends
+/// nothing for STALL_SECONDS fails the read rather than hanging it, since a
+/// transfer has no total limit (Budget.Transfer). The stall message names
+/// the server, not the request: a download's path carries a file token.
+fn read_progressing(stream: io.ReadCloser, base: string, what: string) -> Result<Slice<byte>, CliError> {
+  let limit = (STALL_SECONDS as time.Duration) * time.Second
+  // Closing the body is what ends a Read that is waiting on a silent server.
+  let watchdog = time.AfterFunc(limit, || { let _ = stream.Close() })
+  let mut data = bytes.Buffer { .. }
+  let mut chunk = Slice.make<byte>(32 * 1024)
+  loop {
+    let (n, failure) = match stream.Read(chunk) {
+      Partial.Ok(n) => (n, None),
+      Partial.Both(n, e) => (n, Some(e)),
+      Partial.Err(e) => (0, Some(e)),
+    }
+    if n > 0 {
+      let _ = data.Write(chunk[..n])
+      let _ = watchdog.Reset(limit)
+    }
+    let Some(e) = failure else { continue }
+    // Stop is false once the watchdog has fired.
+    let stalled = !watchdog.Stop()
+    if errors.Is(e, io.EOF) && !stalled { break }
+    if stalled {
+      return Err(fail(ErrorKind.Network, f"the lll server at {base} stopped sending for {STALL_SECONDS}s partway through its answer
+check that the server is healthy and the network is up, then retry"))
+    }
+    return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}"))
+  }
+  Ok(data.Bytes())
 }
 
 /// An HTTP error answer, parsed once (LLL-645). The API's JSON envelope is

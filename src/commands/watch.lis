@@ -150,7 +150,8 @@ With --ready it reads 'watch: ready (agenda subscription accepted)'. After a
 lost stream, watch retries every second and prints each distinct failure once.
 The server sends a keepalive every 30 seconds and keeps a stream open for up
 to a day, so a quiet watch stays connected; a lost/reconnected pair means the
-server restarted or the network dropped.
+server restarted, the network dropped, or the stream sent nothing for 90
+seconds after its first keepalive.
 
 Every connect and reconnect checks the token with one read. When the server
 rejects it (rotated, revoked or expired), the stream could carry no events, so

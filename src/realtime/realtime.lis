@@ -180,7 +180,7 @@ fn start(
   resync: bool,
 ) -> Result<Channel<Event>, pb.CliError> {
   let ch = Channel.new<Event>()
-  let mut reader = match connect(ctx, topics) {
+  let (reader, watchdog) = match connect(ctx, topics) {
     Ok(r) => r,
     Err(ConnectFailure.TokenRefused(e)) => {
       if let DeadToken.Exit = on_dead_token { return Err(pb.fail(pb.ErrorKind.Auth, dead_token_fix(e))) }
@@ -189,7 +189,7 @@ fn start(
     Err(ConnectFailure.Other(e)) => return Err(e),
   }
   task {
-    pump(reader, ch)
+    pump(reader, watchdog, ch)
     reconnect(ctx, topics, on_dead_token, ch, resync)
   }
   Ok(ch)
@@ -211,11 +211,11 @@ fn reconnect(
   loop {
     time.Sleep(time.Second)
     match connect(ctx, topics) {
-      Ok(r) => {
+      Ok((r, watchdog)) => {
         fmt.Fprintln(os.Stderr, "realtime: reconnected to the lll server (subscriptions accepted)")
         last_err = ""
         if resync { let _ = ch.send(Event.Resync) }
-        pump(r, ch)
+        pump(r, watchdog, ch)
         fmt.Fprintln(os.Stderr, "realtime: lll server stream lost; reconnecting")
       },
       Err(failure) => {
@@ -280,7 +280,7 @@ fn dead_token_fix(e: pb.CliError) -> string {
 fn connect(
   ctx: pb.Client,
   topics: Slice<string>,
-) -> Result<mut Ref<bufio.Reader>, ConnectFailure> {
+) -> Result<(mut Ref<bufio.Reader>, Ref<time.Timer>), ConnectFailure> {
   let base_url = ctx.url().map_err(ConnectFailure.Other)?
   let auth = pb.bearer(ctx.token())
   let mut req = match http.NewRequest(
@@ -310,6 +310,9 @@ fn connect(
     return Err(status_failure("GET /api/realtime", resp.StatusCode, resp.Status))
   }
 
+  // The handshake gets a request's budget; pump takes the watchdog over.
+  // A failed connect leaves it armed, so it closes the abandoned stream.
+  let watchdog = time.AfterFunc((pb.ANSWER_SECONDS as time.Duration) * time.Second, || { let _ = stream.Close() })
   let mut reader = bufio.NewReader(stream)
   let mut parser = FrameParser.new()
   let mut client_id = ""
@@ -365,7 +368,18 @@ fn connect(
   // token renewal can reauthenticate that same client using PocketBase's own
   // subscription endpoint; token-key rotation clears auth without closing SSE.
   ctx.remember_subscription(payload as string)
-  Ok(reader)
+  let _ = watchdog.Reset(idle_limit(false))
+  Ok((reader, watchdog))
+}
+
+/// How long a stream may go without a line before the client calls it dead
+/// and reconnects (LLL-623): a server that sent its headers and then went
+/// silent used to hang a watch forever. Once the server has sent a
+/// keepalive (every 30s since 1.0.1), three missed ones. Before that, a 1.0
+/// server's own 5-minute idle close plus 30 seconds, so an older server's
+/// routine cycle is still the server's and a silent one is still caught.
+fn idle_limit(kept_alive: bool) -> time.Duration {
+  if kept_alive { 90 * time.Second } else { 330 * time.Second }
 }
 
 /// LLL-617: one authenticated 1-row read per (re)connect. PocketBase treats
@@ -412,8 +426,13 @@ fn check_token(base_url: string, auth: string) -> Result<(), ConnectFailure> {
 /// Forward record events from an established stream into the channel.
 /// Returns when the stream errors; the caller reconnects. The dead
 /// connection's stream is abandoned (its socket is already gone).
-fn pump(reader: mut Ref<bufio.Reader>, ch: Channel<Event>) {
+///
+/// `watchdog` closes the stream's body when no line has arrived for
+/// idle_limit; every line resets it.
+fn pump(reader: mut Ref<bufio.Reader>, watchdog: Ref<time.Timer>, ch: Channel<Event>) {
+  defer { let _ = watchdog.Stop() }
   let mut parser = FrameParser.new()
+  let mut kept_alive = false
   loop {
     let line = match reader.ReadString('\n') {
       Partial.Ok(l) => l,
@@ -424,6 +443,9 @@ fn pump(reader: mut Ref<bufio.Reader>, ch: Channel<Event>) {
         return
       },
     }
+    // Any line is a sign of life; a comment line is the server's keepalive.
+    if line.starts_with(":") { kept_alive = true }
+    let _ = watchdog.Reset(idle_limit(kept_alive))
     let Some(frame) = parser.push_line(strings.TrimSuffix(line, "\n")) else {
       continue
     }
