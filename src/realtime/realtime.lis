@@ -138,7 +138,7 @@ pub enum DeadToken {
 /// The first connection is established synchronously so configuration errors
 /// (bad URL, PB down, a rejected token) surface immediately; after that a
 /// background task pumps events into the returned channel and, on any stream
-/// error (PB restart, idle disconnect), reconnects from scratch — new SSE
+/// error (PB restart, a dropped network), reconnects from scratch — new SSE
 /// connection, new client id, re-subscribe — retrying every second, forever.
 /// The loop is honest about state instead of silently stopping: a lost stream
 /// and every distinct reconnect error are printed, and a recovery is too.
@@ -376,7 +376,8 @@ fn connect(
 /// (gopb's TASK-319 middleware), and teams is readable by every member.
 /// Not auth-refresh: bot and `lll token create` tokens are non-refreshable
 /// (TASK-309). A token rotated after this check goes unnoticed until the
-/// next reconnect, which an idle stream reaches within five minutes.
+/// next reconnect, which the server forces within 30 seconds by closing a
+/// stream whose auth it cleared (gopb/realtime_keepalive.go, LLL-692).
 fn check_token(base_url: string, auth: string) -> Result<(), ConnectFailure> {
   let mut req = match http.NewRequest(
     "GET",
