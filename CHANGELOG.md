@@ -6,6 +6,25 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.0.1] - unreleased
+
+### Fixed
+
+- A server that accepts the connection and never answers no longer hangs a
+  command forever (LLL-623). An ordinary request now fails after 30 seconds
+  with exit 1, the same code as an unreachable server, and says "the lll
+  server at URL accepted the connection but did not answer within 30s".
+  Uploads, downloads and the realtime stream have no total limit, so a large
+  attachment on a slow link still completes; they must connect within 10
+  seconds and the server must start answering within 30 seconds.
+- An idle `lll watch` no longer drops and reconnects every five minutes
+  (LLL-692). PocketBase closed realtime streams that carried no event for
+  five minutes; the server now sends a keepalive every 30 seconds and keeps
+  a stream open for up to a day. A token revoked while a watch runs now
+  closes its stream within 30 seconds, so the watch still exits naming the
+  dead token (LLL-617). This fix is in the server: upgrade the server to
+  stop the reconnects.
+
 ## [1.0.0] - 2026-10-09
 
 1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,
