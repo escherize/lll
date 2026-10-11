@@ -2514,6 +2514,7 @@ assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
 python3 "$REPO_ROOT"/scripts/test_views_refresh.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_create_response.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_request_timeout.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_config_permissions.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_agenda_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"

@@ -450,3 +450,26 @@ only if you trust http://b: lll login --url http://b (this sends your credential
   assert withheld_login(held(Some(config.Source.Env("LLL_URL")))).message.contains("\nto use your saved login: unset LLL_URL\n")
   assert withheld_login(held(Some(config.Source.Flag("--url")))).message.starts_with("--url points this command at http://b")
 }
+
+// LLL-623: a timeout is not "is the server running?". The live proof, a
+// listener that accepts and never answers, is scripts/test_request_timeout.py.
+#[test]
+fn a_silent_server_is_named_as_accepting_but_not_answering() {
+  let said = timed_out("http://127.0.0.1:9", false)
+  assert strings.HasPrefix(said, "the lll server at http://127.0.0.1:9 accepted the connection but did not answer within 30s\n")
+  assert !strings.Contains(said, "is the lll server running")
+}
+
+#[test]
+fn a_connect_timeout_does_not_claim_the_connection_was_accepted() {
+  let said = timed_out("http://127.0.0.1:9", true)
+  assert strings.HasPrefix(said, "the lll server at http://127.0.0.1:9 did not accept a connection in time\n")
+  assert !strings.Contains(said, "accepted the connection")
+}
+
+#[test]
+fn a_refused_connection_keeps_the_is_it_running_hint_and_the_network_kind() {
+  let err = unreachable("http://127.0.0.1:9", errors.New("connect: connection refused"))
+  assert err.kind == ErrorKind.Network
+  assert strings.Contains(err.message, "cannot reach the lll server at http://127.0.0.1:9")
+}

@@ -494,7 +494,7 @@ pub fn upload_attachments(
   form: string,
   content_type: string,
 ) -> Result<string, pb.CliError> {
-  ctx.send_as(caller, "PATCH", record_path("issues", id.string()), form, content_type)
+  ctx.upload_as(caller, "PATCH", record_path("issues", id.string()), form, content_type)
 }
 
 #[json]
