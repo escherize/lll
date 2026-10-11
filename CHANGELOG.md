@@ -19,11 +19,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   seconds and the server must start answering within 30 seconds.
 - An idle `lll watch` no longer drops and reconnects every five minutes
   (LLL-692). PocketBase closed realtime streams that carried no event for
-  five minutes; the server now sends a keepalive every 30 seconds and keeps
-  a stream open for up to a day. A token revoked while a watch runs now
-  closes its stream within 30 seconds, so the watch still exits naming the
-  dead token (LLL-617). This fix is in the server: upgrade the server to
-  stop the reconnects.
+  five minutes; the server now sends a keepalive every 30 seconds. A stream
+  stays open past PocketBase's 30-minute lifetime only while its token is
+  valid: the server closes it within 30 seconds of the token being revoked,
+  rotated or expiring, so a watch still exits naming the dead token
+  (LLL-617), and a stream that never authenticated still closes at 30
+  minutes. The keepalive runs in one goroutine per stream that owns its own
+  channel and exits with the connection, so a closing client can neither
+  block it nor make it panic. This fix is in the server: upgrade the server
+  to stop the reconnects.
 
 ## [1.0.0] - 2026-10-09
 
