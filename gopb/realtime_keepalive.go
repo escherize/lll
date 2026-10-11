@@ -1,12 +1,15 @@
 package gopb
 
 import (
-	"errors"
+	"context"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/security"
 	"github.com/pocketbase/pocketbase/tools/subscriptions"
+	"github.com/spf13/cast"
 )
 
 // LLL-692: an idle realtime stream must stay open. PocketBase closes a
@@ -17,89 +20,143 @@ import (
 //
 // The server now sends a keepalive every realtimeKeepalive: an SSE comment
 // line, which every SSE reader (lll's FrameParser included, since 1.0) skips.
-// It travels through the client's own message channel, so PocketBase's
-// connection loop writes it and resets the idle timer; nothing else writes
-// to the response concurrently. The keepalive also keeps proxies that close
-// silent connections (Fly's, a reverse proxy in front of `lll up`) from
-// cutting the stream.
+// It reaches PocketBase's connection loop as a message, so the loop writes it
+// and resets its idle timer; nothing else writes to the response. It also
+// keeps proxies that close silent connections (Fly's, a reverse proxy in
+// front of `lll up`) from cutting the stream.
 //
-// The 5-minute reconnect was also what bounded a revoked token's silence
-// (LLL-617): PocketBase clears a client's auth when its token is revoked but
-// keeps the stream open, and that stream carries no event again. The CLI
-// notices only when it reconnects. So the same tick closes a stream whose
-// auth was cleared, and the client's reconnect check names the dead token
-// within one interval instead of five minutes.
+// The 5-minute and 30-minute closes were also what ended a stream whose token
+// had died. A stream's authorization is checked when it subscribes, and
+// PocketBase clears it when the token is revoked or rotated but keeps the
+// stream open, while an expired token's stream keeps receiving events. So a
+// stream now lives past PocketBase's 30 minutes only while its token is
+// valid: each tick closes a stream whose subscription was authenticated and
+// whose auth was cleared or whose token has expired, and a stream that never
+// authenticated still closes at 30 minutes. The client's reconnect check
+// then names the dead token.
 const (
-	realtimeKeepalive   = 30 * time.Second
+	realtimeKeepalive = 30 * time.Second
+	// The hard cap; within it, a stream lives only while its token does.
 	realtimeMaxLifetime = 24 * time.Hour
+	// PocketBase's own MaxTimeout, kept for a stream with no token.
+	realtimeGuestLifetime = 30 * time.Minute
 
 	keepaliveMessage = "LLL_KEEPALIVE"
-	authLostMessage  = "LLL_AUTH_LOST"
 
-	// subscribedAuthedKey marks, in the client's store, a client whose
-	// subscription carried a valid token.
-	subscribedAuthedKey = "lll_subscribed_authed"
+	// tokenExpiryKey holds, in the client's store, the expiry of the token
+	// the client's latest authenticated subscription carried.
+	tokenExpiryKey = "lll_token_expiry"
 )
-
-var errRealtimeAuthLost = errors.New("realtime client lost its auth")
 
 func registerRealtimeKeepalive(app core.App) {
 	app.OnRealtimeConnectRequest().BindFunc(func(e *core.RealtimeConnectRequestEvent) error {
-		// The keepalive resets the idle timer; the lifetime cap stays, a day
-		// rather than half an hour, so a long watch reconnects daily at most.
 		e.MaxTimeout = realtimeMaxLifetime
-		done := e.Request.Context().Done()
-		go func() {
-			ticker := time.NewTicker(realtimeKeepalive)
-			defer ticker.Stop()
-			keepAlive(e.Client, done, ticker.C)
-		}()
-		return e.Next()
+		ctx, cancel := context.WithCancel(e.Request.Context())
+		ticker := time.NewTicker(realtimeKeepalive)
+		client := keepAlive(ctx, e.Client, time.Now(), ticker.C)
+		e.Client = client
+		err := e.Next()
+		// The connection loop has ended: stop the forwarder and wait for it,
+		// so no goroutine outlives the connection.
+		cancel()
+		ticker.Stop()
+		<-client.finished
+		return err
 	})
 
 	app.OnRealtimeSubscribeRequest().BindFunc(func(e *core.RealtimeSubscribeRequestEvent) error {
 		if err := e.Next(); err != nil {
 			return err
 		}
-		if e.Auth != nil {
-			e.Client.Set(subscribedAuthedKey, true)
+		if e.Auth == nil {
+			e.Client.Unset(tokenExpiryKey)
+			return nil
 		}
+		// PocketBase loaded e.Auth from this token, so its signature is
+		// already checked; only its exp is read here.
+		token := strings.TrimPrefix(e.Request.Header.Get("Authorization"), "Bearer ")
+		claims, err := security.ParseUnverifiedJWT(token)
+		exp := cast.ToInt64(claims["exp"])
+		if err != nil || exp <= 0 {
+			// No readable expiry: treat the stream as expiring now, so it
+			// closes at the next tick rather than outliving its token.
+			e.Client.Set(tokenExpiryKey, time.Now())
+			return nil
+		}
+		e.Client.Set(tokenExpiryKey, time.Unix(exp, 0))
 		return nil
 	})
 
 	app.OnRealtimeMessageSend().BindFunc(func(e *core.RealtimeMessageEvent) error {
-		switch e.Message.Name {
-		case keepaliveMessage:
-			if _, err := e.Response.Write([]byte(": keepalive\n\n")); err != nil {
-				return err
-			}
-			return e.Flush()
-		case authLostMessage:
-			// An error ends PocketBase's connection loop, which closes the
-			// stream; the client reconnects and its token check reports.
-			return errRealtimeAuthLost
+		if e.Message.Name != keepaliveMessage {
+			return e.Next()
 		}
-		return e.Next()
+		if _, err := e.Response.Write([]byte(": keepalive\n\n")); err != nil {
+			return err
+		}
+		return e.Flush()
 	})
 }
 
-// keepAlive sends a keepalive to client on every tick until done, or the
-// auth-lost message once a client that subscribed with a valid token has had
-// its auth cleared. Send blocks until the connection loop takes the message;
-// when the loop has ended, PocketBase discards the client, closing its
-// channel, and Send returns.
-func keepAlive(client subscriptions.Client, done <-chan struct{}, tick <-chan time.Time) {
-	for {
-		select {
-		case <-done:
-			return
-		case <-tick:
-			auth, _ := client.Get(apis.RealtimeClientAuthKey).(*core.Record)
-			if client.Get(subscribedAuthedKey) == true && auth == nil {
-				client.Send(subscriptions.Message{Name: authLostMessage})
+// keepaliveClient is the realtime client with its message channel replaced:
+// PocketBase's connection loop reads Channel(), which carries the client's
+// own messages, in order, plus a keepalive on every tick. One goroutine owns
+// that channel: it only receives from the client's channel and sends on its
+// own, so it never sends on a channel PocketBase may close, and closing its
+// channel is how it ends the stream.
+type keepaliveClient struct {
+	subscriptions.Client
+	out      chan subscriptions.Message
+	finished chan struct{}
+}
+
+func (c *keepaliveClient) Channel() chan subscriptions.Message { return c.out }
+
+// keepAlive wraps client and starts its forwarder, which runs until ctx ends,
+// the client is discarded, or a tick finds the stream should close (see
+// streamExpired). opened is when the connection started; each tick's time is
+// the check's "now".
+func keepAlive(ctx context.Context, client subscriptions.Client, opened time.Time, tick <-chan time.Time) *keepaliveClient {
+	c := &keepaliveClient{Client: client, out: make(chan subscriptions.Message), finished: make(chan struct{})}
+	go func() {
+		defer close(c.finished)
+		defer close(c.out)
+		in := client.Channel()
+		for {
+			var msg subscriptions.Message
+			select {
+			case <-ctx.Done():
+				return
+			case m, ok := <-in:
+				if !ok {
+					return
+				}
+				msg = m
+			case now := <-tick:
+				if streamExpired(client, opened, now) {
+					return
+				}
+				msg = subscriptions.Message{Name: keepaliveMessage}
+			}
+			select {
+			case c.out <- msg:
+			case <-ctx.Done():
 				return
 			}
-			client.Send(subscriptions.Message{Name: keepaliveMessage})
 		}
+	}()
+	return c
+}
+
+// streamExpired reports whether a stream must close at now: its
+// authenticated subscription's token was revoked (PocketBase cleared the
+// client's auth) or has expired, or it never authenticated and is older than
+// PocketBase's own lifetime.
+func streamExpired(client subscriptions.Client, opened, now time.Time) bool {
+	expiry, subscribed := client.Get(tokenExpiryKey).(time.Time)
+	if !subscribed {
+		return now.Sub(opened) >= realtimeGuestLifetime
 	}
+	auth, _ := client.Get(apis.RealtimeClientAuthKey).(*core.Record)
+	return auth == nil || !now.Before(expiry)
 }

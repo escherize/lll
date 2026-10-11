@@ -158,9 +158,9 @@ watch prints one line naming the fix and exits 1:
 
   realtime: the server rejected this token (401 Unauthorized): ...
 
-At startup the same refusal is the command's error. A token revoked while the
-stream is up makes the server close the stream within 30 seconds, and the
-reconnect's check reports it.
+At startup the same refusal is the command's error. A token that is revoked
+or expires while the stream is up makes the server close the stream within 30
+seconds, and the reconnect's check reports it.
 
 The stream is live-only: it delivers events from the moment the server
 accepts the subscription, and a reconnect resubscribes without replaying

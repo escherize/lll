@@ -418,7 +418,7 @@ for text in observed + [
     'Every connect and reconnect checks the token with one read.',
     'watch prints one line naming the fix and exits 1:',
     dead_line.split(': it was')[0] + ': ...',
-    'A token rotated while the\nstream is up is caught at the next reconnect',
+    'A token that is revoked\nor expires while the stream is up makes the server close the stream',
 ]:
     assert text in watch_help, f'lll watch --help lost {text!r}'
 rotate_help = ok('bot', 'rotate', '--help')

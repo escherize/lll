@@ -377,7 +377,8 @@ fn connect(
 /// Not auth-refresh: bot and `lll token create` tokens are non-refreshable
 /// (TASK-309). A token rotated after this check goes unnoticed until the
 /// next reconnect, which the server forces within 30 seconds by closing a
-/// stream whose auth it cleared (gopb/realtime_keepalive.go, LLL-692).
+/// stream whose token was revoked or has expired (gopb/realtime_keepalive.go,
+/// LLL-692).
 fn check_token(base_url: string, auth: string) -> Result<(), ConnectFailure> {
   let mut req = match http.NewRequest(
     "GET",
