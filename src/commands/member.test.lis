@@ -74,7 +74,9 @@ fn invite_lines_are_two_commands_and_the_optional_password_change() {
   let lines = invite_lines("kim", "kim@example.com", "pw", "http://127.0.0.1:8090", "ENG")
   let commands = lines.filter(|l| strings.Contains(l, "lll "))
   assert commands.length() == 3
-  assert lines[lines.length() - 1] == "  # to choose your own password: lll member set-password kim --old-password pw"
+  assert lines[lines.length() - 1] == "  # to choose your own password: lll member set-password kim --old-password -"
+  // The temporary password is printed on exactly one line.
+  assert lines.filter(|l| l.contains("pw")).length() == 1
 }
 
 // ------------------------------------------------------------- real_email

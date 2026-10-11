@@ -433,7 +433,9 @@ fn invite_lines(
     "",
     f"  lll login --url {base} --email {email}",
     attach,
-    f"  # to choose your own password: lll member set-password {cli_argument(name)} --old-password {password}",
+    // '-' prompts with echo off (LLL-686): the password appears on one line
+    // only, so redacting that line hides it (final 1.0 replay, case 19).
+    f"  # to choose your own password: lll member set-password {cli_argument(name)} --old-password -",
   ]
 }
 

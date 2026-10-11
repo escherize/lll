@@ -197,6 +197,7 @@ These aliases are permanent:
 | `show` | `view` | `issue`, `doc` |
 | `read` | `view` | `issue`, `doc`, `finding` (hidden: no help row, no completion) |
 | `show` | `list` | `config` (hidden: no help row, no completion) |
+| `comments` | `comment` | `issue` (hidden: no help row, no completion) |
 | `--list` | `list` | `config` (the verb before 1.0, after `git config --list`) |
 | `add` | `create` | `member` |
 | `remove` | `delete` | `member` |

@@ -588,6 +588,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "comment",
       access: flags.Access.Write,
+      // `issue comments KEY` reads them (final replay, case 18: a poll loop
+      // never saw the hint and missed its window).
+      hidden_alias: "comments",
       summary: "add a comment (bare body or -b); 'comment KEY' lists them numbered; 'comment edit KEY N -b' and 'comment delete KEY N' change your own",
       verbs: comment_commands(),
       spec: issue_comment_spec(),

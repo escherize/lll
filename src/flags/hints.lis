@@ -1,3 +1,4 @@
+import "go:path/filepath"
 import "go:regexp"
 import "go:strings"
 
@@ -11,8 +12,9 @@ import "config"
 // files, each patched for the case one fleet run hit.
 
 /// A word lll does not have, and what to type instead. `path` is where it
-/// was typed ("lll issue", "lll issue comment"); no `words` means any word
-/// there, including a stray argument to a verb that takes none. The hint is the text after
+/// was typed ("lll issue", "lll issue comment"); each of `words` is a
+/// filepath.Match pattern, so "*review*" is any word containing review. No
+/// `words` means any word there, including a stray argument to a verb that takes none. The hint is the text after
 /// "unknown ... command: 'WORD'; ", and ends with its own "(see ...)" when
 /// the help that answers it is not the noun's.
 struct Guess {
@@ -30,15 +32,17 @@ fn guesses() -> Slice<Guess> {
     Guess { path: "lll issue", words: ["assign"], hint: "take it for yourself with 'lll issue claim KEY-123'; assign someone else with 'lll issue update KEY-123 --assignee NAME'" },
     Guess { path: "lll issue", words: ["unassign"], hint: "'lll issue release KEY-123' gives a claim back; 'lll issue update KEY-123 --assignee none' clears the assignee" },
     // 'lll send KEY' (case 20) asks this table from the noun slot too.
-    Guess { path: "lll issue", words: ["move", "transition", "send"], hint: "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)" },
+    // `set` and `mark` too (final 1.0 replay, case 20).
+    Guess { path: "lll issue", words: ["move", "transition", "send", "set", "mark"], hint: "'lll issue start KEY-123' sets in-progress; any state: 'lll issue update KEY-123 --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)" },
     Guess { path: "lll issue", words: ["status"], hint: "'lll issue view KEY-123' shows the state; 'lll issue update KEY-123 --state s' sets it" },
     Guess { path: "lll issue", words: ["get"], hint: "'lll issue view KEY-123'" },
     Guess { path: "lll issue", words: ["find", "search"], hint: "'lll search text' ranks every issue, comment and doc with context; 'lll issue list --search text' filters titles" },
     Guess { path: "lll issue", words: ["ls"], hint: "'lll issue list'" },
     Guess { path: "lll issue", words: ["rm", "remove"], hint: "'lll issue delete KEY-123'" },
-    Guess { path: "lll issue", words: ["comments"], hint: "'lll issue comment KEY-123' lists them; add one with a body after the key" },
     Guess { path: "lll issue", words: ["note", "reply"], hint: "'lll issue comment KEY-123 \"body\"' adds one" },
-    Guess { path: "lll issue", words: ["review"], hint: "'lll issue update KEY-123 --state in-review' sends it to review" },
+    // `send-review`, `to-review`, `request-review`: any word about review
+    // (final 1.0 replay, case 20).
+    Guess { path: "lll issue", words: ["review", "*review*"], hint: "'lll issue update KEY-123 --state in-review' sends it to review" },
     Guess { path: "lll issue", words: ["depends", "dep", "blocked-by", "blockedby"], hint: "'lll issue block KEY-123 BLOCKER' records that KEY-123 waits on BLOCKER; 'lll issue list --ready' lists what can start" },
     // 'lll issue comment list KEY': the only sub-verbs are edit and delete,
     // so name what each guessed word is spelled as instead of letting the
@@ -46,13 +50,14 @@ fn guesses() -> Slice<Guess> {
     Guess { path: "lll issue comment", words: ["list", "ls", "view", "show"], hint: "'lll issue comment KEY-123' lists the comments, numbered" },
     Guess { path: "lll issue comment", words: ["add", "create", "new"], hint: "'lll issue comment KEY-123 \"body\"' adds one (or -b \"body\")" },
     Guess { path: "lll issue comment", words: ["update", "rm", "remove"], hint: "'lll issue comment edit KEY-123 N -b \"body\"' and 'lll issue comment delete KEY-123 N' change one" },
-    // 1.0 fleet: one member's details live under access.
-    Guess { path: "lll member", words: ["view", "show"], hint: "did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)" },
+    // 1.0 fleet: one member's details live under access. `read` and `get`
+    // too: two final-replay agents (case 15) looked for one.
+    Guess { path: "lll member", words: ["view", "show", "read", "get"], hint: "did you mean 'lll member access NAME'? (it shows one member's teams and mode; 'lll member list' shows them all)" },
     // Removed at 1.0 (D5): the link lives on the issue noun.
     Guess { path: "lll doc", words: ["link"], hint: "did you mean 'lll issue link KEY-123 SLUG'? (see 'lll issue link --help')" },
     Guess { path: "lll doc", words: ["unlink"], hint: "did you mean 'lll issue unlink KEY-123 SLUG'? (see 'lll issue unlink --help')" },
     // 'lll bot list', 'lll bot read' (1.0 fleet): a verb guess, not a bot name.
-    Guess { path: "lll bot", words: ["list", "ls", "view", "show", "read", "get"], hint: "bot has create and rotate; list bots with 'lll member list'" },
+    Guess { path: "lll bot", words: ["list", "ls", "view", "show", "read", "get"], hint: "bot has create and rotate; see one bot with 'lll member access bot-NAME', all of them with 'lll member list'" },
     Guess { path: "lll completions", words: [], hint: "unknown shell (expected bash, zsh, or fish)" },
     Guess { path: "lll skill list", words: [], hint: "'lll skill list' takes no arguments; use 'lll skill get NAME' to read one skill" },
     // Flags: another verb typed as a flag (1.0 fleet: claiming by update was
@@ -64,7 +69,25 @@ fn guesses() -> Slice<Guess> {
 
 fn guess(path: string, word: string) -> Option<string> {
   if word == "" { return None }
-  guesses().find(|g| g.path == path && (g.words.is_empty() || g.words.contains(word))).map(|g| g.hint)
+  guesses().find(|g| g.path == path && (g.words.is_empty() || matches(g.words, word))).map(|g| g.hint)
+}
+
+fn matches(patterns: Slice<string>, word: string) -> bool {
+  patterns.any(|p| filepath.Match(p, word).unwrap_or(false))
+}
+
+/// One positional too many, from any verb. A second issue key after a first
+/// is the guess `issue view FLEET-4 FLEET-5` (1.0 fleet, cases 13 and 09);
+/// a field typed as a word is `issue update KEY status review` (final 1.0
+/// replay, case 20).
+fn extra_positional(arg: string, pos: Slice<string>) -> string {
+  if arg == "status" || arg == "state" {
+    return f"unexpected argument: '{arg}'; to change the state use --state <name> (states: backlog, todo, in-progress, in-review, done, cancelled)"
+  }
+  if is_issue_key(arg) && pos.any(is_issue_key) {
+    return f"unexpected argument: '{arg}'; this takes one issue key: run it once per key, or 'lll issue list --json' to read several"
+  }
+  f"unexpected argument: '{arg}'"
 }
 
 /// What a stray argument to `path`, a verb that takes none, should have been.
@@ -113,10 +136,25 @@ pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string) -> string
     None => [],
   }
   if let Some(c) = resolve_command(issue, word) {
-    return f"unknown command: '{word}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}' (see 'lll issue {c.name} -h')"
+    // The rest of the form rides along, so the suggestion can be run as is
+    // (six of ten final-replay agents typed `lll comment KEY "text"`).
+    let tail = if !is_issue_key(next) { "" } else if c.name == "comment" { " \"text\"" } else if c.name == "update" { " --state <name>" } else { "" }
+    return f"unknown command: '{word}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}{tail}' (see 'lll issue {c.name} -h')"
   }
-  // 'lll FLEET-4': a key where the noun goes (case 20).
+  // 'lll FLEET-4': a key where the noun goes (case 20). The word after the
+  // key says what was meant (final 1.0 replay, case 20).
   if is_issue_key(word) {
+    let change = f"to change its state use 'lll issue update {word} --state in-review' (states: backlog, todo, in-progress, in-review, done, cancelled)"
+    let note = f"to comment use 'lll issue comment {word} \"text\"'"
+    if ["status", "state", "--status", "--state", "review", "move", "mark"].contains(next) {
+      return f"unknown command: '{word}' is an issue ID; {change}"
+    }
+    if ["comment", "note", "-m", "reply"].contains(next) {
+      return f"unknown command: '{word}' is an issue ID; {note}"
+    }
+    if next != "" {
+      return f"unknown command: '{word}' is an issue ID; put the verb first: 'lll issue view {word}', {change}, or {note}"
+    }
     return f"unknown command: '{word}' is an issue ID; to see it use 'lll issue view {word}'"
   }
   // 'lll send KEY', 'lll note KEY' (case 20, run 3).
@@ -156,6 +194,11 @@ pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word
   // 'lll member whoami' (1.0 fleet): a command typed as a verb.
   if !word.starts_with("-") && find_noun(nouns, word).is_some() {
     return f"unknown {noun} command: '{word}'; did you mean 'lll {word}'? (see '{path} --help')"
+  }
+  // A read verb this noun lacks, beside a list it has: two final-replay
+  // agents guessed `config view` (1.0 fleet case 04).
+  if ["view", "show", "read", "ls"].contains(word) && resolve_command(cmds, "list").is_some() {
+    return f"unknown {noun} command: '{word}'; did you mean '{path} list'? (see '{path} --help')"
   }
   f"unknown {noun} command: '{word}' (see '{path} --help')"
 }

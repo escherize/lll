@@ -110,7 +110,7 @@ pub fn parse_n(
   while i < args.length() {
     let arg = args[i]
     if options_ended {
-      if pos.length() >= max_positional { return Err(usage_error(f"unexpected argument: '{arg}'")) }
+      if pos.length() >= max_positional { return Err(usage_error(extra_positional(arg, pos))) }
       pos = pos.append(arg)
       i += 1
       continue
@@ -150,7 +150,7 @@ pub fn parse_n(
         return Err(usage_error(unknown_flag(arg, usage, spec)))
       }
       if pos.length() >= max_positional {
-        return Err(usage_error(f"unexpected argument: '{arg}'"))
+        return Err(usage_error(extra_positional(arg, pos)))
       }
       pos = pos.append(arg)
       i += 1

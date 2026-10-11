@@ -183,7 +183,8 @@ fn parse_collects_a_single_positional_when_allowed() {
   assert p.first() == "ENG-6"
   // A second positional is rejected, naming the stray argument.
   let assert Err(msg) = parse(spec(), argv(["ENG-6", "ENG-7"]), 3, true, "")
-  assert msg.message == "unexpected argument: 'ENG-7'"
+  assert msg.message.starts_with("unexpected argument: 'ENG-7'")
+  assert msg.message.contains("this takes one issue key")
 }
 
 #[test]

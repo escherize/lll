@@ -169,7 +169,7 @@ fn member_view_and_bot_list_name_where_the_answer_lives() {
   assert refusal(["lll", "member", "view", "ada"]).contains("did you mean 'lll member access NAME'?")
   for verb in ["list", "read"] {
     let msg = refusal(["lll", "bot", verb, "bot-x"])
-    assert msg.contains(f"unknown bot command: '{verb}'; bot has create and rotate; list bots with 'lll member list'")
+    assert msg.contains(f"unknown bot command: '{verb}'; bot has create and rotate; see one bot with 'lll member access bot-NAME', all of them with 'lll member list'")
     assert !msg.contains("bot create bot-")
   }
   // Any other word is the bot's name.
@@ -265,4 +265,54 @@ fn a_stray_argument_or_shell_names_what_was_meant() {
   assert refusal(["lll", "skill", "list", "lll"]).contains("use 'lll skill get NAME' to read one skill")
   assert refusal(["lll", "completions", "tcsh"]).contains("unknown shell (expected bash, zsh, or fish)")
   assert !refusal(["lll", "issue", "list", "x"]).contains("skill")
+}
+
+/// Final 1.0 replay, case 20: the word after a key typed as the command says
+/// which verb was meant, and a redirected comment or update shows its full
+/// form.
+#[test]
+fn a_key_first_command_names_the_meant_verb() {
+  for next in ["status", "review", "--state", "mark"] {
+    assert refusal(["lll", "FLEET-4", next, "x"]).contains("to change its state use 'lll issue update FLEET-4 --state in-review'")
+  }
+  assert refusal(["lll", "FLEET-4", "comment", "x"]).contains("to comment use 'lll issue comment FLEET-4 \"text\"'")
+  assert refusal(["lll", "FLEET-4", "frob"]).contains("put the verb first: 'lll issue view FLEET-4', to change its state")
+  assert refusal(["lll", "FLEET-4"]).contains("to see it use 'lll issue view FLEET-4'")
+  assert refusal(["lll", "comment", "FLEET-4", "x"]).contains("'lll issue comment FLEET-4 \"text\"'")
+  assert refusal(["lll", "update", "FLEET-4"]).contains("'lll issue update FLEET-4 --state <name>'")
+  assert refusal(["lll", "comment", "add"]).contains("'lll issue comment ...'")
+  assert refusal(["lll", "mark", "FLEET-4"]).contains("--state in-review")
+}
+
+/// Final 1.0 replay, case 20: set, mark and any review word name the state
+/// change; `issue comments` reads comments (case 18).
+#[test]
+fn state_guesses_name_update_state() {
+  for word in ["set", "mark", "send-review", "to-review", "review"] {
+    assert refusal(["lll", "issue", word, "FLEET-4"]).contains("'lll issue update KEY-123 --state in-review'")
+  }
+  assert runs(["lll", "issue", "comments", "FLEET-4"])
+}
+
+/// Final 1.0 replay: a stray status word names --state (case 20), a second
+/// key says one key per call (cases 13 and 09).
+#[test]
+fn a_stray_argument_names_what_was_meant() {
+  assert refusal(["lll", "issue", "update", "FLEET-4", "status", "review"]).starts_with("unexpected argument: 'status'; to change the state use --state <name>")
+  assert refusal(["lll", "issue", "view", "FLEET-4", "FLEET-5"]).starts_with("unexpected argument: 'FLEET-5'; this takes one issue key")
+  assert refusal(["lll", "issue", "view", "FLEET-4", "extra"]).starts_with("unexpected argument: 'extra'")
+  assert !refusal(["lll", "issue", "view", "FLEET-4", "extra"]).contains("one issue key")
+}
+
+/// Final 1.0 replay, cases 04 and 15: a read verb a noun lacks points at
+/// its list; member read/get point at access.
+#[test]
+fn a_read_verb_the_noun_lacks_points_at_its_list() {
+  for word in ["view", "read", "ls"] {
+    assert refusal(["lll", "config", word]).starts_with(f"unknown config command: '{word}'; did you mean 'lll config list'?")
+  }
+  for word in ["read", "get"] {
+    assert refusal(["lll", "member", word, "ada"]).contains("did you mean 'lll member access NAME'?")
+  }
+  assert runs(["lll", "config", "show"])
 }

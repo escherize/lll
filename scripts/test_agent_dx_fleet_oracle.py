@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Reject adversarial false positives in the independent fleet oracle."""
 import copy
-from agent_dx_fleet import COLLECTIONS, Instance, audit_path, private_dir, private_write
+from agent_dx_fleet import COLLECTIONS, Board, Seat, audit_path, private_dir, private_write
 
 def exercise_oracle(root):
-    i = Instance.__new__(Instance)
-    i.worker = root / 'oracle'
-    i.worker.mkdir()
+    i = Board.__new__(Board)
+    seat = Seat(root / 'oracle' / '01', '01')
+    seat.worker.mkdir(parents=True)
+    seat.member_id = 'bot'
+    i.seats = [seat]
     i.binary = root / 'lll'
-    audit = audit_path(i.binary, i.worker)
+    audit = audit_path(i.binary, seat.worker)
     private_dir(audit.parent)
     private_write(audit, '')
-    i.number, i.bot_id, i.target = '01', 'bot', 'target'
+    i.target = 'target'
     i.team, i.bug, i.project = 'team', 'bug', 'project'
     i.before = {name: [] for name in COLLECTIONS}
     i.before['issues'] = [{'id': 'target', 'title': 'Seed', 'state': 'todo'}]
@@ -26,15 +28,16 @@ def exercise_oracle(root):
         after['comments' if case == '01' else 'issues'].append(copy.deepcopy(comment if case == '01' else issue))
         if mutate: mutate(after)
         i.snapshot = lambda: after
-        return i.judge(case)
-    assert judge('01')['pass'] and judge('05')['pass']
+        i.case = case
+        return i.judge()
+    assert judge('01')['pass'] and judge('06')['pass']
     assert not judge('01', lambda a: a['comments'][0].update(author='wrong'))['pass']
     assert not judge('01', lambda a: a['comments'].append({'id': 'extra', 'body': 'unmatched'}))['pass']
     assert not judge('01', lambda a: a['issues'][0].update(title='changed'))['pass']
     assert not judge('01', lambda a: a['webhooks'].append({'id': 'extra-hook', 'secret': 'fixture'}))['pass']
-    assert not judge('05', lambda a: a['issues'].append({'id': 'wrong-title-duplicate', 'title': 'Unmatched'}))['pass']
+    assert not judge('06', lambda a: a['issues'].append({'id': 'wrong-title-duplicate', 'title': 'Unmatched'}))['pass']
     for field, value in [('creator','wrong'),('state','done'),('priority',3),('labels',[]),('project',''),('description','changed')]:
-        assert not judge('05', lambda a, f=field, v=value: a['issues'][1].update({f:v}))['pass'], field
+        assert not judge('06', lambda a, f=field, v=value: a['issues'][1].update({f:v}))['pass'], field
     assert i.before['issues'][0]['title'] == 'Seed'
     print('Fleet oracle: exact artifacts accepted; wrong author/creator/fields, unmatched duplicates, seed edits and extra webhooks rejected.')
 
