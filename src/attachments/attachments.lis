@@ -70,12 +70,9 @@ pub fn read_file(ctx: pb.Client, issue: models.Issue, filename: string) -> Resul
   if token.token == "" { return Err(pb.failed("server did not provide file access")) }
   let path = f"/api/files/issues/{issue.id}/{url.PathEscape(filename)}?token={url.QueryEscape(token.token)}"
   // Do not include a token-bearing upstream URL in any user-facing error:
-  // the cause rides along only when it does not contain the token.
+  // the cause rides along with the token blanked out.
   ctx.download(path).map_err(|e| {
-    let mut message = "could not read the attachment from storage"
-    if !strings.Contains(e.message, token.token) && !strings.Contains(e.message, url.QueryEscape(token.token)) {
-      message = message + "\n" + e.message
-    }
-    pb.failed(message)
+    let cause = strings.ReplaceAll(strings.ReplaceAll(e.message, url.QueryEscape(token.token), "<file token>"), token.token, "<file token>")
+    pb.failed(f"could not read the attachment from storage\n{cause}")
   })
 }
