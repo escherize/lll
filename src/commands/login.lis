@@ -48,6 +48,7 @@ pub fn login_spec() -> Slice<flags.Flag> {
     flags.Flag {
       name: "--token",
       stdin: true,
+      excludes: ["--email", "--password", "--create"],
       value: true,
       hint: "token",
       help: "log in with a member token instead of a password; '-' reads it from stdin\n(a terminal prompts with echo off)",

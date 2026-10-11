@@ -1,4 +1,3 @@
-import "go:path/filepath"
 import "go:regexp"
 import "go:strings"
 
@@ -12,8 +11,9 @@ import "config"
 // files, each patched for the case one fleet run hit.
 
 /// A word lll does not have, and what to type instead. `path` is where it
-/// was typed ("lll issue", "lll issue comment"); each of `words` is a
-/// filepath.Match pattern, so "*review*" is any word containing review. No
+/// was typed ("lll issue", "lll issue comment"); each of `words` is the
+/// word itself, or "*text*" for any word containing text ("*review*" takes
+/// send-review and send/review alike). No
 /// `words` means any word there, including a stray argument to a verb that takes none. The hint is the text after
 /// "unknown ... command: 'WORD'; ", and ends with its own "(see ...)" when
 /// the help that answers it is not the noun's.
@@ -73,7 +73,10 @@ fn guess(path: string, word: string) -> Option<string> {
 }
 
 fn matches(patterns: Slice<string>, word: string) -> bool {
-  patterns.any(|p| filepath.Match(p, word).unwrap_or(false))
+  patterns.any(|p| {
+    let inner = strings.TrimSuffix(strings.TrimPrefix(p, "*"), "*")
+    if inner != p && p.starts_with("*") && p.ends_with("*") { strings.Contains(word, inner) } else { p == word }
+  })
 }
 
 /// One positional too many, from any verb. A second issue key after a first
@@ -209,6 +212,11 @@ pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word
     return f"unknown {noun} command: '{word}'; expected {rest} or {last} (see '{path} --help')"
   }
   f"unknown {noun} command: '{word}' (see '{path} --help')"
+}
+
+/// `lll NOUN --flag`: no verb yet, so no verb's flags apply.
+fn unknown_noun_flag(noun: string, arg: string) -> string {
+  f"{unknown_flag(arg, "", [])} (see 'lll {noun} --help')"
 }
 
 /// A word a command with sub-verbs refuses: 'lll issue comment list KEY'.

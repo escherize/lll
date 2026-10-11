@@ -146,6 +146,9 @@ fn verb(
   if word == "" || word == "--help" || word == "-h" {
     return Ok(Invocation.Help(Topic.Page(noun_page(noun))))
   }
+  // A flag where the verb goes is an unknown flag, not a verb guess: 'lll
+  // completions --bogus' is no unknown shell.
+  if word.starts_with("-") { return Err(usage_error(unknown_noun_flag(noun.name, word))) }
   Err(usage_error(unknown_verb(nouns, noun.name, cmds, word)))
 }
 

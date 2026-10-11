@@ -80,6 +80,13 @@ def main():
             (['team', 'set-accent', 'ENG'], 2, "an empty '' clears it", None),
             (['attach', '--key', 'bad!'], 2, 'a team key is a letter', None),
             (['issue', 'create', '-t', 'x', '--priority', '9'], 2, "unknown priority '9'", None),
+            # #348 merge review: a flag after a noun is an unknown flag, not a verb
+            # or a shell; login names its own conflict before the stdin rule.
+            (['completions', '--bogus'], 2, "unknown flag: '--bogus'", 'unknown shell'),
+            (['skill', '--bogus'], 2, "unknown flag: '--bogus'", 'command'),
+            (['webhook', '--bogus'], 2, "unknown flag: '--bogus'", 'command'),
+            (['login', '--url', 'http://127.0.0.1:9', '--password', '-', '--token', '-'], 2,
+             '--token logs in with a member token: drop --email, --password and --create', 'can read stdin'),
         ]
         for args, code, want, unwanted in worded:
             done = run(*args)

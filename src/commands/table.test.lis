@@ -324,3 +324,29 @@ fn a_noun_with_few_verbs_names_them() {
   assert refusal(["lll", "skill", "frob"]) == "unknown skill command: 'frob'; expected list or get (see 'lll skill --help')"
   assert refusal(["lll", "webhook", "frob"]).contains("expected add, list or remove")
 }
+
+/// #348 merge review: a flag where the verb goes is an unknown flag, not a
+/// verb guess ('lll completions --bogus' is no unknown shell).
+#[test]
+fn a_flag_after_a_noun_is_an_unknown_flag() {
+  for noun in ["completions", "skill", "webhook", "issue"] {
+    assert refusal(["lll", noun, "--bogus"]) == f"unknown flag: '--bogus' (see 'lll {noun} --help')"
+  }
+  // bot's flags belong to its bare create form.
+  assert refusal(["lll", "bot", "--bogus"]).starts_with("unknown flag: '--bogus'\nusage: lll bot bot-NAME")
+}
+
+/// A review word with a slash keeps the review hint, as 1.0's contains test did.
+#[test]
+fn a_review_word_with_a_slash_names_in_review() {
+  assert refusal(["lll", "issue", "send/review", "FLEET-4"]).contains("'lll issue update KEY-123 --state in-review'")
+  assert refusal(["lll", "send/review", "FLEET-4"]).contains("--state in-review")
+}
+
+/// --token excludes --password, so login's own refusal names the mistake
+/// instead of the parser calling it a stdin conflict (1.0 wording).
+#[test]
+fn an_exclusive_pair_is_not_a_stdin_conflict() {
+  assert runs(["lll", "login", "--password", "-", "--token", "-"])
+  assert refusal(["lll", "login", "--token", "-", "--admin-password", "-"]).starts_with("only one of --token and --admin-password can read stdin")
+}
