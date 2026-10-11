@@ -200,6 +200,14 @@ pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word
   if ["view", "show", "read", "ls"].contains(word) && resolve_command(cmds, "list").is_some() {
     return f"unknown {noun} command: '{word}'; did you mean '{path} list'? (see '{path} --help')"
   }
+  // A noun with few verbs names them, as 'lll skill frob' did before the
+  // table ('expected list or get').
+  let names = cmds.filter(|c| !c.hidden).map(|c| c.name)
+  if names.length() > 1 && names.length() <= 3 {
+    let last = names[names.length() - 1]
+    let rest = strings.Join(names[..names.length() - 1], ", ")
+    return f"unknown {noun} command: '{word}'; expected {rest} or {last} (see '{path} --help')"
+  }
   f"unknown {noun} command: '{word}' (see '{path} --help')"
 }
 

@@ -316,3 +316,11 @@ fn a_read_verb_the_noun_lacks_points_at_its_list() {
   }
   assert runs(["lll", "config", "show"])
 }
+
+/// A noun with few verbs names them: 'lll skill frob' said "expected list
+/// or get" in 1.0.
+#[test]
+fn a_noun_with_few_verbs_names_them() {
+  assert refusal(["lll", "skill", "frob"]) == "unknown skill command: 'frob'; expected list or get (see 'lll skill --help')"
+  assert refusal(["lll", "webhook", "frob"]).contains("expected add, list or remove")
+}
