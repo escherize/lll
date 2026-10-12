@@ -59,6 +59,7 @@ everything.
 | `cli` | whether it logged your CLI in, or why not |
 | `board` | the board's url |
 | `board  login` | a link that signs your browser in; `lll board` prints it again |
+| `agent` | a prompt to paste into a coding agent on this machine (only when it logged your CLI in), then how to give an agent its own member with `lll bot create` |
 
 With `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot
 generates a password for `admin@local.dev`. Read it with
