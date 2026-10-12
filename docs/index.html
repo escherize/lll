@@ -189,6 +189,12 @@
   .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px;
          background: var(--st-done); }
   .dot.miss { background: transparent; border: 1.5px solid var(--text-3); }
+  /* board missed because of lll itself: a drawn X in the board's error voice */
+  .dot.lll { position: relative; background: transparent; border-radius: 0; }
+  .dot.lll::before, .dot.lll::after { content: ""; position: absolute; left: 50%; top: 50%; width: 13px; height: 1.75px;
+                                      background: #f0827b; border-radius: 1px; }
+  .dot.lll::before { transform: translate(-50%, -50%) rotate(45deg); }
+  .dot.lll::after { transform: translate(-50%, -50%) rotate(-45deg); }
   .ledger tr.has-miss td.r { color: var(--text); }
   .aside { position: sticky; top: 28px; font-size: 15px; color: var(--text-2); }
   .aside p { margin: 0 0 18px; }
@@ -197,6 +203,25 @@
   .judged figcaption { margin-top: 10px; font-size: 13px; color: var(--text-3); }
   .aside strong { color: var(--text); font-weight: 600; }
   .aside .key { display: flex; flex-direction: column; gap: 8px; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13.5px; }
+
+  .proof-figs { margin-top: 44px; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; }
+  .proof-figs figure { margin: 0; background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; padding: 20px 22px 18px; }
+  .proof-figs figcaption { font-size: 15px; color: var(--text-2); }
+  .proof-figs figcaption b { color: var(--text); font-weight: 650; }
+  .proof-figs .note { margin: 14px 0 0; font-size: 13px; color: var(--text-3); }
+  .proof-figs .note b { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+  table.bars { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .bars th { text-align: left; font-size: 14.5px; font-weight: 500; color: var(--text); padding: 8px 16px 8px 0; width: 38%; vertical-align: middle; }
+  .bars th small { display: block; font-size: 12px; font-weight: 400; color: var(--text-3); }
+  .bars td { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
+  .bars .track { flex: 1; height: 10px; border-radius: 999px; background: rgba(255,255,255,0.05); overflow: hidden; }
+  .bars .bar { display: block; height: 100%; width: calc(var(--v) / 25 * 100%); min-width: 4px; border-radius: 999px; background: #f0827b; }
+  .bars .val { font: 600 15px var(--mono); color: var(--text); width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  .waffle .cells { margin-top: 18px; display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 4px; }
+  .waffle .cells i { display: block; aspect-ratio: 1; border-radius: 1px; background: var(--st-done); }
+  .waffle .cells i.m { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+  .pair { display: inline-flex; gap: 0; padding: 2px 1px 2px 4px; margin-right: 3px; border-radius: 999px; background: rgba(255,255,255,0.07); }
+  .pair .dot { margin-right: 3px; }
 
   /* ---------- 1.0 ---------- */
   .contract { margin-top: 40px; max-width: 520px; }
@@ -215,7 +240,7 @@
   .block pre .o { color: var(--text-2); }
   .block pre .c { color: var(--text-3); }
   .dl { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }
-  .dl a { font: 600 12.5px var(--mono); color: var(--text); text-decoration: none; background: var(--bg-raised);
+  .dl a { font: 600 13px "Inter Variable", system-ui, sans-serif; color: var(--text); text-decoration: none; background: var(--bg-raised);
           border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 11px; min-height: 36px; display: inline-flex; align-items: center; }
   .dl a:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.2); }
 
@@ -240,7 +265,7 @@
     .wires { display: none; }
     .band { padding-bottom: 120px; }
     .shot { margin-top: -96px; }
-    .play, .ledger-wrap { grid-template-columns: 1fr; }
+    .play, .ledger-wrap, .proof-figs { grid-template-columns: 1fr; }
     .aside { position: static; }
     .docs { grid-template-columns: 1fr 1fr; }
     section.s { padding-top: 104px; }
@@ -376,9 +401,26 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
     <h2 class="t" id="t-proof">Tested by 2,000+ agents.</h2>
     <p class="intro prose">Fresh agents that have never seen lll get one real task and nothing but <code>--help</code>. A run passes when <strong>the server's own state</strong> is right, not when the agent says it is. Anything two agents trip on gets fixed in lll, and the case runs again.</p>
 
+    <div class="proof-figs">
+      <figure class="trend">
+        <figcaption><b>Agents tripped up by lll</b>, per 100</figcaption>
+        <table class="bars">
+          <tr><th scope="row">First pass<small>run 1, before 1.0</small></th><td><span class="track"><span class="bar" style="--v: 24.2"></span></span><span class="val">24</span></td></tr>
+          <tr><th scope="row">1.0.0 replay<small>run 10</small></th><td><span class="track"><span class="bar" style="--v: 11.1"></span></span><span class="val">11</span></td></tr>
+          <tr><th scope="row">Latest replay<small>run 20, main after 1.0</small></th><td><span class="track"><span class="bar" style="--v: 2.6"></span></span><span class="val">2.6</span></td></tr>
+        </table>
+        <p class="note">190 fresh agents a round, counted when a reviewer traced a failed call to lll. Case 20 is left out: it makes agents guess wrong on purpose.</p>
+      </figure>
+      <figure class="waffle">
+        <figcaption><b>The latest replay</b>, one square per agent</figcaption>
+        <div class="cells" role="img" aria-label="200 agents: 196 boards correct, 4 missed for causes traced to the agent, none missed because of lll"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i class="m"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <p class="note"><b>196</b> correct, <b>4</b> missed (traced to the agent), <b>0</b> missed because of lll.</p>
+      </figure>
+    </div>
+
     <div class="ledger-wrap">
       <table class="ledger">
-        <caption>The 1.0 replay: 20 use cases, 10 fresh agents each, judged on the board.</caption>
+        <caption>The latest replay, on main after 1.0: 20 use cases, 10 fresh agents each, judged on the board.</caption>
         <thead><tr><th scope="col">#</th><th scope="col">Use case</th><th scope="col">Agents</th><th scope="col" style="text-align:right">Boards</th></tr></thead>
         <tbody>
           <tr class="tier"><td colspan="4">Read</td></tr>
@@ -400,9 +442,9 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <tr class="has-miss"><td class="n">14</td><td class="c">Recover a broken config<small>a sandbox blocked one agent's commands</small></td><td class="d" aria-label="9 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">9/10</td></tr>
           <tr><td class="n">15</td><td class="c">Hand off bot credentials</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
           <tr class="tier"><td colspan="4">Two agents at once</td></tr>
-          <tr><td class="n">16</td><td class="c">Hand a claim to a partner<small>five pairs</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
-          <tr><td class="n">17</td><td class="c">Edit one description concurrently<small>five pairs</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
-          <tr class="has-miss"><td class="n">18</td><td class="c">Consume a partner's live changes<small>one agent sent its comment twice; the pair shares a board</small></td><td class="d" aria-label="8 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot miss"></span></td><td class="r">8/10</td></tr>
+          <tr><td class="n">16</td><td class="c">Hand a claim to a partner<small>five pairs</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">17</td><td class="c">Edit one description concurrently<small>five pairs</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span></td><td class="r">10/10</td></tr>
+          <tr class="has-miss"><td class="n">18</td><td class="c">Consume a partner's live changes<small>one agent sent its comment twice, which failed the board it shares with its partner</small></td><td class="d" aria-label="8 of 10 boards correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot miss"></span><span class="dot miss"></span></span></td><td class="r">8/10</td></tr>
           <tr class="has-miss"><td class="n">19</td><td class="c">Invite a scoped colleague<small>one agent's report wasn't valid JSON</small></td><td class="d" aria-label="9 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot"></span></td><td class="r">9/10</td></tr>
           <tr><td class="n">20</td><td class="c">Recover from a wrong command<small>judged on recovery</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
         </tbody>
@@ -413,11 +455,12 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <figcaption>Judged here: the server's own state.</figcaption>
         </figure>
         <p>Since the first fleet, <strong>2,061 fresh Claude Code agents</strong> have run 145 fleets against lll, plus 36 <code>gpt-5.6-luna</code> workers in the first harness.</p>
-        <p>In the 1.0 replay, <strong>196 of 200 boards</strong> came out right. None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which cost its partner the shared board), and one wrote a report that wasn't valid JSON.</p>
+        <p>In the latest replay, <strong>196 of 200 boards</strong> came out right (the 1.0.0 replay: 197). None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which cost its partner the shared board), and one wrote a report that wasn't valid JSON.</p>
         <p>Where agents still guess wrong, the error names the command to run next. Case 20 is judged on that recovery.</p>
         <div class="key">
           <span><span class="dot" aria-hidden="true"></span> board correct</span>
           <span><span class="dot miss" aria-hidden="true"></span> board missed, cause traced to the agent</span>
+          <span><span class="dot lll" aria-hidden="true"></span> board missed, error in lll</span>
         </div>
       </div>
     </div>
@@ -459,9 +502,9 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
 <span class="o">Claimed ENG-1 for bot-codex</span>
 <span class="o">ENG-1</span></pre></div>
         <div class="dl" aria-label="Direct downloads">
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64">darwin-arm64</a>
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64">linux-amd64</a>
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64">linux-arm64</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64" title="lll-darwin-arm64">macOS (Apple silicon)</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64" title="lll-linux-amd64">Linux (x86-64)</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64" title="lll-linux-arm64">Linux (ARM64)</a>
         </div>
       </div>
     </div>

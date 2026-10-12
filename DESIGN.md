@@ -729,9 +729,21 @@ also adds **12px** (landing-frame) for the board screenshot frame alone.
 - **Proof ledger.** A table with tabular numerals: two-digit case numbers,
   the use case with an optional text-3 note, a row of 11px dots (one per
   agent) and a right-aligned count. A correct board is a filled State Done dot;
-  a miss is a hollow dot with a 1.5px text-3 ring, never red. Rows with a miss
-  lift their count to text-primary. Uppercase tier rows (Read, Write,
-  Multi-step, Two agents at once) group the cases. A dot key sits in the aside.
+  a miss traced to the agent is a hollow dot with a 1.5px text-3 ring; a miss
+  caused by lll is a drawn X in Error Text (#f0827b), the only red in the
+  proof section. Rows with a miss lift their count to text-primary. Uppercase
+  tier rows (Read, Write, Multi-step, Two agents at once) group the cases. In
+  two-agent cases the dots sit in pairs on a white-alpha 0.07 pill, so a shared
+  board's miss reads as one event. A three-entry key sits in the aside.
+- **Trend bars.** Above the ledger, on a panel figure: "Agents tripped up by
+  lll, per 100" for each fleet round (first pass, 1.0.0 replay, latest), as
+  10px pill bars in Error Text on a white-alpha 0.05 track, scaled to 25, with
+  the value in 15px/600 monospace. The bar is red because it counts lll's own
+  failures; a note names the denominator and what is excluded.
+- **Waffle.** Beside the trend, one 1px-radius square per agent of the latest
+  replay in a 20-column grid, in case order: State Done fill for correct,
+  a 1.5px text-3 inset ring for a miss traced to the agent. A one-line note
+  gives the three counts.
 - **Exit-code strip.** A 520px table on the panel surface with a 10px radius and
   hairline rows. Codes are 13.5px/600 monospace; meanings are in text-2. The
   shipped codes are orange (see the Two Grounds Rule).
