@@ -140,6 +140,22 @@ fn the_agent_prompt_follows_only_a_saved_login() {
   ].join("\n")
 }
 
+// LLL-699: the prompt prints only when a command run from this shell uses
+// the saved login: a shell token or a shell or repo url pointing elsewhere
+// outranks it, and an agent would inherit that and fail.
+#[test]
+fn the_agent_prompt_needs_a_login_nothing_outranks() {
+  let api = "http://127.0.0.1:8091"
+  assert saved_login_reaches(api, None, api, Some(config.Source.Env("LLL_URL")))
+  assert saved_login_reaches(api, None, "", None)
+  assert saved_login_reaches(api, Some(config.Source.HomeFile("/h/lll.toml")), api, None)
+  // The configured url moved off a taken port, but the home file chose it.
+  assert saved_login_reaches(api, None, "http://127.0.0.1:8090", Some(config.Source.HomeFile("/h/lll.toml")))
+  assert !saved_login_reaches(api, Some(config.Source.Env("LLL_TOKEN")), api, None)
+  assert !saved_login_reaches(api, None, "http://127.0.0.1:8090", Some(config.Source.Env("LLL_URL")))
+  assert !saved_login_reaches(api, None, "http://127.0.0.1:8090", Some(config.Source.RepoFile("/r/.lll.toml")))
+}
+
 // LLL-680: a boot saves its board address as web_url only into a home config
 // whose url names this board's server, or none. A hosted url (and the token
 // beside it) keeps its own web_url.

@@ -16,7 +16,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   another directory on the same machine. A last line, `agent  own identity:
   lll bot create bot-NAME --env > agent.env`, shows how to give the agent its
   own member. A boot that does not log the CLI in (`--pb-dir`, a host bind, or
-  a CLI already logged in or kept on another server) prints only that hint.
+  a CLI already logged in or kept on another server) prints only that hint, as
+  does a boot whose shell would not use the saved login (an `LLL_TOKEN` in the
+  environment, or an `LLL_URL` or repo url naming another server).
   The banner prints no token or password for either case.
 
 ## [1.0.1] - 2026-10-12

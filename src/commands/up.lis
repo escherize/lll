@@ -414,7 +414,7 @@ password in its own data directory's .lll-admin.json."),
       },
     )
     cli_saved = match plan {
-      CliLogin.Save => true,
+      CliLogin.Save => saved_login_reaches(db_url, src.token, cfg.url, src.url),
       CliLogin.Already | CliLogin.Untouched(_) | CliLogin.Keep(_) => false,
     }
     for line in log_cli_in(ctx, member.name, db_url, plan, src.token, (cfg.url, src.url))? {
@@ -564,6 +564,24 @@ only if that server is yours: LLL_URL={db_url} lll up (this sends your admin cre
     ),
     Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
       Some(config.Source.Default) | None => None,
+  }
+}
+
+/// Pure. Whether a login this boot saved is the one a command run from
+/// this shell uses (LLL-699): no token in the environment outranks it, and
+/// no environment or repo url sends commands to another server. When either
+/// does, log_cli_in prints how to fix it; an agent's separate tool calls
+/// would not keep an 'unset', so the banner prints no agent prompt.
+fn saved_login_reaches(
+  db_url: string,
+  token_source: Option<config.Source>,
+  url: string,
+  url_source: Option<config.Source>,
+) -> bool {
+  match token_source {
+    Some(config.Source.Env(_)) => false,
+    Some(config.Source.RepoFile(_)) | Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => shadowed_url_notice(db_url, url, url_source).is_none(),
   }
 }
 

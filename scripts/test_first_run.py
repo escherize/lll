@@ -172,4 +172,23 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
         os.killpg(child.pid, 15)
         child.wait(timeout=15)
 
-print('first run: README walk, CLI auto-login, a pasted agent prompt, own password change and a kept hosted url passed')
+    # LLL-699: an LLL_TOKEN from another server (the first boot's) outranks
+    # the login this boot saves. An agent started from this shell inherits
+    # it, so the banner offers no prompt, only the bot hint.
+    stale = re.search(r'token = "([^"]+)"', saved).group(1)
+    shell_dir = root / 'shell-token'
+    shell_dir.mkdir()
+    child, banner = boot(shell_dir, dict(clean_env(root / 'shell-token-home'), LLL_TEAM='SHELL', LLL_TOKEN=stale,
+                                         LLL_URL=f'http://127.0.0.1:{port()}'), root / 'up3.log')
+    try:
+        assert '\ncli    LLL_TOKEN in this shell overrides that login, and this server does not accept it: unset LLL_TOKEN\n' \
+            in banner, banner
+        assert 'paste this into your agent' not in banner, banner
+        assert banner.rstrip('\n').endswith('\nagent  own identity: lll bot create bot-NAME --env > agent.env'), banner
+        assert stale not in banner, banner
+    finally:
+        os.killpg(child.pid, 15)
+        child.wait(timeout=15)
+
+print('first run: README walk, CLI auto-login, a pasted agent prompt (none under a shell token), '
+      'own password change and a kept hosted url passed')
