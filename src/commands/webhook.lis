@@ -14,18 +14,6 @@ import "query"
 import "secret"
 import "writes"
 
-/// Dispatch `lll webhook <verb>` through the noun's Command table (TASK-307):
-/// dispatch, `lll webhook --help` and shell completions all read the table.
-pub fn webhook(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx,
-    "webhook",
-    "outbound webhooks for issue events",
-    webhook_intro(),
-    webhook_commands(),
-    args,
-  )
-}
-
 fn webhook_intro() -> string {
   "The server POSTs one JSON object per issue create/update/delete to every
 registered URL whose scope matches, shaped like an `lll watch --json` event
@@ -52,14 +40,17 @@ pub fn webhook_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "add",
+      access: flags.Access.Write,
       summary: "register a URL that receives this team's issue events, or one project's with --project",
       spec: webhook_add_spec(),
       positional: "URL",
+      missing: "a webhook needs a target URL: 'lll webhook add URL'",
       run: webhook_add,
       ..
     },
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "list this team's registrations: scope, URL, whether a secret is set",
       spec: webhook_list_spec(),
       run: webhook_list,
@@ -67,9 +58,11 @@ pub fn webhook_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "remove",
+      access: flags.Access.Write,
       summary: "delete a registration by its URL; --project picks between the same URL at both scopes",
       spec: webhook_remove_spec(),
       positional: "URL",
+      missing: "which webhook? its URL, as 'lll webhook list' prints it",
       run: webhook_remove,
       ..
     },
@@ -79,7 +72,7 @@ pub fn webhook_commands() -> Slice<flags.Command> {
 fn webhook_add_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
-    flags.Flag { name: "--secret", value: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
+    flags.Flag { name: "--secret", value: true, stdin: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
   ])
 }
 

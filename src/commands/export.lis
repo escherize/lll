@@ -26,10 +26,21 @@ import "records"
 /// flock. Under Git none of it is needed — `git status` reports an edit,
 /// `git checkout` undoes one, and the commit is the atomic unit. What is
 /// kept is the part Git cannot do: refusing to publish an incomplete read.
-pub fn export_cmd(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  let spec = export_spec()
-  let usage = flags.usage("lll export", spec, "[DIR]")
-  let p = flags.parse_n(spec, args, 2, 1, usage)?
+pub fn export_command() -> flags.Command {
+  flags.Command {
+    name: "export",
+    access: flags.Access.Write,
+    summary: "the team as readable Markdown a repo can hold: one file per issue and doc (default DIR: mirror)",
+    spec: export_spec(),
+    positional: "[DIR]",
+    run: export_cmd,
+    ..,
+  }
+}
+
+fn export_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let p = input.parsed
   let mut dir = p.first()
   if dir == "" { dir = "mirror" }
   let team = team_flag_or_current(ctx, p.one("--team"))?

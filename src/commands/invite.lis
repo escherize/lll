@@ -13,20 +13,11 @@ import "records"
 // superuser (LLL-629), and its refusal names who can; this command only
 // resolves team keys and prints the link.
 
-pub fn invite(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx,
-    "invite",
-    "single-use join links",
-    invite_intro(),
-    invite_commands(),
-    args,
-  )
-}
-
 pub fn invite_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "create",
+      access: flags.Access.Write,
       summary: "print a single-use link that lets one person join with these teams",
       spec: invite_create_spec(),
       run: invite_create,

@@ -37,25 +37,7 @@ pub fn version_skew_check(ctx: pb.Client, noun: string) -> Channel<Option<string
 /// their behalf (the skew probe, login renewal) costs nothing new. --help,
 /// version, completions, skill and upgrade stay off the network.
 pub fn talks_to_server(noun: string) -> bool {
-  [
-    "issue",
-    "team",
-    "member",
-    "invite",
-    "project",
-    "api",
-    "label",
-    "doc",
-    "finding",
-    "search",
-    "whoami",
-    "token",
-    "bot",
-    "webhook",
-    "import",
-    "export",
-  ]
-    .contains(noun)
+  noun_named(noun).map_or(false, |n| n.server)
 }
 
 fn skew_line(ctx: pb.Client, noun: string) -> Option<string> {

@@ -67,34 +67,22 @@ struct WhoamiJson {
   access: string,
 }
 
-/// The refusal for an argument `lll whoami` does not take. A `--team` here is
-/// a guess about how context works (LLL-493, fleet case 05): the answer names
-/// the bare invocation that DOES report context, and the house one-command
-/// override for inspecting another team. Other arguments keep the short form.
-fn whoami_arg_error(flag: string, args: Slice<string>) -> string {
-  let refusal = f"unknown whoami argument: '{flag}' (see 'lll whoami --help')"
-  if flag != "--team" && !flag.starts_with("--team=") {
-    return refusal
-  }
-  let raw = if flag.starts_with("--team=") {
-    strings.TrimPrefix(flag, "--team=")
-  } else {
-    args.get(3).unwrap_or("KEY")
-  }
-  let key = if strings.TrimSpace(raw) == "" { "KEY" } else { raw }
-  f"{refusal}
-'whoami' takes no flags: run it bare to see the identity, server and team this machine is acting as.
-For a one-command team override, prefix your command with LLL_TEAM={flags.shell_argument(key)}.
-This leaves the saved attachment unchanged (see 'lll config --help')."
-}
-
 /// `lll whoami` — the member or administrator identity, confirmed by a
 /// record lookup against the server rather than read off the config.
-pub fn whoami(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  if let Some(flag) = args.get(2) {
-    if flag == "--help" || flag == "-h" {
-      return Ok(output.line(
-        "lll whoami - show which member or administrator, server and team this machine is acting as
+pub fn whoami_command() -> flags.Command {
+  flags.Command {
+    name: "whoami",
+    access: flags.Access.Read,
+    summary: "which member, server and team you are acting as",
+    page: whoami_page(),
+    spec: [flags.Flag { name: "--json", help: "the same facts as one JSON object", .. }],
+    run: whoami,
+    ..,
+  }
+}
+
+fn whoami_page() -> string {
+  "lll whoami - show which member or administrator, server and team this machine is acting as
 
 Usage:
   lll whoami [--json]
@@ -103,13 +91,12 @@ Usage:
 
 Confirms the stored token against the server, including administrator tokens.
 'lll config list' shows where each value came from; 'lll login' replaces the
-token with a member session, and 'lll bot create bot-NAME' provisions a bot identity.",
-      ))
-    }
-    if flag != "--json" { return Err(flags.usage_error(whoami_arg_error(flag, args))) }
-    if let Some(extra) = args.get(3) { return Err(flags.usage_error(whoami_arg_error(extra, args))) }
-  }
-  let json_mode = args.get(2) == Some("--json")
+token with a member session, and 'lll bot create bot-NAME' provisions a bot identity."
+}
+
+fn whoami(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let json_mode = input.parsed.given("--json")
   let (cfg, src) = ctx.settings.traced().map_err(pb.failed)?
   // NOT auth-refresh, which this used to POST. A refresh is refused for every
   // non-refreshable token - and `lll token create` mints exactly those, the
