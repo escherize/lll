@@ -215,7 +215,7 @@
   .bars th small { display: block; font-size: 12px; font-weight: 400; color: var(--text-3); }
   .bars td { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
   .bars .track { flex: 1; height: 10px; border-radius: 999px; background: rgba(255,255,255,0.05); overflow: hidden; }
-  .bars .bar { display: block; height: 100%; width: calc(var(--v) / 25 * 100%); min-width: 4px; border-radius: 999px; background: #f0827b; }
+  .bars .fill { display: block; height: 100%; width: calc(var(--v) / 25 * 100%); min-width: 4px; border-radius: 999px; background: #f0827b; }
   .bars .val { font: 600 15px var(--mono); color: var(--text); width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
   .waffle .cells { margin-top: 18px; display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 4px; }
   .waffle .cells i { display: block; aspect-ratio: 1; border-radius: 1px; background: var(--st-done); }
@@ -405,9 +405,9 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       <figure class="trend">
         <figcaption><b>Agents tripped up by lll</b>, per 100</figcaption>
         <table class="bars">
-          <tr><th scope="row">First pass<small>run 1, before 1.0</small></th><td><span class="track"><span class="bar" style="--v: 24.2"></span></span><span class="val">24</span></td></tr>
-          <tr><th scope="row">1.0.0 replay<small>run 10</small></th><td><span class="track"><span class="bar" style="--v: 11.1"></span></span><span class="val">11</span></td></tr>
-          <tr><th scope="row">Latest replay<small>run 20, main after 1.0</small></th><td><span class="track"><span class="bar" style="--v: 2.6"></span></span><span class="val">2.6</span></td></tr>
+          <tr><th scope="row">First pass<small>run 1, before 1.0</small></th><td><span class="track"><span class="fill" style="--v: 24.2"></span></span><span class="val">24</span></td></tr>
+          <tr><th scope="row">1.0.0 replay<small>run 10</small></th><td><span class="track"><span class="fill" style="--v: 11.1"></span></span><span class="val">11</span></td></tr>
+          <tr><th scope="row">Latest replay<small>run 20, main after 1.0</small></th><td><span class="track"><span class="fill" style="--v: 2.6"></span></span><span class="val">2.6</span></td></tr>
         </table>
         <p class="note">190 fresh agents a round, counted when a reviewer traced a failed call to lll. Case 20 is left out: it makes agents guess wrong on purpose.</p>
       </figure>
