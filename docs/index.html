@@ -189,6 +189,12 @@
   .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px;
          background: var(--st-done); }
   .dot.miss { background: transparent; border: 1.5px solid var(--text-3); }
+  /* board missed because of lll itself: a drawn X in the board's error voice */
+  .dot.lll { position: relative; background: transparent; border-radius: 0; }
+  .dot.lll::before, .dot.lll::after { content: ""; position: absolute; left: 50%; top: 50%; width: 13px; height: 1.75px;
+                                      background: #f0827b; border-radius: 1px; }
+  .dot.lll::before { transform: translate(-50%, -50%) rotate(45deg); }
+  .dot.lll::after { transform: translate(-50%, -50%) rotate(-45deg); }
   .ledger tr.has-miss td.r { color: var(--text); }
   .aside { position: sticky; top: 28px; font-size: 15px; color: var(--text-2); }
   .aside p { margin: 0 0 18px; }
@@ -418,6 +424,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
         <div class="key">
           <span><span class="dot" aria-hidden="true"></span> board correct</span>
           <span><span class="dot miss" aria-hidden="true"></span> board missed, cause traced to the agent</span>
+          <span><span class="dot lll" aria-hidden="true"></span> board missed, error in lll</span>
         </div>
       </div>
     </div>
