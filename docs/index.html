@@ -642,7 +642,18 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   };
   btn.addEventListener('click', go);
   reset();
-  const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); go(); } }, { threshold: 0.35 });
+  // Play when the section is mostly on screen; reset once it has left, so
+  // every visit starts from the first command (a tall window or a restored
+  // scroll position would otherwise spend the run before anyone looks).
+  let playing = false;
+  const io = new IntersectionObserver(es => {
+    for (const e of es) {
+      // On a phone the section is taller than the screen, so measure against the smaller of the two.
+      const seen = e.intersectionRect.height / Math.min(e.boundingClientRect.height, e.rootBounds ? e.rootBounds.height : innerHeight);
+      if (seen >= 0.6 && !playing) { playing = true; go(); }
+      else if (!e.isIntersecting && playing) { playing = false; run++; reset(); log.innerHTML = ''; btn.hidden = true; }
+    }
+  }, { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] });
   io.observe(play);
 })();
 </script>
