@@ -3,8 +3,11 @@ import "go:encoding/base64"
 import "go:crypto/sha256"
 import "go:encoding/hex"
 import "go:encoding/json"
+import "go:errors"
 import "go:io"
+import "go:net"
 import "go:net/http"
+import "go:os"
 import "go:sort"
 import "go:strings"
 import "go:time"
@@ -168,7 +171,7 @@ impl Client {
 
   /// Replayable JSON creation carrying the same key through token renewal.
   pub fn post_idempotent(self, path: string, payload: string, key: string) -> Result<string, CliError> {
-    self.send_content_options("POST", path, payload, "application/json", "", key)
+    self.send_content_options("POST", path, payload, "application/json", "", key, Budget.Request)
   }
 
   /// PATCH a JSON payload to a path and return the response body.
@@ -182,7 +185,7 @@ impl Client {
   /// write, not at the caller's earlier read. "" sends no header — callers can
   /// pass the flag through untouched.
   pub fn patch_with_stamp(self, path: string, payload: string, stamp: string) -> Result<string, CliError> {
-    self.send_content_options("PATCH", path, payload, "application/json", stamp, "")
+    self.send_content_options("PATCH", path, payload, "application/json", stamp, "", Budget.Request)
   }
 
   /// patch_with_stamp as `caller` (LLL-665): a stamped edit from a board
@@ -192,7 +195,7 @@ impl Client {
       Caller.Process => self.patch_with_stamp(path, payload, stamp),
       Caller.Member(tok) => {
         let (cfg, src) = self.settings.traced().map_err(failed)?
-        request_content(cfg.url, "PATCH", path, payload, bearer(tok), src.url, "application/json", stamp)
+        request_content(cfg.url, "PATCH", path, payload, bearer(tok), src.url, "application/json", stamp, Budget.Request)
       },
     }
   }
@@ -247,11 +250,42 @@ impl Client {
     payload: string,
     content_type: string,
   ) -> Result<string, CliError> {
+    self.send_as_within(caller, method, path, payload, content_type, Budget.Request)
+  }
+
+  /// send_as for an upload (LLL-623): a large body on a slow link may take
+  /// longer than an ordinary request's whole budget, so only connecting and
+  /// the server's first answer are limited.
+  pub fn upload_as(
+    self,
+    caller: Caller,
+    method: string,
+    path: string,
+    payload: string,
+    content_type: string,
+  ) -> Result<string, CliError> {
+    self.send_as_within(caller, method, path, payload, content_type, Budget.Transfer)
+  }
+
+  /// GET for a download (LLL-623): `get` with the transfer budget.
+  pub fn download(self, path: string) -> Result<string, CliError> {
+    self.send_content_options("GET", path, "", "application/json", "", "", Budget.Transfer)
+  }
+
+  fn send_as_within(
+    self,
+    caller: Caller,
+    method: string,
+    path: string,
+    payload: string,
+    content_type: string,
+    budget: Budget,
+  ) -> Result<string, CliError> {
     match caller {
-      Caller.Process => self.send_content_options(method, path, payload, content_type, "", ""),
+      Caller.Process => self.send_content_options(method, path, payload, content_type, "", "", budget),
       Caller.Member(tok) => {
         let (cfg, src) = self.settings.traced().map_err(failed)?
-        request_content(cfg.url, method, path, payload, bearer(tok), src.url, content_type, "")
+        request_content(cfg.url, method, path, payload, bearer(tok), src.url, content_type, "", budget)
       },
     }
   }
@@ -260,7 +294,7 @@ impl Client {
   /// the configured token reaches PocketBase on every request — GET included,
   /// which is why `get` does not call http.Get.
   fn send(self, method: string, path: string, payload: string) -> Result<string, CliError> {
-    self.send_content_options(method, path, payload, "application/json", "", "")
+    self.send_content_options(method, path, payload, "application/json", "", "", Budget.Request)
   }
 
   /// The whole authenticated path — token check, 401 re-mint, empty-list
@@ -269,18 +303,18 @@ impl Client {
   fn send_content_options(
     self,
     method: string, path: string, payload: string, content_type: string,
-    stamp: string, key: string,
+    stamp: string, key: string, budget: Budget,
   ) -> Result<string, CliError> {
     let (cfg, src) = self.settings.traced().map_err(failed)?
     let token = self.token()
     if token == "" && (strings.HasPrefix(path, "/api/collections/") || strings.HasPrefix(path, "/api/lll/")) {
       return Err(self.not_logged_in_message())
     }
-    let wire = Wire { base: cfg.url, url_origin: src.url, method, path, payload, content_type, stamp, key }
+    let wire = Wire { base: cfg.url, url_origin: src.url, method, path, payload, content_type, stamp, key, budget }
     // TASK-319: the server answers 401 to a record request whose token it
     // could not load, which is how an expired, corrupted or disowned token now
     // arrives - one step earlier than the empty list below, same verdicts.
-    let body = match request_options(cfg.url, method, path, payload, bearer(token), wire.url_origin, content_type, stamp, key) {
+    let body = match request_options(cfg.url, method, path, payload, bearer(token), wire.url_origin, content_type, stamp, key, budget) {
       Ok(b) => b,
       Err(e) => {
         if token != "" && e.status == 401 {
@@ -328,7 +362,7 @@ impl Client {
       let fresh = self.token()
       match request_options(
         wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.url_origin,
-        wire.content_type, wire.stamp, wire.key,
+        wire.content_type, wire.stamp, wire.key, wire.budget,
       ) {
         Ok(body) => return Some(Ok(body)),
         Err(e) => {
@@ -367,7 +401,7 @@ impl Client {
         }
         return Some(request_options(
           wire.base, wire.method, wire.path, wire.payload, bearer(fresh), wire.url_origin,
-          wire.content_type, wire.stamp, wire.key,
+          wire.content_type, wire.stamp, wire.key, wire.budget,
         ))
       }
       let login = login_command(wire.base, wire.url_origin)
@@ -476,13 +510,31 @@ struct Wire {
   content_type: string,
   stamp: string,
   key: string,
+  budget: Budget,
 }
 
 /// Connection-failure message that names the fix. Shared by every request
-/// path here and by the realtime client.
+/// path here and by the realtime client. A timeout is its own message
+/// (LLL-623): the server may be up, so "is it running?" would mislead.
 pub fn unreachable(base: string, e: error) -> CliError {
+  if os.IsTimeout(e) {
+    // Go names a connect that timed out "dial tcp ...: i/o timeout"; any
+    // other timeout came after the server took the connection.
+    return fail(ErrorKind.Network, timed_out(base, strings.Contains(e.Error(), "dial tcp")))
+  }
   fail(ErrorKind.Network, f"cannot reach the lll server at {base}: {e}
 is the lll server running? start everything with 'lll up', or point LLL_URL (or 'url' in .lll.toml) at your server")
+}
+
+/// The words for a request that timed out, by whether it was still
+/// connecting. Pure so both wordings are testable without a network.
+pub fn timed_out(base: string, connecting: bool) -> string {
+  if connecting {
+    return f"the lll server at {base} did not accept a connection in time
+check the url and the network between here and the server; is a firewall dropping the connection?"
+  }
+  f"the lll server at {base} accepted the connection but did not answer within {ANSWER_SECONDS}s
+check that the server is healthy: is 'lll up' stuck, or is a proxy in front of it holding the request? retry once it answers"
 }
 
 /// unreachable(), plus — when the url that refused was nobody's choice but
@@ -724,9 +776,9 @@ pub fn same_login(old: string, fresh: string) -> bool {
 /// PocketBase's auth-refresh for the collection `tok` names: a fresh token
 /// for the same record, its exp a full collection duration from now.
 ///
-/// Its own 2-second client, not request(): this runs before ordinary commands,
-/// and http.DefaultClient has no timeout, so a server that accepts and never
-/// answers would hang the command indefinitely (version_skew uses 1s, discovery 2s).
+/// Its own 2-second client, shorter than a request's ANSWER_SECONDS: this runs
+/// before ordinary commands, so a server that accepts and never answers
+/// should cost little here (version_skew uses 1s, discovery 2s).
 pub fn refresh_token(base: string, tok: string) -> Result<string, CliError> {
   let Some(collection) = token_collection(tok) else {
     return Err(failed("the token names no collection"))
@@ -740,12 +792,12 @@ pub fn refresh_token(base: string, tok: string) -> Result<string, CliError> {
     let mut h = h
     h.Set("Authorization", bearer(tok))
   }
-  let client = http.Client { Timeout: 2 * time.Second, ..no_redirects() }
+  let client = http.Client { Timeout: 2 * time.Second, ..http_client(Budget.Request) }
   let resp = match client.Do(req) {
     Ok(r) => r,
     Err(e) => return Err(failed(f"{what}: {e}")),
   }
-  let body = read_body(resp, what)?
+  let body = read_body(resp, base, what, Budget.Request)?
   let mut auth = TokenOnly { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &auth) {
     return Err(failed(f"decoding the refreshed token: {e}"))
@@ -908,19 +960,20 @@ fn request(
   auth: string,
   url_origin: Option<config.Source>,
 ) -> Result<string, CliError> {
-  request_content(base, method, path, payload, auth, url_origin, "application/json", "")
+  request_content(base, method, path, payload, auth, url_origin, "application/json", "", Budget.Request)
 }
 
 fn request_content(
   base: string, method: string, path: string, payload: string,
-  auth: string, url_origin: Option<config.Source>, content_type: string, stamp: string,
+  auth: string, url_origin: Option<config.Source>, content_type: string, stamp: string, budget: Budget,
 ) -> Result<string, CliError> {
-  request_options(base, method, path, payload, auth, url_origin, content_type, stamp, "")
+  request_options(base, method, path, payload, auth, url_origin, content_type, stamp, "", budget)
 }
 
 fn request_options(
   base: string, method: string, path: string, payload: string,
   auth: string, url_origin: Option<config.Source>, content_type: string, stamp: string, key: string,
+  budget: Budget,
 ) -> Result<string, CliError> {
   let mut req = match http.NewRequest(
     method,
@@ -940,31 +993,90 @@ fn request_options(
     if stamp != "" { h.Set("If-Unmodified-Since", stamp) }
     if key != "" { h.Set("Idempotency-Key", key) }
   }
-  let resp = match no_redirects().Do(req) {
+  let resp = match http_client(budget).Do(req) {
     Ok(r) => r,
     Err(e) => return Err(unreachable_hint(base, url_origin, e)),
   }
-  read_body(resp, f"{method} {base}{path}")
+  read_body(resp, base, f"{method} {base}{path}", budget)
 }
 
-/// An HTTP client that never follows a redirect (LLL-688). Go's default
-/// client follows one, keeps Authorization for the same host on another
-/// port, and re-sends a POST body (a password) on 307. Every request that
-/// carries a credential goes through one of these; a 3xx answer is an error
-/// naming where it pointed (read_body).
-pub fn no_redirects() -> http.Client {
-  http.Client { CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)), .. }
+/// How long one request may take (LLL-623). Go's default client has no
+/// limit, so a server that accepted the connection and never answered hung
+/// every command forever.
+pub enum Budget {
+  /// An ordinary request: the whole exchange, body included, within
+  /// ANSWER_SECONDS. Export and import are many of these, one page or one
+  /// record each, so each is bounded and the command is not.
+  Request,
+  /// An upload, a download or a realtime stream: no total limit, because a
+  /// big file on a slow link and a stream that stays open are both
+  /// legitimately long. Connecting must finish within DIAL_SECONDS, the
+  /// server must start its answer within ANSWER_SECONDS of receiving the
+  /// whole request, and the answer must not stall for STALL_SECONDS
+  /// (read_progressing; the realtime stream has its own idle limit).
+  Transfer,
 }
 
-fn read_body(resp: Ref<http.Response>, what: string) -> Result<string, CliError> {
+/// The seconds a server gets to answer: the whole of an ordinary request,
+/// the response headers of a transfer.
+pub const ANSWER_SECONDS: int = 30
+
+/// The seconds a transfer gets to connect, and then for its TLS handshake.
+const DIAL_SECONDS: int = 10
+
+/// The seconds a transfer's answer may go without a byte arriving.
+const STALL_SECONDS: int = 60
+
+/// The HTTP client for `budget`. Every request to the lll server goes through
+/// one of these, so it is also the one place that refuses redirects
+/// (LLL-688): Go's default client follows one, keeps Authorization for the
+/// same host on another port, and re-sends a POST body (a password) on 307.
+/// A 3xx answer is an error naming where it pointed (read_body).
+pub fn http_client(budget: Budget) -> http.Client {
+  match budget {
+    Budget.Request => http.Client {
+      CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)),
+      Timeout: (ANSWER_SECONDS as time.Duration) * time.Second,
+      ..
+    },
+    Budget.Transfer => {
+      // Dialer.Cancel is deprecated and has no zero value in Lisette; a
+      // channel nothing sends on is Go's nil Cancel in effect.
+      let (_, never) = Channel.new<()>().split()
+      let dialer = net.Dialer { Timeout: (DIAL_SECONDS as time.Duration) * time.Second, KeepAlive: 30 * time.Second, Cancel: never, .. }
+      // A transport of its own, because the header limit lives on the
+      // transport. Keep-alives are off so one built per transfer leaves no
+      // idle connection behind.
+      let mut transport = http.Transport {
+        Proxy: Some(http.ProxyFromEnvironment),
+        DialContext: Some(|ctx, network, addr| dialer.DialContext(ctx, network, addr)),
+        TLSHandshakeTimeout: (DIAL_SECONDS as time.Duration) * time.Second,
+        ResponseHeaderTimeout: (ANSWER_SECONDS as time.Duration) * time.Second,
+        DisableKeepAlives: true,
+        ForceAttemptHTTP2: true,
+        ..
+      }
+      http.Client {
+        Transport: Some(&transport),
+        CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)),
+        ..
+      }
+    },
+  }
+}
+
+fn read_body(resp: Ref<http.Response>, base: string, what: string, budget: Budget) -> Result<string, CliError> {
   let Some(stream) = resp.Body else {
     return Err(fail(ErrorKind.Network, f"{what}: empty response body"))
   }
   defer stream.Close()
-  let body = match io.ReadAll(stream) {
-    Partial.Ok(b) => b,
-    // A complete JSON prefix does not make an incomplete HTTP body valid.
-    Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
+  let body = match budget {
+    Budget.Request => match io.ReadAll(stream) {
+      Partial.Ok(b) => b,
+      // A complete JSON prefix does not make an incomplete HTTP body valid.
+      Partial.Both(_, e) | Partial.Err(e) => return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}")),
+    },
+    Budget.Transfer => read_progressing(stream, base, what)?,
   }
   if resp.StatusCode >= 300 && resp.StatusCode < 400 {
     let location = resp.Header.map_or("", |h| h.Get("Location"))
@@ -975,6 +1087,39 @@ if that is the lll server, use its address as the url"))
     return Err(http_error(what, resp.StatusCode, resp.Status, body as string))
   }
   Ok(body as string)
+}
+
+/// A transfer's answer, read while it keeps arriving: a server that sends
+/// nothing for STALL_SECONDS fails the read rather than hanging it, since a
+/// transfer has no total limit (Budget.Transfer). The stall message names
+/// the server, not the request: a download's path carries a file token.
+fn read_progressing(stream: io.ReadCloser, base: string, what: string) -> Result<Slice<byte>, CliError> {
+  let limit = (STALL_SECONDS as time.Duration) * time.Second
+  // Closing the body is what ends a Read that is waiting on a silent server.
+  let watchdog = time.AfterFunc(limit, || { let _ = stream.Close() })
+  let mut data = bytes.Buffer { .. }
+  let mut chunk = Slice.make<byte>(32 * 1024)
+  loop {
+    let (n, failure) = match stream.Read(chunk) {
+      Partial.Ok(n) => (n, None),
+      Partial.Both(n, e) => (n, Some(e)),
+      Partial.Err(e) => (0, Some(e)),
+    }
+    if n > 0 {
+      let _ = data.Write(chunk[..n])
+      let _ = watchdog.Reset(limit)
+    }
+    let Some(e) = failure else { continue }
+    // Stop is false once the watchdog has fired.
+    let stalled = !watchdog.Stop()
+    if errors.Is(e, io.EOF) && !stalled { break }
+    if stalled {
+      return Err(fail(ErrorKind.Network, f"the lll server at {base} stopped sending for {STALL_SECONDS}s partway through its answer
+check that the server is healthy and the network is up, then retry"))
+    }
+    return Err(fail(ErrorKind.Network, f"{what}: reading response: {e}"))
+  }
+  Ok(data.Bytes())
 }
 
 /// An HTTP error answer, parsed once (LLL-645). The API's JSON envelope is

@@ -1,3 +1,4 @@
+import "go:time"
 #[test]
 fn push_line_assembles_an_event_data_frame() {
   let mut p = FrameParser.new()
@@ -107,4 +108,13 @@ fn split_field_handles_multi_byte_characters() {
   let (f2, v2) = split_field("é: café")
   assert f2 == "é"
   assert v2 == "café"
+}
+
+// LLL-623: a stream that has shown it sends keepalives is dead after three
+// missed ones; before the first, a 1.0 server's 5-minute idle close is left
+// to the server.
+#[test]
+fn a_kept_alive_stream_is_dead_after_three_missed_keepalives() {
+  assert idle_limit(true) == 90 * time.Second
+  assert idle_limit(false) > 5 * time.Minute
 }

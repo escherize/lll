@@ -33,6 +33,35 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - `lll attach --key 'bad!'` is refused with exit 2, as LLL-628 intended; the
   key check ran only for a retired spelling (LLL-684).
 
+## [1.0.1] - 2026-10-12
+
+### Fixed
+
+- A server that accepts the connection and never answers no longer hangs a
+  command forever (LLL-623). An ordinary request now fails after 30 seconds
+  with exit 1, the same code as an unreachable server, and says "the lll
+  server at URL accepted the connection but did not answer within 30s".
+  Uploads, downloads and the realtime stream have no total limit, so a large
+  attachment on a slow link still completes; they must connect within 10
+  seconds and the server must start answering within 30 seconds. An upload's
+  or download's answer that stops arriving for 60 seconds fails with exit 1
+  and says so, and a watch whose stream goes silent for 90 seconds after the
+  server's first keepalive reconnects (5.5 minutes before one arrives, so a
+  1.0 server's own 5-minute cycle is unchanged).
+- An idle `lll watch` no longer drops and reconnects every five minutes
+  (LLL-692). PocketBase closed realtime streams that carried no event for
+  five minutes; the server now sends a keepalive every 30 seconds. A stream
+  stays open past PocketBase's 30-minute lifetime only while its token is
+  valid: the server closes it within 30 seconds of the token being revoked,
+  rotated or expiring, so a watch still exits naming the dead token
+  (LLL-617). The token is read as PocketBase reads it, so a lowercase
+  `bearer` prefix works. A stream with no authenticated subscription gets no
+  keepalive, so PocketBase's 5-minute idle close still ends an anonymous
+  connection. The keepalive runs in one goroutine per stream that owns its own
+  channel and exits with the connection, so a closing client can neither
+  block it nor make it panic. This fix is in the server: upgrade the server
+  to stop the reconnects.
+
 ## [1.0.0] - 2026-10-09
 
 1.0 promises SemVer for the surface in `docs/cli-contract.md`: exit codes,
