@@ -5,20 +5,14 @@ import "pb"
 /// applied: main puts it in the Settings it builds (LLL-486), so it reaches
 /// every command as a value and no child process inherits it. No
 /// configuration file is rewritten, and explicit issue identifiers still
-/// resolve their own team.
+/// resolve their own team. The table says which nouns are scoped.
 pub fn scoped_args(args: Slice<string>) -> Result<(Slice<string>, Option<string>), pb.CliError> {
-  let noun = args.get(1).unwrap_or("")
-  let verb = args.get(2).unwrap_or("")
-  let (start, spec) = match noun {
-    "issue" => (3, flags.command_spec(issue_commands(), verb)),
-    "project" => (3, flags.command_spec(project_commands(), verb)),
-    "label" => (3, flags.command_spec(label_commands(), verb)),
-    "doc" => (3, flags.command_spec(doc_commands(), verb)),
-    "finding" => (3, flags.command_spec(finding_commands(), verb)),
-    "import" => (3, flags.command_spec(import_commands(), verb)),
-    "watch" => (2, watch_spec()),
-    "search" => (2, search_spec()),
-    _ => return Ok((args, None)),
+  let Some(noun) = noun_named(args.get(1).unwrap_or("")) else { return Ok((args, None)) }
+  if !noun.scoped { return Ok((args, None)) }
+  let (start, spec) = match noun.shape {
+    flags.Shape.Single(c) => (2, c.spec),
+    flags.Shape.Verbs(cmds) | flags.Shape.VerbsOr(cmds, _) => (3, flags.command_spec(cmds, args.get(2).unwrap_or(""))),
+    flags.Shape.Topics => return Ok((args, None)),
   }
   if args.length() < start { return Ok((args, None)) }
   flags.extract_team(args, start, spec)

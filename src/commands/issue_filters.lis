@@ -22,14 +22,16 @@ fn filter_spec(use: FilterUse) -> Slice<flags.Flag> {
   // mutation the last set wins, on a filter they union.
   let label_hint = if use == FilterUse.Watch { "; repeatable, matching any of them" } else { "; repeatable\n(update replaces the set - --add-label/--remove-label edit it;\na filter matches any of them)" }
   [
-    flags.Flag { name: "--state", value: true, hint: strings.Join(query.states(), "|"), repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
+    flags.Flag { name: "--state", value: true, values: query.states(), repeat: repeat_state, help: f"one of: {strings.Join(query.states(), ", ")}{state_hint}{state_repeat_hint}", .. },
     flags.Flag { name: "--assignee", value: true, hint: "name", help: f"member name (see 'lll member list'){assignee_hint}", .. },
     flags.Flag { name: "--label", value: true, hint: "name", repeat: true, help: f"label name (see 'lll label list'){label_hint}", .. },
     flags.Flag { name: "--project", value: true, hint: "name", help: f"project name (see 'lll project list'){project_hint}", .. },
   ]
 }
 
-fn filters_from(p: flags.Parsed) -> Result<query.Criteria, pb.CliError> {
+/// The filters 'issue list' and 'watch' declare; `search` is the title
+/// filter's text, which each spells its own way.
+fn filters_from(p: flags.Parsed, search: string) -> Result<query.Criteria, pb.CliError> {
   // Explicit --state "" is a mistake; absence is an unrestricted filter.
   if p.given("--state") && p.one("--state") == "" { let _ = query.state("")? }
   // `all`, not `one` (LLL-381). The parser had been collecting every value all
@@ -37,7 +39,7 @@ fn filters_from(p: flags.Parsed) -> Result<query.Criteria, pb.CliError> {
   // into a confident answer to a question nobody asked.
   query.Filters {
     state: p.all("--state"), assignee: p.one("--assignee"),
-    label: p.all("--label"), project: p.one("--project"), search: p.one("--search"),
+    label: p.all("--label"), project: p.one("--project"), search,
   }.parse()
 }
 

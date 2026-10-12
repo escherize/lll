@@ -8,17 +8,6 @@ import "pb"
 import "writes"
 import "records"
 
-/// `lll finding` (TASK-103) — the retrieval side of docs. A finding is a doc
-/// with kind=finding; `lll finding create` files one, and
-/// these verbs answer "what do we know about THIS file / area". Surfacing is
-/// by area and path — a filter over kind='finding' — never full-text luck.
-///
-/// Dispatched through the noun's Command table (TASK-307): dispatch, `lll
-/// finding --help` and shell completions all read it, so none can drift.
-pub fn finding(ctx: pb.Client, args: Slice<string>) -> Result<output.Output, pb.CliError> {
-  flags.dispatch(ctx, "finding", "retrieve findings near a path", finding_intro(), finding_commands(), args)
-}
-
 /// Every finding verb, as a value. Neither verb had a hand-written page, so
 /// `page` is "" and help is generated from `spec` - and dispatch parses args
 /// against `spec` before `run`, so a trailing -h never reaches the verb body.
@@ -26,6 +15,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
   [
     flags.Command {
       name: "near",
+      access: flags.Access.Read,
       summary: "findings about a file or directory, exact path matches first",
       spec: flags.with_team([flags.Flag { name: "--json", help: "print the findings as a JSON list", .. }]),
       positional: "<path>",
@@ -34,6 +24,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "create", alias: "new",
+      access: flags.Access.Write,
       summary: "file a finding: 'lll doc create -k finding' with the kind already set",
       spec: finding_new_spec(),
       positional: "[\"slug\"]",
@@ -42,6 +33,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "list",
+      access: flags.Access.Read,
       summary: "every finding, or one area's, one line each (slug, area, title)",
       spec: finding_list_spec(),
       run: finding_list,
@@ -49,6 +41,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "confirm",
+      access: flags.Access.Write,
       summary: "assert a finding is fact; clears any refutation's reason",
       spec: flags.with_team([json_after_flag("the finding")]),
       positional: "SLUG",
@@ -57,6 +50,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     },
     flags.Command {
       name: "refute",
+      access: flags.Access.Write,
       summary: "mark a finding refuted and record why: -b why ('-b -' reads stdin)",
       spec: finding_refute_spec(),
       positional: "SLUG",
@@ -69,6 +63,7 @@ pub fn finding_commands() -> Slice<flags.Command> {
     // (5 of 20 workers in the 1.0 fleet typed it).
     flags.Command {
       name: "view", hidden: true, hidden_alias: "read",
+      access: flags.Access.Read,
       summary: "show one finding by slug; the documented spelling is 'lll doc view'",
       spec: doc_view_spec(),
       positional: "SLUG",

@@ -264,13 +264,12 @@ fn issue_list_takes_l_for_limit_and_refuses_p_shorts() {
   assert flags.parse(spec, ["lll", "issue", "list", "-P", "2"], 3, false, "").is_err()
 }
 
-/// --help is hidden: it is a parser entry so 'issue create --help' is not an
-/// unknown flag, but it must not appear in help output or completions.
+/// --help is the table parser's (LLL-684): no spec declares it, so it never
+/// appears in help output or completions.
 #[test]
-fn issue_create_help_flag_is_hidden_from_help_and_completions() {
+fn issue_create_help_flag_is_not_declared_or_shown() {
   let spec = issue_create_spec()
-  let assert Some(help) = spec.find(|f| f.name == "--help")
-  assert help.hidden
+  assert spec.find(|f| f.name == "--help").is_none()
   assert flags.tokens(spec).find(|t| t == "--help").is_none()
   assert !flags.usage("lll issue create", spec, "").contains("--help")
   assert !flags.section(spec).contains("--help")
@@ -715,14 +714,6 @@ fn a_retry_command_swaps_in_the_current_stamp() {
   assert inline == "lll issue update ENG-1 --if-unchanged-since='2026-10-09T02:55:01.501Z'"
 }
 
-/// An update field typed as a verb names the update flag (1.0 fleet).
-#[test]
-fn an_update_field_typed_as_a_verb_names_the_flag() {
-  let assert Some(hint) = issue_synonym("priority")
-  assert hint == "unknown issue command 'priority'; to change it use 'lll issue update KEY --priority <name>'"
-  assert issue_synonym("title").is_none()
-}
-
 /// Two 1.0 fleet agents (case 13) stranded their own claims and read only
 /// "nothing to do"; the refusal names what they still hold.
 #[test]
@@ -731,18 +722,3 @@ fn an_empty_agenda_names_my_own_held_claims() {
   assert nothing_to_do_message(NothingToDo { reason: Idle.Empty, mine: ["FLEET-8", "FLEET-9"] }).contains("; you hold claims on FLEET-8, FLEET-9")
 }
 
-/// 1.0 fleet case 20: 'issue note' and 'issue review' name the real verbs.
-#[test]
-fn note_and_review_point_at_comment_and_in_review() {
-  let assert Some(note) = issue_synonym("note")
-  assert note.contains("lll issue comment KEY-123")
-  let assert Some(review) = issue_synonym("review")
-  assert review.contains("--state in-review")
-}
-
-/// 1.0 fleet case 20, run 3: a key in the verb slot names the verb-first form.
-#[test]
-fn a_key_where_the_verb_goes_names_the_verb_first_form() {
-  let assert Some(hint) = issue_synonym("FLEET-4")
-  assert hint.contains("put the verb first: 'lll issue view FLEET-4'")
-}

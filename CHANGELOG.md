@@ -6,6 +6,33 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- `member access NAME --json` prints the member as the object
+  `member list --json` prints per item, and `skill list --json` prints the
+  list envelope of `{name, description}` (LLL-684). Both exited 2 before.
+
+### Changed
+
+- One command table and one parser read every command line before any
+  verb runs (LLL-684):
+  - `--help` and `-h` exit 0 on every noun and verb, print to stdout, and run
+    nothing.
+  - Usage lines list every flag the verb takes, with the values of a flag
+    that has a closed set (`[--state backlog|todo|...]`).
+  - A missing argument, an unknown flag or verb, and a value outside a
+    closed set (`--priority 9`) exit 2 before the verb runs.
+  - Recovery hints come from one rule, with the same wording everywhere.
+- Exit codes:
+  - `issue attach KEY`, `issue detach KEY` and `issue download KEY` with no
+    file name exit 2 (usage) instead of 1.
+  - `member access NAME --json` and `skill list --json` exit 0 instead of 2.
+
+### Fixed
+
+- `lll attach --key 'bad!'` is refused with exit 2, as LLL-628 intended; the
+  key check ran only for a retired spelling (LLL-684).
+
 ## [1.0.1] - 2026-10-12
 
 ### Fixed
