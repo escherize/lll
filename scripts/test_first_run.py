@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -40,7 +41,8 @@ def boot(directory, env, log):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         text = log.read_text()
-        if 'board  login ' in text:
+        # LLL-699: the bot hint closes every non-scratch banner.
+        if 'agent  own identity: ' in text:
             return child, text
         assert child.poll() is None, 'lll up exited: ' + text
         time.sleep(.1)
@@ -79,6 +81,27 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
                            (('board',), login)]:
             out = run(board_dir, env, *argv)
             assert out.returncode == 0 and want in out.stdout, (argv, out.stdout + out.stderr)
+
+        # LLL-699: the banner closes with a prompt an agent follows as pasted,
+        # from a directory with no .lll.toml, and never with the token.
+        hint = 'agent  own identity: lll bot create bot-NAME --env > agent.env'
+        prompt = banner[banner.index('agent  paste this into your agent:\n'):]
+        assert prompt.endswith(hint + '\n'), banner
+        assert f"\n  You're on lll team FIRST at {api}.\n" in prompt, prompt
+        assert re.search(r'token = "([^"]+)"', saved).group(1) not in banner, banner
+        out = run(board_dir, env, 'issue', 'create', '-t', 'For the agent')
+        assert out.returncode == 0 and 'FIRST-2' in out.stdout, out.stdout + out.stderr
+        agent_dir = root / 'agent'
+        agent_dir.mkdir()
+        commands = re.findall(r'`(lll [^`]+)`', prompt)
+        assert commands == ['lll attach --key FIRST', 'lll skill get software-factory', 'lll issue next --claim'], prompt
+        for command in commands:
+            out = run(agent_dir, env, *shlex.split(command)[1:])
+            assert out.returncode == 0, (command, out.stdout + out.stderr)
+        assert out.stdout.strip() == 'FIRST-2', out.stdout
+        bot = subprocess.run(hint.split(': ', 1)[1].replace('lll', shlex.quote(binary), 1).replace('bot-NAME', 'bot-first'),
+                             shell=True, cwd=agent_dir, env=env, text=True, capture_output=True, timeout=30)
+        assert bot.returncode == 0 and 'LLL_TOKEN=' in (agent_dir / 'agent.env').read_text(), bot.stdout + bot.stderr
 
         # An invite's temporary password, replaced by the member itself.
         out = run(board_dir, env, 'member', 'invite', 'kim', '--email', 'kim@example.com', '--team', 'FIRST')
@@ -142,8 +165,11 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
         assert 'cli    not logged in to this board: the home config points the CLI at https://hosted.example.invalid' \
             in banner, banner
         assert 'token' not in hosted.read_text() and 'hosted.example.invalid' in hosted.read_text()
+        # LLL-699: the CLI is not logged in here, so only the bot hint.
+        assert 'paste this into your agent' not in banner, banner
+        assert banner.rstrip('\n').endswith('\nagent  own identity: lll bot create bot-NAME --env > agent.env'), banner
     finally:
         os.killpg(child.pid, 15)
         child.wait(timeout=15)
 
-print('first run: README walk, CLI auto-login, own password change and a kept hosted url passed')
+print('first run: README walk, CLI auto-login, a pasted agent prompt, own password change and a kept hosted url passed')

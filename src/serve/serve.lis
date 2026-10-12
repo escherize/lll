@@ -95,6 +95,7 @@ pub fn run_server(
   port: int,
   refresh: Option<fn() -> Result<string, pb.CliError>>,
   admin_ui: bool,
+  trailer: Slice<string>,
 ) -> Result<(), pb.CliError> {
   // `lll up` resolved the gate's token (generated when unset) into these
   // settings before any request could arrive, so the handlers and the
@@ -188,6 +189,10 @@ pub fn run_server(
   fmt.Println(
     f"board  login {board_url}/?board_token={board_tok} (sets a cookie; LLL_BOARD_TOKEN pins it)",
   )
+  // Lines `lll up` wants after the board's, which close the banner.
+  for line in trailer {
+    fmt.Println(line)
+  }
   // LLL-676: a loopback board answers only loopback Host names, which
   // refuses DNS-rebinding pages (the API listener checks the same).
   match http.Serve(listener, gopb.LoopbackHostGuard(bind, mux)) {

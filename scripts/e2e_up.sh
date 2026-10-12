@@ -127,6 +127,16 @@ grep -q 'admin-local-123' "$UP_LOG" && fail "banner still names the well-known f
 [ "$(stat -f '%Lp' "$ADMIN_FILE" 2>/dev/null || stat -c '%a' "$ADMIN_FILE")" = "600" ] || fail "generated admin file is not 0600"
 ADMIN_PASS=$(jq -r .password "$ADMIN_FILE")
 [ "${#ADMIN_PASS}" -ge 40 ] || fail "generated admin password is short"
+# LLL-699: a --pb-dir boot leaves the CLI logged out, so the banner closes
+# with only the bot hint: no agent prompt, and no secret beside it.
+for _ in $(seq 1 50); do
+  grep -qF 'agent  own identity: ' "$UP_LOG" && break
+  sleep 0.1
+done
+grep -qxF 'agent  own identity: lll bot create bot-NAME --env > agent.env' "$UP_LOG" \
+  || fail "--pb-dir banner lacks the bot hint: $(cat "$UP_LOG")"
+grep -qF 'paste this into your agent' "$UP_LOG" && fail "--pb-dir banner printed the agent prompt"
+grep -qF "$ADMIN_PASS" "$UP_LOG" && fail "--pb-dir banner printed the admin password"
 grep -q '/_/' "$UP_LOG" && fail "default banner advertised administration UI"
 grep -q "port $WEB_PORT taken" "$UP_LOG" || fail "web port move not printed"
 # LLL-648: on this machine 'lll board' prints a link that signs the browser in.

@@ -399,6 +399,7 @@ password in its own data directory's .lll-admin.json."),
   }
   // A demo boot points the CLI at itself (demo.lis), and scratch and shared
   // boots write their own CLI config.
+  let mut cli_saved = false
   if !scratch && share_bind == "" && !demo {
     let home = ctx.settings.load_home().map_err(pb.failed)?
     let plan = cli_login_plan(
@@ -412,10 +413,16 @@ password in its own data directory's .lll-admin.json."),
         db_url,
       },
     )
+    cli_saved = match plan {
+      CliLogin.Save => true,
+      CliLogin.Already | CliLogin.Untouched(_) | CliLogin.Keep(_) => false,
+    }
     for line in log_cli_in(ctx, member.name, db_url, plan, src.token, (cfg.url, src.url))? {
       fmt.Println(line)
     }
   }
+  // A scratch boot's CLI needs the scratch config, so no agent line fits it.
+  let agent = if scratch { [] } else { agent_lines(cli_saved, team, db_url) }
   // The board binds in microseconds; a browser takes far longer to launch,
   // so opening before run_server blocks is not a race worth guarding.
   let board_url = serve.advertised_board_url(ctx.settings, chosen)
@@ -483,7 +490,7 @@ password in its own data directory's .lll-admin.json."),
       fmt.Println(f"could not open a browser: {e.message}")
     }
   }
-  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui")))
+  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"), agent))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no
@@ -558,6 +565,24 @@ only if that server is yours: LLL_URL={db_url} lll up (this sends your admin cre
     Some(config.Source.HomeFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
       Some(config.Source.Default) | None => None,
   }
+}
+
+/// Pure. The lines that close the banner (LLL-699). When this boot just
+/// logged the CLI in, a prompt an agent on this machine can follow as pasted,
+/// from any directory: the saved login lives in the home config, but the
+/// team does not, so the prompt attaches first. Otherwise only the hint for
+/// an agent's own identity. Never a token: a host banner lands in server logs.
+fn agent_lines(cli_saved: bool, team: string, url: string) -> Slice<string> {
+  let hint = "agent  own identity: lll bot create bot-NAME --env > agent.env"
+  if !cli_saved { return [hint] }
+  [
+    "agent  paste this into your agent:",
+    f"  You're on lll team {team} at {url}.",
+    f"  Run `lll attach --key {team}` in your working directory first.",
+    "  Run `lll skill get software-factory` and follow it.",
+    "  Claim before you edit: `lll issue next --claim`.",
+    hint,
+  ]
 }
 
 fn loopback_bind(settings: config.Settings) -> bool {

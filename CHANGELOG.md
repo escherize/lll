@@ -6,6 +6,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- `lll up` closes its banner with a prompt to paste into a local coding agent
+  when it has just logged the CLI in (LLL-699). The prompt names the team and
+  the API url, attaches the agent's directory to the team (the saved login
+  does not carry the team), points at `lll skill get software-factory` and
+  claims with `lll issue next --claim`; every command works as printed from
+  another directory on the same machine. A last line, `agent  own identity:
+  lll bot create bot-NAME --env > agent.env`, shows how to give the agent its
+  own member. A boot that does not log the CLI in (`--pb-dir`, a host bind, or
+  a CLI already logged in or kept on another server) prints only that hint.
+  The banner prints no token or password for either case.
+
 ## [1.0.1] - 2026-10-12
 
 ### Fixed
