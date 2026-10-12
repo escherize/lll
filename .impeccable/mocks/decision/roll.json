@@ -1,0 +1,19 @@
+{
+  "seed": "7e659f1c",
+  "scope": "surface",
+  "mode": "persuade",
+  "command": "concept-seed.mjs --scope surface --mode persuade",
+  "dealt": [7, 6, 4],
+  "ranked_structures": [
+    "1 split-screen live demo (terminals + board)",
+    "2 one issue's journey across harnesses",
+    "3 topology map of machines wired to one server",
+    "4 the event stream (lll watch as the page)",
+    "5 the board as the page",
+    "6 the proof ledger",
+    "7 two doors, one board (local / online)"
+  ],
+  "cards": {"two-doors": 7, "ledger": 6, "stream": 4},
+  "comps": "google/nano-banana-2 on Replicate, refs: .impeccable/review/current-hero.png, docs/board.png",
+  "user_choice": "two-doors hero + ledger section + scripted playback (user, in chat: '1 and 2 are sick' then 'yup')"
+}

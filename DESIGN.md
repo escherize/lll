@@ -32,6 +32,12 @@ colors:
   avatar-moss: "#82c99a"
   avatar-ink: "#0a1620"
   scrim: "rgba(6, 7, 8, 0.62)"
+  landing-door-text: "#f3e3d3"
+  landing-ink-voice: "#3b2a18"
+  landing-ink-wash: "rgba(26, 15, 6, 0.1)"
+  landing-ink-wash-hover: "rgba(26, 15, 6, 0.18)"
+  landing-ink-hairline: "rgba(26, 15, 6, 0.22)"
+  landing-scrollbar: "#2a2e34"
 typography:
   title:
     fontFamily: "Inter Variable, system-ui, sans-serif"
@@ -70,6 +76,39 @@ typography:
     select-flash: "12.5px"
     base: "13px"
     title: "19px"
+  landing-display:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "clamp(44px, 6.5vw, 84px)"
+    fontWeight: 800
+    lineHeight: 0.98
+    letterSpacing: "-0.038em"
+    fontFeature: "cv05"
+  landing-door-command:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "clamp(34px, 4.2vw, 54px)"
+    fontWeight: 800
+    lineHeight: 1
+    letterSpacing: "-0.035em"
+    fontFeature: "cv05"
+  landing-headline:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "clamp(32px, 4.4vw, 52px)"
+    fontWeight: 800
+    lineHeight: 1.04
+    letterSpacing: "-0.032em"
+    fontFeature: "cv05"
+  landing-intro:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "17.5px"
+    fontWeight: 400
+    lineHeight: 1.6
+    fontFeature: "cv05"
+  landing-body:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "16px"
+    fontWeight: 400
+    lineHeight: 1.6
+    fontFeature: "cv05"
 rounded:
   indicator: "1px"
   focus: "4px"
@@ -77,6 +116,8 @@ rounded:
   base: "6px"
   lg: "8px"
   pill: "999px"
+  landing-panel: "10px"
+  landing-frame: "12px"
 spacing:
   hairline: "2px"
   xs: "5px"
@@ -120,6 +161,39 @@ components:
     textColor: "{colors.error-text}"
     rounded: "{rounded.base}"
     padding: "6px 10px"
+  landing-door-online:
+    backgroundColor: "{colors.ember-ink}"
+    textColor: "{colors.landing-door-text}"
+    rounded: "{rounded.landing-panel}"
+    padding: "22px 26px"
+  landing-door-pre:
+    backgroundColor: "{colors.ember-ink}"
+    textColor: "{colors.landing-door-text}"
+    rounded: "{rounded.lg}"
+    padding: "13px 16px"
+  landing-harness-chip:
+    backgroundColor: "{colors.ember-ink}"
+    textColor: "{colors.landing-door-text}"
+    rounded: "{rounded.pill}"
+    padding: "8px 15px 8px 12px"
+  landing-version-tag:
+    backgroundColor: "{colors.landing-ink-wash}"
+    textColor: "{colors.ember-ink}"
+    rounded: "{rounded.base}"
+    padding: "6px 8px"
+  landing-version-tag-hover:
+    backgroundColor: "{colors.landing-ink-wash-hover}"
+  landing-panel:
+    backgroundColor: "{colors.panel}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.landing-panel}"
+  landing-download:
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.base}"
+    padding: "8px 11px"
+  landing-download-hover:
+    backgroundColor: "{colors.hover}"
 ---
 
 # Design System: lll
@@ -509,3 +583,157 @@ stays outside page morphs. Static pages update their snapshot on reload.
   point of it, and it spends nothing from the Ember Budget because it is not
   an affordance. The exception covers that field and nothing else.
 - **Don't** add a light theme or theme switching; the world is dark-only.
+
+## Landing page (docs/index.html)
+
+The static landing page at escherize.com/lll is the Instrument Panel seen from
+outside: the same tonal ladder, Inter Variable, white-alpha hairlines and six
+state hues, with the board itself as the hero. Everything above stays in force
+on this page except the deviations named here. They are scoped to
+`docs/index.html` and do not license the same moves inside the product. Tokens
+prefixed `landing-` in the frontmatter belong to this page alone.
+
+### Colors
+
+The page splits into two grounds: an ember orange band (the header) carrying
+ink type, and the product's near-black ground below it.
+
+- **The band spends orange as a ground.** Ember Orange (#f0883e) fills the
+  whole header. Everything on it is Ember Ink (#1a0f06) or **Landing Ink
+  Voice** (`--ink-2`), the band's secondary text: nav links, the lede, the
+  local door's tag, the machine names under the chips. The band has its own
+  hairline, **Landing Ink Hairline**, used for the top-bar rule, the seam
+  between the doors and the version tag's border. The same ink at 0.1 alpha
+  (**Landing Ink Wash**, 0.18 on hover) fills the version tag. Selection and
+  focus invert inside the band: ink selection with orange text, and an ink
+  focus outline.
+- **Ink surfaces carry warm light text.** On the ink panels inside the band
+  (the online door, the local door's code block, the harness chips), text is
+  **Landing Door Text**, a warm off-white, never the product's cool
+  text-primary.
+- **Harness identity reuses the avatar palette.** Each harness keeps one hue
+  wherever it appears (chip dot, terminal prompt, card claim dot): Claude Code
+  = Avatar Sand, Codex = Avatar Sky, pi = Avatar Moss, opencode = Avatar
+  Violet, any shell or CI = text-secondary gray. Set per element as `--h`;
+  no new hues.
+- **Scrollbar** uses **Landing Scrollbar** on the ground color.
+
+**The Two Grounds Rule.** Orange is a ground only in the band. Below the
+band, the Ember Budget applies as it does in the product: orange marks focus,
+the playback cursor, the card that just moved, and a docs link on hover. Data
+below the band, such as the exit codes in the 1.0 table, stays in the gray
+text voices.
+
+### Typography
+
+One face, Inter Variable, with `font-feature-settings: "cv05"` on the body so
+the lowercase l carries a tail and "lll" never reads as "III". Page body text
+is 16px/1.6 (the product's 13px is too small for reading copy at page width).
+
+- **Display** (landing-display): the h1 only, balanced wrapping.
+- **Door command** (landing-door-command): the two door headings ("lll up",
+  "One binary. One volume.").
+- **Headline** (landing-headline): section titles, max 18ch, balanced.
+- **Intro** (landing-intro): the paragraph under each section title, text-2
+  with text-primary `strong`, measure 62ch. The lede under the h1 is
+  `clamp(17px, 1.6vw, 20px)`/1.5 in Landing Ink Voice, 46ch.
+- **Small steps** reuse the product register: 11px/600 uppercase +0.02em for
+  ledger headers and tier rows, 12-13.5px monospace for code, ledger counts
+  and exit codes, 13.5px text-3 captions.
+
+**The Display Exception Rule.** This page is the one place type goes above
+the product's 19px ceiling. Size comes with weight 800 and tracking between
+-0.032em and -0.038em, in three steps (display, door command, headline). The
+Weight-Not-Size Rule still governs the product.
+
+### Layout
+
+- Container 1120px with 28px gutters (20px under 560px); sections open with
+  136px of top space (104px under 900px).
+- **The band and the board straddle.** The band carries 170px of bottom
+  padding and the board screenshot pulls up 164px into it, so the real board
+  raster sits across the band's lower edge (120px / -96px under 900px). The
+  frame widens to 1240px, past the text column.
+- **Two doors, one seam.** The local and online doors sit in a two-column
+  grid divided by a 1px ink seam, bottom-aligned. Under 900px they stack and
+  the seam goes away.
+- **Harness row.** Five chips in a five-column grid, each with its machine
+  name below, wired into the board by an SVG of curved ink strokes (1.25px,
+  0.55 opacity, non-scaling) that converge on three arrow tips. The wires are
+  hidden under 900px; the chips go to three columns, then two.
+- Playback is a 0.9fr / 1.1fr grid (terminal, board); the proof ledger is a
+  table beside a 300px sticky aside. Both stack under 900px.
+- Breakpoints: 900px and 560px.
+
+### Elevation & Depth
+
+The product's tonal ladder and card whisper apply below the band. The page
+adds two shadows, both on hero objects only:
+
+- **Door shadow**: ink-tinted, under the online door
+  (`0 18px 40px -20px rgba(26,15,6,0.7)`) and, lighter, under the local door's
+  code block (`0 12px 28px -14px rgba(26,15,6,0.55)`). The ink color keeps the
+  shadow warm against the orange.
+- **Board frame**: `0 40px 80px -30px rgba(0,0,0,0.7), 0 2px 6px rgba(0,0,0,0.35)`
+  on the screenshot frame, lifting the board off the band edge.
+
+**The Hero-Only Shadow Rule.** Large shadows exist on the doors and the board
+frame and nowhere else. Panels below the band (terminal, mini board, code
+block, exit-code table) stay tonal: panel surface plus strong hairline.
+
+### Shapes
+
+Product radii carry over (6px buttons and cards, 8px code blocks and mini-board
+columns, 5px tags and the mark, pill chips). The page adds **10px**
+(landing-panel) for its own containers: the online door, the terminal and
+mini-board panels, the code block, the exit-code table, the aside image. It
+also adds **12px** (landing-frame) for the board screenshot frame alone.
+
+### Components
+
+- **Doors.** Each door is a heading unit: the door command, then a trailing
+  outlined tag in currentColor (12px/600, 5px radius, raised 0.3em), then a code
+  block with dimmed (0.55) unselectable `$` prompts and hanging indents. The
+  local door sits on the band with an ink code block. The online door is an
+  ink panel with an orange command and tag, and its code block is a
+  white-alpha inset.
+- **Version tag.** A monospace "1.0" link set beside the h1: ink wash, ink
+  hairline, 6px radius.
+- **Harness chip.** An ink pill with warm light text and an 8px dot in the
+  harness hue. It labels identity and is not a control.
+- **Terminal-to-board playback.** A terminal panel and a four-column mini
+  board (todo, in progress, in review, done) with the product's drawn state
+  icons. It starts when 35% of it is in view. Commands type at 22ms per
+  character after a 260ms lead, output follows 320ms later, then the affected
+  card updates and moves. The move is FLIP: the node is reparented, then
+  animated from its old position over 650ms on `cubic-bezier(0.16, 1, 0.3, 1)`.
+  The card that just changed takes an orange border on the hover surface
+  (`hot`, 0.4s transition). Prompt names are colored by harness hue; the
+  cursor is an orange block on a 1s step blink. A Replay button appears when
+  the run ends. Under `prefers-reduced-motion` the whole script renders at once
+  in its final state, with no typing and no movement; without JavaScript a
+  `<noscript>` transcript stands in.
+- **Proof ledger.** A table with tabular numerals: two-digit case numbers,
+  the use case with an optional text-3 note, a row of 11px dots (one per
+  agent) and a right-aligned count. A correct board is a filled State Done dot;
+  a miss is a hollow dot with a 1.5px text-3 ring, never red. Rows with a miss
+  lift their count to text-primary. Uppercase tier rows (Read, Write,
+  Multi-step, Two agents at once) group the cases. A dot key sits in the aside.
+- **Exit-code strip.** A 520px table on the panel surface with a 10px radius and
+  hairline rows. Codes are 13.5px/600 monospace; meanings are in text-2. The
+  shipped codes are orange (see the Two Grounds Rule).
+- **Docs index.** A three-column grid (two under 900px, one under 560px) under a
+  strong hairline: 16px/650 title with a text-3 trailing arrow, 14px text-2
+  description at 32ch, hairline row dividers, title turns orange on hover.
+- **Downloads.** Monospace link buttons on the raised surface with a strong
+  hairline, 36px minimum height, hover steps to the hover surface.
+
+### Do's and Don'ts (page)
+
+- **Do** take harness color from the avatar palette through `--h`, so a
+  harness reads the same in the chip, the terminal and on the card.
+- **Do** render the playback's final state at once under reduced motion.
+- **Do** mark a miss with a hollow ring, not a red or tinted dot. The One
+  Error Voice Rule still holds.
+- **Don't** carry the band's orange ground, display sizes or hero shadows
+  into the product.

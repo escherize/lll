@@ -1,0 +1,41 @@
+{
+  "title": "lll 1.0 landing page: choose the structure",
+  "question": "The look stays: ember orange, instrument-panel dark, Inter. The roll dealt three page structures for 'many agents, many machines, many harnesses, one board'. Lock one, steer it, or re-roll.",
+  "options": [
+    {
+      "id": "two-doors",
+      "label": "Two doors, one board",
+      "kicker": "THE ROLL",
+      "thesis": "Host it on your laptop or online; every agent, anywhere, lands on the same live board.",
+      "palette": ["#f0883e", "#1a0f06", "#0e0f11", "#191c20", "#e8eaed"],
+      "materials": ["orange band split by a hairline seam", "real board screenshot", "harness chips"],
+      "viewport": "Hero split into two doors, left 'on your machine: lll up' on orange, right 'online: one binary and a volume' on dark; both feed down into one real board screenshot, with Claude Code, Codex, pi, opencode and CI chips arriving from either side.",
+      "risk": "The hosting choice can read as a fork in the product rather than two routes to one thing.",
+      "comp": ".impeccable/mocks/decision/two-doors.webp"
+    },
+    {
+      "id": "ledger",
+      "label": "The proof ledger",
+      "thesis": "Lead with how lll was tested: fresh agents, real tasks, judged on the server's own state.",
+      "palette": ["#0e0f11", "#141619", "#f0883e", "#4cb782", "#e8eaed"],
+      "materials": ["ledger table with drawn state icons", "tabular numerals", "board screenshot as ground truth"],
+      "viewport": "Headline over a 20-row ledger of use cases, each with 10 worker dots in the board's own state colours and a pass mark; the board screenshot sits beside it labelled 'judged here'; install and lll up are one line under the headline.",
+      "risk": "Proof before promise: a visitor who doesn't yet care about agents may not read past the table.",
+      "comp": ".impeccable/mocks/decision/ledger.webp"
+    },
+    {
+      "id": "stream",
+      "label": "The event stream",
+      "thesis": "The page is an lll watch stream: agents on different machines and harnesses act, the board answers live.",
+      "palette": ["#0e0f11", "#111316", "#f0883e", "#8d7ce6", "#e0b13e"],
+      "materials": ["scripted terminal playback", "NDJSON event rows", "live-morphing board"],
+      "viewport": "Full-width split: left a terminal plays back events (codex on ci-runner claims ENG-12, claude-code on a laptop comments, pi on a homelab hands off), right the board moves the same cards in step; the orange band carries the headline above.",
+      "risk": "Motion carries the story, so the static and reduced-motion versions must make the same point on their own.",
+      "comp": ".impeccable/mocks/decision/stream.webp"
+    }
+  ],
+  "reroll": true,
+  "steer": true,
+  "canon": false,
+  "buildPath": { "value": "comp", "toggle": true }
+}

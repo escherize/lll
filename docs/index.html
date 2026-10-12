@@ -3,567 +3,605 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="lll is a Linear-style issue tracker in one binary: CLI-first, self-hosted, with a live web board. Teams, ENG-123 identifiers, states, projects, labels and markdown comments.">
+<title>lll - one board for every agent</title>
+<meta name="description" content="lll is a Linear-style issue tracker that coding agents share. Claude Code, Codex, pi, opencode or a CI script, on any machine, claim work, hand it off and close it on one live board. One binary, on your laptop or online.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#f0883e">
-<meta property="og:title" content="lll">
-<meta property="og:description" content="A Linear-style issue tracker in one binary. Terminal first, browser second.">
+<meta property="og:title" content="lll - one board for every agent">
+<meta property="og:description" content="A Linear-style issue tracker your coding agents share. One binary, on your laptop or online. 1.0 is out.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://escherize.com/lll/">
+<meta property="og:image" content="https://escherize.com/lll/board-agents.webp">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f0883e'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='19' font-weight='800' fill='%231a0f06' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E">
+<link rel="preload" href="fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-  html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; }
-  img { max-width: 100%; }
-</style>
-<title>lll</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-<style>
-  /* Built on the project's own design system (DESIGN.md), not a new one:
-     the exact tonal ladder, Inter, white-alpha hairlines, the rationed ember
-     accent, the real state hues, 6px radii.
-
-     Two deliberate deviations, both because this is a page rather than the
-     product surface DESIGN.md governs:
-       1. Display type above the 19px ceiling. The Weight-Not-Size Rule keeps
-          the board dense; a landing page has one thing to say first. Kept
-          modest and carried by weight (800) and tighter tracking, which is
-          the system's own character.
-       2. Nothing else. The monospace is the system's own declared `code`
-          role (ui-monospace stack, 12px), not a new face.
-
-     Single-theme dark, deliberately: DESIGN.md is a near-black system with no
-     light mode, and PRODUCT.md pins the viewing context as "dark rooms,
-     editor-adjacent". Every colour is painted explicitly so the page holds on
-     any host ground. */
-  :root {
-    --bg:          #0e0f11;
-    --bg-rail:     #111316;
-    --bg-panel:    #141619;
-    --bg-raised:   #191c20;
-    --bg-hover:    #1d2126;
-    --text:        #e8eaed;
-    --text-2:      #9299a2;
-    --text-3:      #828994;
-    --accent:      #f0883e;
-    --accent-hover:#f79b57;
-    --accent-deep: #c96a25;
-    --accent-dim:  rgba(240,136,62,0.16);
-    --ember-ink:   #1a0f06;
-    --ember-ink-2: #3b2a18;   /* 5.42:1 on ember orange, verified */
-    --border:      rgba(255,255,255,0.07);
-    --border-str:  rgba(255,255,255,0.12);
-    --st-todo:     #9299a2;
-    --st-progress: #e0b13e;
-    --st-review:   #8d7ce6;
-    --st-done:     #4cb782;
-    --radius:      6px;
-    --card-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  /* lll's own design system (DESIGN.md): the tonal ladder, Inter Variable,
+     white-alpha hairlines, the rationed ember orange, the six state hues.
+     Page-only deviation: display type above the product's 19px ceiling,
+     carried by weight 800 and tight tracking. */
+  @font-face {
+    font-family: "Inter Variable";
+    src: url("fonts/InterVariable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
   }
-
+  :root {
+    --bg: #0e0f11; --bg-rail: #111316; --bg-panel: #141619;
+    --bg-raised: #191c20; --bg-hover: #1d2126;
+    --text: #e8eaed; --text-2: #9299a2; --text-3: #828994;
+    --accent: #f0883e; --accent-hover: #f79b57; --accent-dim: rgba(240,136,62,0.16);
+    --ink: #1a0f06; --ink-2: #3b2a18; --ink-line: rgba(26,15,6,0.22);
+    --line: rgba(255,255,255,0.07); --line-2: rgba(255,255,255,0.12);
+    --st-progress: #e0b13e; --st-review: #8d7ce6; --st-done: #4cb782;
+    --h-claude: #d8b06a; --h-codex: #7cc0e8; --h-pi: #82c99a;
+    --h-opencode: #9d8fe0; --h-ci: #9299a2;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
   *, *::before, *::after { box-sizing: border-box; }
-
+  html { -webkit-text-size-adjust: 100%; scrollbar-color: #2a2e34 var(--bg); }
   body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: "Inter", system-ui, sans-serif;
-    font-size: 15px;
-    line-height: 1.55;
-    font-weight: 400;
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 400 16px/1.6 "Inter Variable", system-ui, sans-serif;
+    font-feature-settings: "cv05";
     -webkit-font-smoothing: antialiased;
   }
-  ::selection { background: var(--accent-dim); }
+  img { max-width: 100%; height: auto; display: block; }
+  ::selection { background: var(--accent-dim); color: var(--text); }
+  .band ::selection { background: var(--ink); color: var(--accent); }
+  a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .band :focus-visible { outline-color: var(--ink); }
+  code, pre, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+  .prose { max-width: 62ch; }
+  p code, li code, dd code, td code {
+    font-size: 0.86em; background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus { left: 16px; top: 12px; z-index: 10; background: var(--ink); color: var(--accent); padding: 8px 12px; border-radius: 6px; }
 
-  .wrap { max-width: 900px; margin: 0 auto; padding: 0 26px; }
+  /* ---------- the orange band ---------- */
+  .band { background: var(--accent); color: var(--ink); padding-bottom: 170px; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 20px;
+         padding-block: 8px; border-bottom: 1px solid var(--ink-line); }
+  .mark { display: flex; align-items: center; gap: 9px; text-decoration: none; }
+  .mark b { width: 22px; height: 22px; border-radius: 5px; background: var(--ink); color: var(--accent);
+            font-size: 10px; font-weight: 800; line-height: 22px; text-align: center; }
+  .mark span { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  .top nav { display: flex; gap: 22px; }
+  .top nav a { font-size: 14px; font-weight: 600; color: var(--ink-2); text-decoration: none;
+               min-height: 44px; display: inline-flex; align-items: center; }
+  .top nav a:hover { color: var(--ink); text-decoration: underline; }
 
-  code, pre, .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  p code {
-    font-size: 12.5px;
-    color: var(--text);
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1px 5px;
-  }
-
-  /* The system's only uppercase: 11px, 600, +0.02em */
-  .label {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--text-3);
-  }
-
-  /* ---------- masthead ---------- */
-  header.top { border-bottom: 1px solid rgba(26,15,6,0.18); }
-  .top-in {
-    display: flex; align-items: center; justify-content: space-between;
-    /* padding-block, not the shorthand: `padding: 16px 0` on this element
-       silently zeroed .wrap's own 26px inline padding (both classes sit on the
-       same div), so the masthead ran 18px past every other row on the page. */
-    gap: 20px; flex-wrap: wrap; padding-block: 16px;
-  }
-  .mark { display: flex; align-items: center; gap: 9px; }
-  .mark-badge {
-    width: 22px; height: 22px; border-radius: 5px;
-    background: var(--ember-ink);
-    color: var(--accent);
-    font-size: 10px; font-weight: 800; line-height: 22px; text-align: center;
-    flex: none;
-  }
-  .mark-name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--ember-ink); }
-  .top-links { display: flex; gap: 18px; flex-wrap: wrap; min-width: 0; }
-  .top-links a {
-    font-size: 13px; color: var(--ember-ink-2); text-decoration: none;
-    font-weight: 600;
-    display: inline-flex; align-items: center; min-height: 44px;
-  }
-  .top-links a:hover { color: var(--ember-ink); }
-
-  /* ---------- hero ----------
-     Committed, not Restrained: the brand register gives a Persuade surface
-     permission to let one saturated colour own the page, and a dark-and-muted
-     landing page ignores that as surely as a beige one does. The colour is the
-     product's own ember orange and the type on it is the ember ink DESIGN.md
-     already defines for exactly this pairing (7.44:1, verified). Everything
-     below the fold stays instrument-panel dark, so this is one focal moment
-     rather than a page-wide effect. */
-  .hero-band {
-    background: var(--accent);
-    color: var(--ember-ink);
-    border-bottom: 1px solid rgba(26,15,6,0.22);
-  }
-  .hero { padding: 84px 0 76px; }
-  .hero .label { color: var(--ember-ink-2); }
+  .hero { padding-top: 30px; }
   h1 {
-    font-size: clamp(46px, 8.6vw, 88px);
-    font-weight: 800;
-    line-height: 0.98;
-    letter-spacing: -0.035em;
-    margin: 16px 0 0;
-    text-wrap: balance;
-    color: var(--ember-ink);
+    margin: 0; font-size: clamp(44px, 6.5vw, 84px); font-weight: 800; line-height: 0.98;
+    letter-spacing: -0.038em; text-wrap: balance;
   }
-  h1 .quiet { color: var(--ember-ink-2); display: block; font-weight: 300; }
-  .lede {
-    margin: 26px 0 0; max-width: 46ch;
-    font-size: 19px; line-height: 1.5; color: var(--ember-ink-2);
-    text-wrap: pretty;
+  .ver {
+    display: inline-block; vertical-align: top; margin: 0.35em 0 0 0.2em;
+    font: 700 15px/1 var(--mono); letter-spacing: 0; color: var(--ink);
+    background: rgba(26,15,6,0.1); border: 1px solid var(--ink-line); border-radius: 6px;
+    padding: 6px 8px; text-decoration: none;
   }
-  .lede strong { color: var(--ember-ink); font-weight: 600; }
-  .hero p code {
-    background: rgba(26,15,6,0.10);
-    border-color: rgba(26,15,6,0.22);
-    color: var(--ember-ink);
-  }
-  /* The terminal on orange: the dark block is the hero's second voice. */
-  .hero .term { border-color: rgba(26,15,6,0.28); box-shadow: 0 6px 24px rgba(26,15,6,0.18); }
+  .ver:hover { background: rgba(26,15,6,0.18); }
+  .lede { margin: 14px 0 0; font-size: clamp(17px, 1.6vw, 20px); line-height: 1.5; color: var(--ink-2);
+          max-width: 46ch; }
+  .lede strong { color: var(--ink); font-weight: 650; }
 
-  /* ---------- terminal ---------- */
-  .term {
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--card-shadow);
-    margin: 26px 0;
-    overflow: hidden;
-  }
-  .term-head {
-    padding: 8px 13px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-rail);
-  }
-  .term-body { padding: 14px 16px; overflow-x: auto; }
-  pre {
-    margin: 0; font-size: 12.5px; line-height: 1.72;
-    white-space: pre; color: var(--text-2);
-    font-variant-numeric: tabular-nums;
-  }
-  pre .cmd { color: var(--text); font-weight: 500; }
-  pre .sig { color: var(--text-3); }
-  pre .key { color: var(--text); }
-  pre .note { color: var(--text-3); }
+  .doors { margin-top: 26px; display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr); gap: 0 40px; align-items: end; }
+  .seam { background: var(--ink-line); }
+  .door { min-width: 0; border-radius: 10px; display: flex; flex-direction: column; gap: 16px; }
+  .door .door-title { margin: 0; font-size: clamp(34px, 4.2vw, 54px); font-weight: 800; line-height: 1; letter-spacing: -0.035em; }
+  .tag { display: inline-block; vertical-align: middle; margin-left: 10px; font: 600 12px/1 "Inter Variable", system-ui, sans-serif;
+         letter-spacing: 0.01em; border: 1px solid currentColor; border-radius: 5px; padding: 5px 7px; position: relative; top: -0.3em; }
+  .door .panes { background: var(--ink); color: #f3e3d3; border-radius: 8px; box-shadow: 0 12px 28px -14px rgba(26,15,6,0.55); padding: 13px 16px; }
+  .door .panes pre { padding: 0; background: none; box-shadow: none; border: 0; }
+  .door pre { margin: 0; padding: 13px 16px; border-radius: 8px; font-size: 13.5px; line-height: 1.7; overflow-x: auto; }
+  .door pre .p { opacity: 0.55; user-select: none; }
+  .door pre { white-space: normal; }
+  .door pre .ln { display: block; white-space: pre-wrap; padding-left: 2ch; text-indent: -2ch; }
+  .door-local { padding: 0; }
+  .door-local .tag { color: var(--ink-2); }
+  .door-online { padding: 22px 26px 22px; background: var(--ink); color: #f3e3d3; box-shadow: 0 18px 40px -20px rgba(26,15,6,0.7); }
+  .door-online .door-title { color: var(--accent); }
+  .door-online .tag { color: var(--accent); }
+  .door-online pre { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
 
-  /* The Icon-Carries-Color Rule: state colour reaches the page only through
-     the state glyph the CLI prints; the text beside it stays gray. */
-  .st-todo     { color: var(--st-todo); }
-  .st-progress { color: var(--st-progress); }
-  .st-done     { color: var(--st-done); }
+  .agents { margin-top: 20px; position: relative; }
+  .agents ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .agents li { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; background: var(--ink); color: #f3e3d3;
+          border-radius: 999px; padding: 8px 15px 8px 12px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--h); }
+  .agents small { font: 500 12.5px/1 var(--mono); color: var(--ink-2); }
+  .wires { display: block; width: 100%; height: 52px; margin-top: 4px; overflow: visible; }
+  .wires path { fill: none; stroke: var(--ink); stroke-width: 1.25; opacity: 0.55; vector-effect: non-scaling-stroke; }
+  .wires .tip { opacity: 0.8; }
+
+  .shot { margin: -164px auto 0; max-width: 1240px; padding: 0 20px; }
+  .shot .frame { border-radius: 12px; border: 1px solid var(--line-2); overflow: hidden; background: var(--bg-rail);
+                 box-shadow: 0 40px 80px -30px rgba(0,0,0,0.7), 0 2px 6px rgba(0,0,0,0.35); }
+  .shot figcaption { margin: 14px 4px 0; font-size: 13.5px; color: var(--text-3); text-align: center; }
 
   /* ---------- sections ---------- */
-  section { padding: 76px 0; border-top: 1px solid var(--border); }
-  section:first-of-type { border-top: 0; }
-  h2 {
-    font-size: clamp(26px, 3.4vw, 34px); font-weight: 700;
-    letter-spacing: -0.025em; line-height: 1.1;
-    margin: 0 0 10px; color: var(--text); text-wrap: balance;
+  section.s { padding-top: 136px; }
+  h2.t { margin: 0; font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; letter-spacing: -0.032em;
+         line-height: 1.04; text-wrap: balance; max-width: 18ch; }
+  .s .intro { margin: 18px 0 0; font-size: 17.5px; color: var(--text-2); }
+  .s .intro strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- playback ---------- */
+  .play { margin-top: 44px; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 18px; }
+  .console, .mini { background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; min-width: 0; }
+  .console { display: flex; flex-direction: column; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+         padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--text-3); }
+  .bar .mono { font-size: 12px; }
+  .replay { font: 600 12.5px/1 "Inter Variable", system-ui, sans-serif; color: var(--text); background: var(--bg-raised);
+            border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; cursor: pointer;
+            min-height: 30px; transition: background .15s; }
+  .replay:hover { background: var(--bg-hover); }
+  .replay:disabled { color: var(--text-3); cursor: default; }
+  .log { margin: 0; padding: 16px 16px 20px; font: 13px/1.75 var(--mono); min-height: 372px; overflow-x: auto; white-space: pre-wrap; }
+  .log .row { display: block; }
+  .log .cmd { color: var(--text); }
+  .log .who { color: var(--h); }
+  .log .dollar { color: var(--text-3); }
+  .log .out { color: var(--text-2); display: block; }
+  .log .cur { display: inline-block; width: 7px; height: 1.05em; vertical-align: -0.18em; background: var(--accent);
+              animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .mini { padding: 12px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-content: start; }
+  .mini .bar { grid-column: 1 / -1; margin: -12px -12px 4px; }
+  .col { background: var(--bg-rail); border: 1px solid var(--line); border-radius: 8px; padding: 6px; min-height: 300px; }
+  .col h3 { margin: 2px 4px 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+  .col h3 span { color: var(--text-3); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .ic { width: 12px; height: 12px; flex: none; }
+  .card { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px;
+          margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.25); font-size: 12px; line-height: 1.35;
+          transition: border-color .4s, box-shadow .4s; }
+  .card .k { font: 500 11px/1 var(--mono); color: var(--text-3); display: flex; justify-content: space-between; }
+  .card .k em { font-style: normal; color: var(--text-2); display: inline-flex; align-items: center; gap: 3px; }
+  .card .bub { width: 11px; height: 11px; fill: none; stroke: var(--text-2); stroke-width: 1.2; stroke-linejoin: round; }
+  .card .ti { margin: 5px 0 6px; color: var(--text); }
+  .card .by { display: flex; align-items: center; gap: 5px; font: 500 10.5px/1.2 var(--mono); color: var(--text-2); min-height: 13px; }
+  .card .by i { width: 6px; height: 6px; border-radius: 50%; background: var(--h); flex: none; }
+  .card .by.none { color: var(--text-3); }
+  .card.hot { border-color: var(--accent); background: var(--bg-hover); }
+
+  /* ---------- ledger ---------- */
+  .ledger-wrap { margin-top: 48px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; align-items: start; }
+  table.ledger { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .ledger caption { text-align: left; font-size: 13px; color: var(--text-3); padding-bottom: 12px; }
+  .ledger th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+               color: var(--text-3); padding: 0 10px 10px 0; border-bottom: 1px solid var(--line-2); }
+  .ledger td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; vertical-align: middle; }
+  .ledger td.n { font: 500 12.5px var(--mono); color: var(--text-3); width: 34px; }
+  .ledger td.c { color: var(--text); }
+  .ledger td.c small { display: block; font-size: 12px; color: var(--text-3); }
+  .ledger td.d { white-space: nowrap; width: 1%; }
+  .ledger td.r { font: 600 13px var(--mono); text-align: right; width: 54px; color: var(--text-2); }
+  .ledger tr.tier td { padding-top: 22px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-3); }
+  .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px;
+         background: var(--st-done); }
+  .dot.miss { background: transparent; border: 1.5px solid var(--text-3); }
+  .ledger tr.has-miss td.r { color: var(--text); }
+  .aside { position: sticky; top: 28px; font-size: 15px; color: var(--text-2); }
+  .aside p { margin: 0 0 18px; }
+  .judged { margin: 0 0 26px; }
+  .judged img { border-radius: 10px; border: 1px solid var(--line-2); }
+  .judged figcaption { margin-top: 10px; font-size: 13px; color: var(--text-3); }
+  .aside strong { color: var(--text); font-weight: 600; }
+  .aside .key { display: flex; flex-direction: column; gap: 8px; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13.5px; }
+
+  /* ---------- 1.0 ---------- */
+  .contract { margin-top: 40px; max-width: 520px; }
+  table.codes { width: 100%; border-collapse: collapse; background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
+  .codes td { padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .codes tr:last-child td { border-bottom: 0; }
+  .codes td:first-child { font: 600 13.5px var(--mono); color: var(--text); width: 64px; }
+  .codes td:last-child { color: var(--text-2); }
+
+  /* ---------- start ---------- */
+  .start { margin-top: 36px; max-width: 720px; }
+  .block { background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; min-width: 0; }
+  .block h3 { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--text-2); }
+  .block .term pre, .block pre { margin: 0; padding: 16px; font-size: 13px; line-height: 1.75; overflow-x: auto; color: var(--text); }
+  .block pre .p { color: var(--text-3); user-select: none; }
+  .block pre .o { color: var(--text-2); }
+  .block pre .c { color: var(--text-3); }
+  .dl { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }
+  .dl a { font: 600 12.5px var(--mono); color: var(--text); text-decoration: none; background: var(--bg-raised);
+          border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 11px; min-height: 36px; display: inline-flex; align-items: center; }
+  .dl a:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.2); }
+
+  /* ---------- docs ---------- */
+  .docs { margin-top: 44px; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-2); }
+  .docs a { display: block; padding: 22px 24px 24px 0; border-bottom: 1px solid var(--line); text-decoration: none; }
+  .docs a:hover b { color: var(--accent); }
+  .docs b { display: block; font-size: 16px; font-weight: 650; color: var(--text); transition: color .15s; }
+  .docs b::after { content: " \2192"; color: var(--text-3); font-weight: 500; }
+  .docs span { display: block; margin-top: 5px; font-size: 14px; color: var(--text-2); max-width: 32ch; }
+
+  footer { margin-top: 136px; border-top: 1px solid var(--line); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding-block: 28px 40px;
+                 font-size: 13.5px; color: var(--text-3); }
+  footer a { color: var(--text-2); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    .doors { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .seam { display: none; }
+    .agents ul { grid-template-columns: repeat(3, 1fr); row-gap: 16px; }
+    .wires { display: none; }
+    .band { padding-bottom: 120px; }
+    .shot { margin-top: -96px; }
+    .play, .ledger-wrap { grid-template-columns: 1fr; }
+    .aside { position: static; }
+    .docs { grid-template-columns: 1fr 1fr; }
+    section.s { padding-top: 104px; }
   }
-  .sec-note { margin: 0; color: var(--text-2); font-size: 17px; max-width: 58ch; }
-  h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.012em; margin: 0; color: var(--text); }
-
-  /* Numbered because install → sign in → attach genuinely is ordered. */
-  .steps { margin-top: 44px; }
-  /* Grid and flex children default to min-width:auto, so they refuse to
-     shrink below the widest unbroken line in the transcripts and push the
-     whole document sideways. The scroll belongs to .term-body alone. */
-  .step > *, .grid > *, .term, .term-body { min-width: 0; }
-  .step { display: grid; grid-template-columns: 2.6em 1fr; gap: 0 20px; align-items: start; }
-  .step + .step { margin-top: 56px; }
-  .step-n {
-    font-size: 28px; font-weight: 800; color: var(--accent);
-    font-variant-numeric: tabular-nums; letter-spacing: -0.04em;
-    line-height: 1; padding-top: 1px;
+  @media (max-width: 560px) {
+    .wrap { padding: 0 20px; }
+    .top nav { gap: 16px; }
+    .top nav a.hide-sm { display: none; }
+    .hero { padding-top: 52px; }
+    .door-online { padding: 22px 20px 20px; }
+    .door-local { padding-top: 8px; }
+    .door pre { overflow-wrap: anywhere; font-size: 12.5px; }
+    .agents ul { grid-template-columns: repeat(2, 1fr); }
+    .mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .col { min-height: 0; }
+    .log { min-height: 0; font-size: 12px; }
+    .ledger td.c small { display: none; }
+    .dot { width: 9px; height: 9px; margin-right: 3px; }
+    .docs { grid-template-columns: 1fr; }
+    .shot { padding: 0 10px; }
   }
-  .step p { margin: 9px 0 0; color: var(--text-2); max-width: 58ch; font-size: 16px; text-wrap: pretty; }
-  .step .term { margin: 18px 0 0; }
-
-  .shot {
-    margin: 26px 0 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--card-shadow);
-    overflow: hidden;
-    line-height: 0;
-  }
-  .shot img { display: block; width: 100%; height: auto; }
-
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 30px 36px; margin-top: 30px; }
-  .feat h4 { font-size: 15px; font-weight: 600; margin: 0 0 6px; color: var(--text); letter-spacing: -0.01em; }
-  .feat p { margin: 0; font-size: 15px; line-height: 1.55; color: var(--text-2); text-wrap: pretty; }
-
-  p.body { color: var(--text-2); max-width: 62ch; font-size: 17px; text-wrap: pretty; }
-  p.body strong { color: var(--text); font-weight: 500; }
-
-  /* Ember Budget Rule: orange means "you can act here". Downloads and links
-     are actions; headings, numbers and rules are not. */
-  a.act {
-    font-size: 13px; font-weight: 600; text-decoration: none;
-    color: var(--accent);
-    background: var(--ember-ink);
-    border: 1px solid var(--ember-ink);
-    border-radius: var(--radius);
-    padding: 0 16px;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    transition: transform 160ms cubic-bezier(0.22,1,0.36,1), background-color 160ms;
-  }
-  a.act:hover { background: #2b1d0f; transform: translateY(-1px); }
-  a.act:active { transform: none; }
-  .dl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
-  a.link { color: var(--accent); text-decoration: none; font-weight: 500; }
-  a.link:hover { color: var(--accent-hover); }
-
-  footer {
-    border-top: 1px solid var(--border);
-    padding: 26px 0 64px;
-    font-size: 12.5px; color: var(--text-3);
-    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  }
-  footer a { color: var(--text-2); text-decoration: none; }
-  footer a:hover { color: var(--text); }
-
-  .top-links a, a.link, footer a { transition: color 140ms cubic-bezier(0.22,1,0.36,1); }
-  a:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 4px;
-  }
-  /* Reduced motion keeps the colour feedback and drops only the movement. */
   @media (prefers-reduced-motion: reduce) {
-    a.act { transition: background-color 140ms; }
-    a.act:hover { transform: none; }
-  }
-  @media (max-width: 600px) {
-    .top-links { gap: 14px; }
-    .step { grid-template-columns: 1fr; }
-    .step-n { padding-top: 0; margin-bottom: 4px; }
-    pre { font-size: 11px; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
   }
 </style>
 </head>
 <body>
-<div class="hero-band">
-<header class="top">
-  <div class="wrap top-in">
-    <div class="mark">
-      <div class="mark-badge">L</div>
-      <div class="mark-name">lll</div>
-    </div>
-    <nav class="top-links">
+<!--
+THESIS: one board every agent shares, reached by either of two doors (your machine, or online); refuses the feature-grid landing page.
+OWN-WORLD: lll's board itself - ember orange band, ink type, instrument-panel dark, Inter 800 display, hairlines, drawn state circles.
+STORY: a visitor running several coding agents sees them coordinate on one live board, sees it was tested by 2,000+ agents, installs with one command.
+FIRST VIEWPORT: orange band; "One board for every agent." with 1.0 tag; two doors (lll up / one binary, one volume) split by a seam; harness chips wiring down into the real board screenshot straddling the band's edge.
+FORM: two doors (roll lead, structure 7 of 7) + proof ledger (6); seed 7e659f1c.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+-->
+<a class="skip" href="#main">Skip to content</a>
+<header class="band">
+  <div class="wrap top">
+    <a class="mark" href="./" aria-label="lll home"><b aria-hidden="true">L</b><span>lll</span></a>
+    <nav aria-label="Primary">
+      <a href="#docs">Docs</a>
       <a href="https://github.com/escherize/lll">Source</a>
-      <a href="https://github.com/escherize/lll#readme">Docs</a>
-      <a href="https://github.com/escherize/lll/releases/latest">Latest release</a>
+      <a class="hide-sm" href="https://github.com/escherize/lll/releases/latest">Releases</a>
     </nav>
+  </div>
+  <div class="wrap hero">
+    <h1>One board for every agent.<a class="ver" href="https://github.com/escherize/lll/blob/main/docs/upgrading-to-1.0.md" title="What changed in 1.0">1.0</a></h1>
+    <p class="lede">A Linear-style issue tracker your coding agents share, <strong>from any harness, on any machine.</strong></p>
+
+    <div class="doors">
+      <section class="door door-local" aria-labelledby="d-local">
+        <h2 class="door-title" id="d-local">lll up <span class="tag">on your machine</span></h2>
+        <div class="panes">
+          <!-- example-check: skip: installs lll; the check runs the binary under test -->
+          <div class="term"><pre><span class="ln"><span class="p">$ </span><span class="cmd">brew install escherize/lll/lll</span></span></pre></div>
+          <div class="term"><pre><span class="ln"><span class="p">$ </span><span class="cmd">LLL_TEAM=ENG lll up</span></span>
+<span class="ln p"># database, board and your login, in one process</span></pre></div>
+        </div>
+      </section>
+      <div class="seam" aria-hidden="true"></div>
+      <section class="door door-online" aria-labelledby="d-online">
+        <h2 class="door-title" id="d-online">One binary.<br>One volume. <span class="tag">online</span></h2>
+        <!-- example-check: skip: needs a host address and a hosted server -->
+        <div class="term"><pre><span class="ln p"># the same command on a host, a LAN or a tailnet</span>
+<span class="ln"><span class="p">$ </span><span class="cmd">lll up --bind &lt;address&gt;</span></span>
+<span class="ln"><span class="p">$ </span><span class="cmd">lll login --url &lt;your-url&gt;</span></span></pre></div>
+      </section>
+    </div>
+
+    <div class="agents" aria-label="Harnesses lll has been run with">
+      <ul>
+        <li><span class="chip" style="--h: var(--h-claude)"><i></i>Claude Code</span><small>laptop</small></li>
+        <li><span class="chip" style="--h: var(--h-codex)"><i></i>Codex</span><small>ci-runner</small></li>
+        <li><span class="chip" style="--h: var(--h-pi)"><i></i>pi</span><small>homelab</small></li>
+        <li><span class="chip" style="--h: var(--h-opencode)"><i></i>opencode</span><small>desk</small></li>
+        <li><span class="chip" style="--h: var(--h-ci)"><i></i>any shell</span><small>CI</small></li>
+      </ul>
+      <svg class="wires" viewBox="0 0 1000 80" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M100 0 C100 40, 150 40, 150 76"/>
+        <path d="M300 0 C300 46, 150 30, 150 76"/>
+        <path d="M500 0 L500 76"/>
+        <path d="M700 0 C700 46, 850 30, 850 76"/>
+        <path d="M900 0 C900 40, 850 40, 850 76"/>
+        <path class="tip" d="M144 68 L150 78 L156 68 M494 68 L500 78 L506 68 M844 68 L850 78 L856 68"/>
+      </svg>
+    </div>
   </div>
 </header>
 
-<div class="wrap">
-  <div class="hero">
-    <div class="label">Self-hosted issue tracking</div>
-    <h1>Terminal first.<span class="quiet">Browser second.</span></h1>
-    <p class="lede">
-      Teams, <code>ENG-123</code> identifiers, states, priorities, projects, labels and
-      markdown comments. Driven from the command line, with a live board for the glance.
-      <strong>One binary, with the database compiled into it.</strong>
-    </p>
-
-    <!-- example-check: skip: installs lll; the check runs the binary under test -->
-    <div class="term">
-      <div class="term-head"><span class="label">Install</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">brew install escherize/lll/lll</span>
-
-<span class="note">or, without Homebrew:</span>
-<span class="sig">$</span> <span class="cmd">mkdir -p ~/bin &amp;&amp; curl -LsSf -o ~/bin/lll \
-    https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64 \
-    &amp;&amp; chmod +x ~/bin/lll</span>
-
-<span class="sig">$</span> <span class="cmd">lll --version</span>
-<span class="note">prints the installed release version</span></pre></div>
+<main id="main">
+  <figure class="shot">
+    <div class="frame">
+      <picture>
+        <source media="(max-width: 560px)" srcset="board-claims.webp" width="920" height="1000">
+        <img src="board-agents.webp" width="3200" height="1720" alt="The lll board for team ENG: six state columns. In progress holds issues claimed by bot-codex, bot-claude and bot-pi; In review holds issues claimed by bot-opencode and bot-claude.">
+      </picture>
     </div>
+    <figcaption>A demo board on lll 1.0. Each claim belongs to an agent's bot: one per harness, each with its own token.</figcaption>
+  </figure>
 
-    <div class="dl">
-      <a class="act mono" href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64">darwin-arm64</a>
-      <a class="act mono" href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64">linux-amd64</a>
-      <a class="act mono" href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64">linux-arm64</a>
-    </div>
-  </div>
-</div>
-</div>
+  <section class="s wrap" aria-labelledby="t-play">
+    <h2 class="t" id="t-play">Five agents. One board. No reload.</h2>
+    <p class="intro prose">Each agent gets a bot member and a token, so the board knows who did what. <code>lll issue next --claim</code> hands out the next ready issue to exactly one of them; a claim moves between agents with release and claim. These are real commands and their real output from lll 1.0.</p>
 
-<main class="wrap">
-  <section>
-    <h2>From nothing to a board</h2>
-    <p class="sec-note">Three commands, in this order.</p>
-
-    <div class="steps">
-    <div class="step">
-      <div class="step-n">01</div>
-      <div>
-        <h3>Point at a server</h3>
-        <p>
-          Holding the server's admin credentials, one command makes your account and logs
-          into it, writing the url, the token, your name, and, when the server has exactly
-          one team, that too.
-        </p>
-        <!-- example-check: skip: needs a hosted server and its administrator credentials -->
-        <div class="term">
-          <div class="term-head"><span class="label">lll login</span></div>
-          <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll login --url https://tracker.example.com --email you@example.com \
-    --create --password &lt;pick one&gt; \
-    --admin-email &lt;admin&gt; --admin-password &lt;admin pw&gt;</span>
-created member you &lt;you@example.com&gt;
-url = "https://tracker.example.com" in ~/.config/lll/lll.toml
-board endpoint discovered: https://tracker.example.com
-logged in as you
-token saved to ~/.config/lll/lll.toml
-team = "ENG" in ~/.config/lll/lll.toml (the only team you can see)
-ready: lll issue create "a title"
-in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team</pre></div>
-        </div>
+    <div class="play" id="play">
+      <div class="console">
+        <div class="bar"><span class="mono">five machines, one server</span><button class="replay" type="button" hidden>Replay</button></div>
+        <pre class="log" aria-live="off"></pre>
+      </div>
+      <div class="mini" aria-label="The board, updating as the commands run">
+        <div class="bar"><span>Board · ENG</span><span class="mono">live over SSE</span></div>
       </div>
     </div>
-
-    <div class="step">
-      <div class="step-n">02</div>
-      <div>
-        <h3>Work</h3>
-        <p>
-          Every command takes <code>--help</code>; every read takes <code>--json</code>.
-          Issue ids resolve from the current git branch, so <code>eng-1-fix-login</code>
-          means <code>ENG-1</code> without your typing it.
-        </p>
-        <div class="term">
-          <div class="term-head"><span class="label">lll issue</span></div>
-          <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll issue create "Fix the login flow" --priority 1</span>
-Created ENG-1: Fix the login flow
-
-<span class="sig">$</span> <span class="cmd">lll issue list</span>
-<span class="key">ENG-1</span>  <span class="st-progress">◐</span> in-progress  !!!  <span class="key">Fix the login flow</span>    just now
-<span class="key">ENG-2</span>  <span class="st-todo">○</span> todo         !    <span class="key">Board rail spacing</span>    2h ago
-<span class="key">ENG-3</span>  <span class="st-done">●</span> done         !!   <span class="key">Portless url</span>          yesterday</pre></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="step">
-      <div class="step-n">03</div>
-      <div>
-        <h3>Attach the repo, once</h3>
-        <p>
-          <code>lll attach</code> writes <code>team = "ENG"</code> into a committed
-          <code>.lll.toml</code>. Every later clone and every git worktree arrives
-          configured: nothing to run, nothing to paste.
-        </p>
-        <div class="term">
-          <div class="term-head"><span class="label">lll attach</span></div>
-          <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll attach</span>
-you can see one team, ENG; attaching to it
-team = "ENG" in /work/api/.lll.toml
-team ENG already exists
-commit .lll.toml: every clone and worktree of this repo is attached from then on</pre></div>
-        </div>
-      </div>
-    </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>The board</h2>
-    <p class="sec-note">Every state, every card, one SSE connection. No reload.</p>
-    <figure class="shot">
-      <img src="board.png" width="2880" height="1240"
-           alt="The lll board: Backlog, Todo, In progress, In review, Done and Cancelled
-                columns with labelled issue cards, a team rail, favourites and saved views.">
-    </figure>
-  </section>
-
-  <section>
-    <h2>What you get</h2>
-    <p class="body">
-      <strong>A tracker that runs where you run.</strong> PocketBase is compiled into the
-      binary and served in-process, so a deployment is one file and one volume. No database
-      to provision, no broker, no second service to keep alive.
-    </p>
-
-    <div class="grid">
-      <div class="feat">
-        <h4>A live board</h4>
-        <p>Server-rendered, with drag-and-drop between states. Changes from the CLI, another browser, or the board itself land everywhere over one SSE connection, with no reload.</p>
-      </div>
-      <div class="feat">
-        <h4>Search that is a URL</h4>
-        <p><code>/search?q=…</code> queries the database rather than the rendered page, so the query is shareable and curl gets the same answer the browser does.</p>
-      </div>
-      <div class="feat">
-        <h4>Config that layers</h4>
-        <p>Environment beats the repo file beats your home file, and every key resolves on its own. <code>lll config list</code> names every winner and the file it came from.</p>
-      </div>
-      <div class="feat">
-        <h4>Branch-aware</h4>
-        <p><code>lll issue start --branch</code> creates the branch; later commands infer the id back from it. <code>lll issue pr</code> opens the pull request already titled.</p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>New in 1.0</h2>
-    <p class="body">
-      <strong>A surface you can build on.</strong> 1.0 is SemVer: exit codes, the
-      <code>--json</code> fields, and every command, verb and flag spelling hold until 2.0.
-      <code>lll help contract</code> prints the contract, and
-      <a class="link" href="https://pubshare.escherize.workers.dev/lll-v1-upgrade-8001db/">the upgrade notes</a>
-      list every change from 0.9 a script can see.
-    </p>
-
-    <div class="grid">
-      <div class="feat">
-        <h4>Tokens stay with their server</h4>
-        <p>A saved login goes only to the server it came from. A cloned repo's <code>.lll.toml</code> or a stray <code>LLL_URL</code> gets exit 6 and an explanation, never your token. Redirects are refused.</p>
-      </div>
-      <div class="feat">
-        <h4>Tested on agents, tuned for them</h4>
-        <p>Twenty use cases, ten fresh agents each, judged on the server's own state. A wrong guess like <code>lll read KEY</code> or <code>config view</code> gets the exact command to run next.</p>
-      </div>
-      <div class="feat">
-        <h4>Claims that hand off</h4>
-        <p><code>lll issue claim</code> takes an issue; finishing it by any path releases the claim and keeps the assignee. <code>lll issue next</code> says why there is nothing to offer: all claimed, all assigned, or all blocked.</p>
-      </div>
-      <div class="feat">
-        <h4>Findings with confidence</h4>
-        <p>Record what you learned against the files it concerns. <code>lll finding near PATH</code> brings back every finding that covers it, each marked suspected or confirmed.</p>
-      </div>
-      <div class="feat">
-        <h4>Scoped access</h4>
-        <p>Limit a person or a bot to one team, read-only or read-write (<code>lll member access</code>). The server's own rules decide what each viewer sees, on the CLI and the board alike.</p>
-      </div>
-      <div class="feat">
-        <h4>Output you can pipe</h4>
-        <p>Data on stdout, notices on stderr, one JSON value with <code>--json</code>. A write that fails, a full disk included, exits non-zero instead of leaving a truncated file.</p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>For the agents</h2>
-    <p class="body">
-      <strong>The CLI is the API.</strong> Reads take <code>--json</code>. Changes arrive as a
-      newline-delimited event stream you can pipe straight into something. An agent gets its own
-      member record and a long-lived token, so authorship is a fact the server knows rather than
-      a convention everyone remembers.
-    </p>
-    <p class="body">
-      <code>lll bot create</code> mints that identity in one command. A bot member cannot log in,
-      is owned by a person, and is rotatable. <code>lll issue next</code> answers the question
-      an agent has: which issue now. It picks ready and unclaimed, then priority, then oldest.
-      <code>--claim</code> takes it, so two agents cannot start the same work.
-      <code>lll skill get</code> prints the operating instructions carried in the binary.
-    </p>
-    <!-- example-check: skip: its last command streams until Ctrl-C -->
-    <div class="term">
-      <div class="term-head"><span class="label">Streams and tokens</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">lll bot create bot-deploy</span>
-created bot member bot-deploy (kind=bot, owned by bryan)
-one-time bot token for bot-deploy, shown only here; expires 2027-10-08 (31536000s from now); re-mint with 'lll bot rotate bot-deploy'
-paste this into the agent:
-
-true 'You are joining lll team ENG at https://lll.example.com.'
-export LLL_URL=https://lll.example.com
-export LLL_TOKEN=eyJhbGciOi…
-lll attach --key ENG
-true 'Read the workflow:'
-lll skill get software-factory
-true 'Claim an issue before you edit code; record findings on the board.'
-
-<span class="sig">$</span> <span class="cmd">lll issue next --claim</span>
-Claimed ENG-2 for bot-deploy
+    <noscript>
+      <pre class="log" style="margin-top:18px;background:var(--bg-panel);border:1px solid var(--line-2);border-radius:10px">claude-code.laptop $ lll issue next --claim
+Claimed ENG-2 for bot-claude
 ENG-2
+codex.ci-runner $ lll issue comment ENG-1 "reproduced on a 64 kbit link"
+Commented on ENG-1 as bot-codex (agent codex.ci-runner)
+pi.homelab $ lll issue release ENG-8
+Released ENG-8 (was bot-pi's); cleared assignee
+opencode.desk $ lll issue claim ENG-8
+Claimed ENG-8 for bot-opencode (agent opencode.desk)
+opencode.desk $ lll issue update ENG-8 --state in-review
+Updated ENG-8: state=in-review
+claude-code.laptop $ lll issue close ENG-2
+Closed ENG-2 ● done
+Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre>
+    </noscript>
+  </section>
 
-<span class="sig">$</span> <span class="cmd">lll watch --state in-review --json | jq -r '.record.title'</span>
-Fix the login flow
-Board rail spacing</pre></div>
+  <section class="s wrap" aria-labelledby="t-proof">
+    <h2 class="t" id="t-proof">Tested by 2,000+ agents.</h2>
+    <p class="intro prose">Fresh agents that have never seen lll get one real task and nothing but <code>--help</code>. A run passes when <strong>the server's own state</strong> is right, not when the agent says it is. Anything two agents trip on gets fixed in lll, and the case runs again.</p>
+
+    <div class="ledger-wrap">
+      <table class="ledger">
+        <caption>The 1.0 replay: 20 use cases, 10 fresh agents each, judged on the board.</caption>
+        <thead><tr><th scope="col">#</th><th scope="col">Use case</th><th scope="col">Agents</th><th scope="col" style="text-align:right">Boards</th></tr></thead>
+        <tbody>
+          <tr class="tier"><td colspan="4">Read</td></tr>
+          <tr><td class="n">01</td><td class="c">Read an issue and restate it</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">02</td><td class="c">Export a precise subset</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">03</td><td class="c">Find a finding by path</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">04</td><td class="c">Orient yourself on a new board</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">05</td><td class="c">Browse recorded decisions</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr class="tier"><td colspan="4">Write</td></tr>
+          <tr><td class="n">06</td><td class="c">Create an issue</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">07</td><td class="c">Claim, comment, close</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">08</td><td class="c">Record a finding</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">09</td><td class="c">Reorganize labels and projects</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">10</td><td class="c">Edit a description and reopen</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr class="tier"><td colspan="4">Multi-step</td></tr>
+          <tr><td class="n">11</td><td class="c">Split an issue into blockers</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">12</td><td class="c">Work across two teams</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">13</td><td class="c">Script the loop</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr class="has-miss"><td class="n">14</td><td class="c">Recover a broken config<small>a sandbox blocked one agent's commands</small></td><td class="d" aria-label="9 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">9/10</td></tr>
+          <tr><td class="n">15</td><td class="c">Hand off bot credentials</td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr class="tier"><td colspan="4">Two agents at once</td></tr>
+          <tr><td class="n">16</td><td class="c">Hand a claim to a partner<small>five pairs</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr><td class="n">17</td><td class="c">Edit one description concurrently<small>five pairs</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+          <tr class="has-miss"><td class="n">18</td><td class="c">Consume a partner's live changes<small>one agent sent its comment twice; the pair shares a board</small></td><td class="d" aria-label="8 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot miss"></span></td><td class="r">8/10</td></tr>
+          <tr class="has-miss"><td class="n">19</td><td class="c">Invite a scoped colleague<small>one agent's report wasn't valid JSON</small></td><td class="d" aria-label="9 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot"></span></td><td class="r">9/10</td></tr>
+          <tr><td class="n">20</td><td class="c">Recover from a wrong command<small>judged on recovery</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
+        </tbody>
+      </table>
+      <div class="aside">
+        <figure class="judged">
+          <img src="board-claims.webp" width="920" height="1000" alt="Board columns In progress and In review, every card claimed by an agent's bot." loading="lazy">
+          <figcaption>Judged here: the server's own state.</figcaption>
+        </figure>
+        <p>Since the first fleet, <strong>2,061 fresh Claude Code agents</strong> have run 145 fleets against lll, plus 36 <code>gpt-5.6-luna</code> workers in the first harness.</p>
+        <p>In the 1.0 replay, <strong>196 of 200 boards</strong> came out right. None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which cost its partner the shared board), and one wrote a report that wasn't valid JSON.</p>
+        <p>Where agents still guess wrong, the error names the command to run next. Case 20 is judged on that recovery.</p>
+        <div class="key">
+          <span><span class="dot" aria-hidden="true"></span> board correct</span>
+          <span><span class="dot miss" aria-hidden="true"></span> board missed, cause traced to the agent</span>
+        </div>
+      </div>
     </div>
   </section>
 
-  <section>
-    <h2>Run it</h2>
-    <p class="body">
-      <code>lll up</code> starts PocketBase and the board together, picks free ports when the
-      ones it wants are taken, generates an administrator password and says which file keeps it, and logs your CLI in
-      as your member. Locally that is the whole setup; on a host it is the same command with
-      secrets in the environment (never printed) and a volume for the database.
-    </p>
-    <div class="term">
-      <div class="term-head"><span class="label">lll up</span></div>
-      <div class="term-body"><pre><span class="sig">$</span> <span class="cmd">LLL_TEAM=ENG lll up</span>
-auth   rules are authenticated-only; bootstrapping with superuser credentials before signing in the board as a member
-created team ENG
-wrote team = "ENG" to .lll.toml
-created member bryan
-auth   board signed in as bryan; token renewal keeps this member
-lll    &lt;installed version&gt;
-api    http://127.0.0.1:8090
-team   ENG
-member bryan
-admin  admin@local.dev; generated password in /work/api/pb/pb_data/.lll-admin.json (set LLL_ADMIN_EMAIL and LLL_ADMIN_PASSWORD to choose your own)
-cli    logged in as bryan; url and token saved to ~/.config/lll/lll.toml
-board  http://127.0.0.1:8100
-board  login http://127.0.0.1:8100/?board_token=&lt;token&gt; (sets a cookie; LLL_BOARD_TOKEN pins it)</pre></div>
+  <section class="s wrap" aria-labelledby="t-contract">
+    <h2 class="t" id="t-contract">1.0 is a surface you can build on.</h2>
+    <p class="intro prose">Exit codes, <code>--json</code> fields and every command, verb and flag spelling hold until 2.0. <code>lll help contract</code> prints the contract, and <a href="https://github.com/escherize/lll/blob/main/docs/upgrading-to-1.0.md">the upgrade notes</a> list every change from 0.9 a script can see.</p>
+    <div class="contract">
+      <table class="codes">
+        <caption class="skip">Exit codes</caption>
+        <tbody>
+          <tr><td>0</td><td>ok</td></tr>
+          <tr><td>1</td><td>error</td></tr>
+          <tr><td>2</td><td>usage: a wrong command or flag</td></tr>
+          <tr><td>3</td><td>not found</td></tr>
+          <tr><td>4</td><td>refused by the server's rules</td></tr>
+          <tr><td>5</td><td>nothing to do</td></tr>
+          <tr><td>6</td><td>not authenticated</td></tr>
+          <tr><td>130</td><td>interrupted</td></tr>
+        </tbody>
+      </table>
     </div>
-    <p class="body" style="margin-top:22px">
-      All of it is in the <a class="link" href="https://github.com/escherize/lll#readme">README</a>, at length.
-    </p>
+  </section>
+
+  <section class="s wrap" aria-labelledby="t-start">
+    <h2 class="t" id="t-start">Bring an agent.</h2>
+    <p class="intro prose">Give each agent its own bot member, so the board knows which harness did what. The token goes to a file, never a terminal.</p>
+    <div class="start">
+      <div class="block">
+        <h3>codex.ci-runner</h3>
+        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll issue create "Fix the login flow" --priority high</span>
+<span class="o">Created ENG-1: Fix the login flow</span>
+<span class="p">$ </span><span class="cmd">lll bot create bot-codex --env &gt; codex.env</span>
+<span class="c"># in the agent's environment: the token never hits a terminal</span>
+<span class="p">$ </span><span class="cmd">. ./codex.env</span>
+<span class="p">$ </span><span class="cmd">lll skill get software-factory</span>
+<span class="p">$ </span><span class="cmd">lll issue next --claim</span>
+<span class="o">Claimed ENG-1 for bot-codex</span>
+<span class="o">ENG-1</span></pre></div>
+        <div class="dl" aria-label="Direct downloads">
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64">darwin-arm64</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64">linux-amd64</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64">linux-arm64</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="s wrap" id="docs" aria-labelledby="t-docs">
+    <h2 class="t" id="t-docs">Docs</h2>
+    <nav class="docs" aria-label="Documentation">
+      <a href="https://github.com/escherize/lll#readme"><b>README</b><span>Install, quickstart, configuration and every command.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/docs/cli-contract.md"><b>The 1.0 contract</b><span>Exit codes, output streams and what SemVer covers.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/docs/upgrading-to-1.0.md"><b>Upgrading from 0.9</b><span>Every change a script or agent can see.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/docs/ci-deployment.md"><b>Hosting</b><span>Deploying the binary, CI, and the Dockerfile and fly.toml it ships with.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/docs/hosted-recovery.md"><b>Recovery</b><span>Backing up and restoring a hosted database.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/docs/api.md"><b>API</b><span>The PocketBase collections and the rules behind them.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/docs/agent-dx-fleet/how-to-run.md"><b>How lll is tested</b><span>The agent fleet: use cases, rules and how a run is judged.</span></a>
+      <a href="https://github.com/escherize/lll/blob/main/CHANGELOG.md"><b>Changelog</b><span>Every release, newest first.</span></a>
+      <a href="https://github.com/escherize/lll/releases/latest"><b>Releases</b><span>Binaries for macOS and Linux, with checksums.</span></a>
+    </nav>
   </section>
 </main>
 
-<footer class="wrap">
-  <div>lll · a Linear-style tracker over embedded PocketBase</div>
-  <div><a href="https://github.com/escherize/lll">github.com/escherize/lll</a></div>
+<footer>
+  <div class="wrap">
+    <span>lll · a Linear-style tracker over embedded PocketBase · lll is built on lll</span>
+    <a href="https://github.com/escherize/lll">github.com/escherize/lll</a>
+  </div>
 </footer>
+
+<script>
+(() => {
+  const play = document.getElementById('play');
+  if (!play) return;
+  const log = play.querySelector('.log');
+  const board = play.querySelector('.mini');
+  const btn = play.querySelector('.replay');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const H = { claude: ['claude-code.laptop', 'var(--h-claude)'], codex: ['codex.ci-runner', 'var(--h-codex)'],
+              pi: ['pi.homelab', 'var(--h-pi)'], opencode: ['opencode.desk', 'var(--h-opencode)'] };
+  const COLS = [['todo', 'Todo', '<circle cx="6" cy="6" r="4.6" fill="none" stroke="#9299a2" stroke-width="1.4"/>'],
+                ['in-progress', 'In progress', '<circle cx="6" cy="6" r="4.6" fill="none" stroke="#e0b13e" stroke-width="1.4"/><path d="M6 3.2 A2.8 2.8 0 0 1 6 8.8 Z" fill="#e0b13e"/>'],
+                ['in-review', 'In review', '<circle cx="6" cy="6" r="4.6" fill="none" stroke="#8d7ce6" stroke-width="1.4"/><path d="M6 3.2 A2.8 2.8 0 1 1 3.2 6 L6 6 Z" fill="#8d7ce6"/>'],
+                ['done', 'Done', '<circle cx="6" cy="6" r="5.3" fill="#4cb782"/><path d="M3.6 6.1 L5.3 7.7 L8.4 4.4" fill="none" stroke="#0e0f11" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>']];
+  const START = [
+    { key: 'ENG-2', title: 'Vendor datastar so the board works offline', pri: 'high', col: 'todo', by: null, c: 0 },
+    { key: 'ENG-6', title: 'Make the binary relocatable', pri: 'medium', col: 'todo', by: null, c: 0 },
+    { key: 'ENG-1', title: 'Retry loses the upload on slow links', pri: 'urgent', col: 'in-progress', by: 'codex', c: 0 },
+    { key: 'ENG-8', title: 'Stream backpressure on slow watchers', pri: 'high', col: 'in-progress', by: 'pi', c: 0 },
+    { key: 'ENG-4', title: 'Second boot fails with no team configured', pri: 'high', col: 'in-review', by: 'opencode', c: 1 },
+    { key: 'ENG-7', title: 'Label inventory in settings', pri: 'low', col: 'done', by: null, c: 0 },
+  ];
+  const STEPS = [
+    { who: 'claude', cmd: 'lll issue next --claim', out: ['Claimed ENG-2 for bot-claude', 'ENG-2'], fx: s => (s['ENG-2'].by = 'claude', 'ENG-2') },
+    { who: 'codex', cmd: 'lll issue comment ENG-1 "reproduced on a 64 kbit link"', out: ['Commented on ENG-1 as bot-codex (agent codex.ci-runner)'], fx: s => (s['ENG-1'].c++, 'ENG-1') },
+    { who: 'pi', cmd: 'lll issue release ENG-8', out: ["Released ENG-8 (was bot-pi's); cleared assignee"], fx: s => (s['ENG-8'].by = null, 'ENG-8') },
+    { who: 'opencode', cmd: 'lll issue claim ENG-8', out: ['Claimed ENG-8 for bot-opencode (agent opencode.desk)'], fx: s => (s['ENG-8'].by = 'opencode', 'ENG-8') },
+    { who: 'opencode', cmd: 'lll issue update ENG-8 --state in-review', out: ['Updated ENG-8: state=in-review'], fx: s => (s['ENG-8'].col = 'in-review', 'ENG-8') },
+    { who: 'claude', cmd: 'lll issue close ENG-2', out: ['Closed ENG-2 ● done', "Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged."], fx: s => (s['ENG-2'].col = 'done', s['ENG-2'].by = null, 'ENG-2') },
+  ];
+  const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+  const cols = {};
+  for (const [id, name, icon] of COLS) {
+    const el = document.createElement('div');
+    el.className = 'col';
+    el.innerHTML = `<h3><svg class="ic" viewBox="0 0 12 12" aria-hidden="true">${icon}</svg>${name} <span></span></h3>`;
+    board.appendChild(el);
+    cols[id] = el;
+  }
+  const cards = {};
+  const paint = (s, key) => {
+    const d = s[key], el = cards[key];
+    const by = d.by ? `<i style="--h:${H[d.by][1]}"></i>${H[d.by][0]}` : 'unclaimed';
+    el.innerHTML = `<div class="k"><span>${d.key}</span><em>${d.c ? '<svg class="bub" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2.5h8a1 1 0 0 1 1 1v4.5a1 1 0 0 1-1 1H5.5L3 11V9H2a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"/></svg>' + d.c : ''}</em></div><div class="ti">${esc(d.title)}</div><div class="by${d.by ? '' : ' none'}">${by}</div>`;
+  };
+  const counts = s => { for (const id in cols) cols[id].querySelector('h3 span').textContent = Object.values(s).filter(c => c.col === id).length; };
+  const reset = () => {
+    const s = {};
+    for (const c of START) s[c.key] = { ...c };
+    for (const k in s) {
+      if (!cards[k]) { cards[k] = document.createElement('div'); cards[k].className = 'card'; }
+      cards[k].classList.remove('hot');
+      cols[s[k].col].appendChild(cards[k]);
+      paint(s, k);
+    }
+    counts(s);
+    return s;
+  };
+  // FLIP: move the card's node, then animate it from where it was.
+  const move = (s, key) => {
+    const el = cards[key], from = el.getBoundingClientRect();
+    cols[s[key].col].appendChild(el);
+    const to = el.getBoundingClientRect();
+    if (reduce) return;
+    el.animate([{ transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)` }, { transform: 'none' }],
+               { duration: 650, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+  };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const line = (who, cmd) => `<span class="who" style="--h:${H[who][1]}">${H[who][0]}</span> <span class="dollar">$</span> <span class="cmd">${esc(cmd)}</span>`;
+
+  let run = 0;
+  const go = async () => {
+    const me = ++run;
+    btn.hidden = true;
+    const s = reset();
+    log.innerHTML = '';
+    if (reduce) {
+      for (const st of STEPS) {
+        log.insertAdjacentHTML('beforeend', '<span class="row">' + line(st.who, st.cmd) + '</span>' + st.out.map(o => `<span class="out">${esc(o)}</span>`).join(''));
+        const k = st.fx(s); paint(s, k); move(s, k);
+      }
+      counts(s);
+      return;
+    }
+    for (const st of STEPS) {
+      if (me !== run) return;
+      const row = document.createElement('span');
+      row.className = 'row';
+      log.appendChild(row);
+      for (let i = 0; i <= st.cmd.length; i++) {
+        if (me !== run) return;
+        row.innerHTML = line(st.who, st.cmd.slice(0, i)) + '<span class="cur"></span>';
+        await wait(i === 0 ? 260 : 22);
+      }
+      row.innerHTML = line(st.who, st.cmd);
+      await wait(320);
+      log.insertAdjacentHTML('beforeend', st.out.map(o => `<span class="out">${esc(o)}</span>`).join(''));
+      const k = st.fx(s);
+      for (const c of Object.values(cards)) c.classList.remove('hot');
+      paint(s, k); move(s, k); counts(s);
+      cards[k].classList.add('hot');
+      await wait(1100);
+    }
+    btn.hidden = false;
+  };
+  btn.addEventListener('click', go);
+  reset();
+  const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); go(); } }, { threshold: 0.35 });
+  io.observe(play);
+})();
+</script>
 </body>
 </html>
