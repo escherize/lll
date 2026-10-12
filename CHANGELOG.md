@@ -6,7 +6,7 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-## [1.0.1] - unreleased
+## [1.0.1] - 2026-10-12
 
 ### Fixed
 
