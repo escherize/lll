@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-12T17:13:31.615392+00:00",
+  "generatedAt": "2026-10-12T17:16:46.412879+00:00",
   "title": "Design System: lll",
   "extensions": {
     "colorMeta": {
@@ -192,6 +192,14 @@
       "landing-body": {
         "displayName": "Landing Body",
         "purpose": "Landing page reading copy."
+      },
+      "landing-lede": {
+        "displayName": "Landing Lede",
+        "purpose": "The one line under the landing h1: clamp(17px, 1.6vw, 20px), ink-2 with the harness clause in ink at 650."
+      },
+      "landing-chip": {
+        "displayName": "Landing Chip",
+        "purpose": "Harness chips on the orange band: 15px, weight 600."
       }
     },
     "roundedMeta": {
@@ -391,7 +399,7 @@
   ],
   "narrative": {
     "northStar": "The Instrument Panel",
-    "overview": "lll is a dark, dense, quiet issue board: every issue's state legible in one\nglance, refusing the airy marketing-card look of generic kanban tools. The\nworld is Linear's grammar rebuilt in lll's own materials — a near-black ground,\nhairline white-alpha borders, one small variable typeface at 13px, muted gray\ntext, and semantic state color carried almost entirely by small drawn icons.\nChrome recedes; the data is the interface.\n\nColor is rationed. The single accent, an ember orange (#f0883e), appears only\nwhere the user can act (primary buttons, focus rings, selection, the workspace\nmark) and on exactly one piece of data: urgent priority. Errors get one voice\nof their own — a muted red flash strip patched in over SSE. Everything else\nspeaks in three grays and the six semantic state hues. Depth is tonal, not\nshadowed: five closely-spaced dark surfaces layer the UI, and the one real\nshadow is a 1px whisper under cards.\n\nNote: PRODUCT.md's brand commitment named a teal accent; the shipped build is\norange throughout (tokens, comp, icons). Orange #f0883e is canonical.",
+    "overview": "lll is a dark, dense, quiet issue board: every issue's state legible in one\nglance, refusing the airy marketing-card look of generic kanban tools. The\nworld is Linear's grammar rebuilt in lll's own materials \u2014 a near-black ground,\nhairline white-alpha borders, one small variable typeface at 13px, muted gray\ntext, and semantic state color carried almost entirely by small drawn icons.\nChrome recedes; the data is the interface.\n\nColor is rationed. The single accent, an ember orange (#f0883e), appears only\nwhere the user can act (primary buttons, focus rings, selection, the workspace\nmark) and on exactly one piece of data: urgent priority. Errors get one voice\nof their own \u2014 a muted red flash strip patched in over SSE. Everything else\nspeaks in three grays and the six semantic state hues. Depth is tonal, not\nshadowed: five closely-spaced dark surfaces layer the UI, and the one real\nshadow is a 1px whisper under cards.\n\nNote: PRODUCT.md's brand commitment named a teal accent; the shipped build is\norange throughout (tokens, comp, icons). Orange #f0883e is canonical.",
     "keyCharacteristics": [
       "Dark-only; near-black tonal surfaces, no light theme.",
       "Compact density: 13px base type, 5-8px internal padding, 18px avatars.",
@@ -404,7 +412,7 @@
     "rules": [
       {
         "name": "The Ember Budget Rule",
-        "body": "Orange means \"you can act here\" or \"urgent\" — nothing else. Never use it for decoration, emphasis, headings, or non-urgent data.",
+        "body": "Orange means \"you can act here\" or \"urgent\" \u2014 nothing else. Never use it for decoration, emphasis, headings, or non-urgent data.",
         "section": "colors"
       },
       {
@@ -419,7 +427,7 @@
       },
       {
         "name": "The White-Alpha Border Rule",
-        "body": "Borders are translucent white (0.07 structural, 0.12 interactive), so they read correctly over every tonal surface. No opaque border grays. The one exception is the error flash, whose border is the red at 0.4 alpha — still translucent, never opaque.",
+        "body": "Borders are translucent white (0.07 structural, 0.12 interactive), so they read correctly over every tonal surface. No opaque border grays. The one exception is the error flash, whose border is the red at 0.4 alpha \u2014 still translucent, never opaque.",
         "section": "colors"
       },
       {
@@ -434,7 +442,7 @@
       },
       {
         "name": "The Stable Id Rule",
-        "body": "`#board`, `#issue-detail`, and `#comments` are SSE morph boundaries; cards are `#issue-{id}`, columns `#col-{state}`, comments `#comment-{id}`. New surfaces must keep ids stable and semantic — Datastar morphs by id, and agents are first-class consumers of the markup.",
+        "body": "`#board`, `#issue-detail`, and `#comments` are SSE morph boundaries; cards are `#issue-{id}`, columns `#col-{state}`, comments `#comment-{id}`. New surfaces must keep ids stable and semantic \u2014 Datastar morphs by id, and agents are first-class consumers of the markup.",
         "section": "layout"
       },
       {
@@ -444,7 +452,7 @@
       },
       {
         "name": "The Drawn Icon Rule",
-        "body": "Icons are drawn inline SVG in the shared sprite — never icon fonts, emoji, or third-party icon packages. New icons match the 14px grid, ~1.5px round-capped strokes, and `currentColor`.",
+        "body": "Icons are drawn inline SVG in the shared sprite \u2014 never icon fonts, emoji, or third-party icon packages. New icons match the 14px grid, ~1.5px round-capped strokes, and `currentColor`.",
         "section": "shapes"
       },
       {
@@ -473,7 +481,7 @@
       "**Scope component classes.** Stylesheets share one global class namespace. Use names such as `.issue-desc` for the issue description and `.cr-desc` for a descending sort caret; a generic `.desc` once applied the description block's 24px margin to an icon. Keep shared utilities explicit and intentional.",
       "**Do** route every color through the `:root` custom properties in theme.css; the tokens are the design system, and SSE-morphed fragments must inherit them.",
       "**Do** keep ids stable and semantic on any element inside a morph boundary (`#board`, `#issue-detail`, `#comments`).",
-      "**Do** express state with the drawn circle icons and priority with the bar icons — the icon carries the hue, the adjacent text stays gray.",
+      "**Do** express state with the drawn circle icons and priority with the bar icons \u2014 the icon carries the hue, the adjacent text stays gray.",
       "**Do** surface failures through the flash strip's single red voice; hide it when there is nothing to report.",
       "**Do** use `font-variant-numeric: tabular-nums` for keys and counts.",
       "**Do** step one rung up the tonal ladder for hover, and pair every surface with a white-alpha hairline.",
@@ -483,10 +491,10 @@
     ],
     "donts": [
       "**Don't** spend orange on anything except interactive affordances and the urgent priority icon.",
-      "**Don't** use red outside the flash strip — no inline error text, no red icons, no second error treatment.",
+      "**Don't** use red outside the flash strip \u2014 no inline error text, no red icons, no second error treatment.",
       "**Don't** introduce a second typeface, type above 19px, or uppercase outside the sidebar section-label register.",
       "**Don't** add drop shadows beyond the card whisper, or invent new dark grays off the ladder.",
-      "**Don't** use icon fonts, emoji glyphs, or imported icon packs; draw new icons into the shared sprite. One exception: the per-issue emoji, a marker the author picks for one issue. System iconography — state, priority, navigation — must inherit `currentColor` for the Icon-Carries-Color Rule and stay legible at 14px next to hairline strokes, and emoji are full-colour bitmaps that ignore the palette and redraw themselves per platform. A personal marker is the opposite category: arbitrary colour is the whole point of it, and it spends nothing from the Ember Budget because it is not an affordance. The exception covers that field and nothing else.",
+      "**Don't** use icon fonts, emoji glyphs, or imported icon packs; draw new icons into the shared sprite. One exception: the per-issue emoji, a marker the author picks for one issue. System iconography \u2014 state, priority, navigation \u2014 must inherit `currentColor` for the Icon-Carries-Color Rule and stay legible at 14px next to hairline strokes, and emoji are full-colour bitmaps that ignore the palette and redraw themselves per platform. A personal marker is the opposite category: arbitrary colour is the whole point of it, and it spends nothing from the Ember Budget because it is not an affordance. The exception covers that field and nothing else.",
       "**Don't** add a light theme or theme switching; the world is dark-only.",
       "**Don't** carry the band's orange ground, display sizes or hero shadows into the product."
     ]

@@ -109,6 +109,17 @@ typography:
     fontWeight: 400
     lineHeight: 1.6
     fontFeature: "cv05"
+  landing-lede:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "clamp(17px, 1.6vw, 20px)"
+    fontWeight: 400
+    lineHeight: 1.5
+    fontFeature: "cv05"
+  landing-chip:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "15px"
+    fontWeight: 600
+    fontFeature: "cv05"
 rounded:
   indicator: "1px"
   focus: "4px"
@@ -631,6 +642,8 @@ the lowercase l carries a tail and "lll" never reads as "III". Page body text
 is 16px/1.6 (the product's 13px is too small for reading copy at page width).
 
 - **Display** (landing-display): the h1 only, balanced wrapping.
+- **Lede** (landing-lede): the one line under the h1, ink-2 with the harness clause in ink at 650.
+- **Chip** (landing-chip): the harness chips on the band, 15px 600.
 - **Door command** (landing-door-command): the two door headings ("lll up",
   "One binary. One volume.").
 - **Headline** (landing-headline): section titles, max 18ch, balanced.
