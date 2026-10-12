@@ -1,0 +1,8 @@
+{
+ "model": "google/nano-banana-2 (Replicate)",
+ "prompt": "Desktop landing page first viewport, 1536x1024, for \"lll\", a self-hosted Linear-style issue tracker driven from the terminal, built so many coding agents on many machines and in many harnesses share one live board. Keep the exact visual identity of the reference screenshots: saturated ember orange #f0883e band with near-black ember ink #1a0f06 type, Inter heavy display type at weight 800 with tight tracking, and an instrument-panel dark section (#0e0f11 ground, #191c20 raised cards, hairline white-alpha borders, 6px radii, monospace terminal blocks, small drawn state circle icons: yellow in-progress #e0b13e, violet in-review #8d7ce6, green done #4cb782). Small top bar: \"lll\" mark left; Source, Docs, Latest release right. Crisp, production-grade UI rendering, legible real text, no stock photos, no gradients, no glow, no 3D, no people.\nSTRUCTURE \"The proof ledger\": orange band at top holds the headline \"Tested by 200 agents before you.\" and one line \"$ brew install escherize/lll/lll\" with a small \"1.0\" tag. Below, on dark, a dense ledger table takes the left two thirds: 20 rows of use cases (01 find an issue, 02 read a doc, 03 claim, work, close, ... 16 claim handoff, 17 concurrent edit, 18 watch a partner, 19 scoped invite, 20 recover from a wrong command), each row with ten small worker dots in state colours (mostly green done circles), a \"10/10\" tabular count, and a pass check. The right third shows a real dark board screenshot captioned \"judged here: the server's own state\". Tabular numerals, label text 11px uppercase. Calm, dense, editorial-instrument feel.\n",
+ "refs": [
+  ".impeccable/review/current-hero.png",
+  "docs/board.png"
+ ]
+}
