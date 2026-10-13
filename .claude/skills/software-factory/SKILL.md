@@ -6,8 +6,9 @@ description: Start here. The map of how work moves through a repo tracked on lll
 # How work moves through a repo tracked on lll
 
 Six stages. This page is the map: it says what each stage is for, when you are
-in it, and what you hand to the next one. Four stages have a skill that ships
-with lll; read one with `lll skill get NAME`. Stages 2 to 4 depend on your
+in it, and what you hand to the next one. Stages 1, 4, 5 and 6 have a skill
+that ships with lll, and stage 3 has one for repos that have no skills of their
+own; read one with `lll skill get NAME`. Stages 2 and 3 depend on your
 repo, so this page carries the general guidance and your repo may add its own
 skills for them. Where your repo's instructions (AGENTS.md, CLAUDE.md, a repo
 skill) are more specific than this page, they win.
@@ -19,8 +20,8 @@ instead of the territory, and then it rots while the territory moves.
 ```
   1 intake      backlog-loop        which issue may I take?
   2 isolate     (this page)         where do I work without colliding?
-  3 build       your repo's skills  codebase-skills writes them if there are none
-  4 verify      (this page)         your project's gate, and the path the issue describes
+  3 build       your repo's skills  listed by your repo; codebase-skills if none
+  4 verify      verify-gate         your project's gate, and the path the issue describes
   5 merge       merge-gate          land it, confirm it reached the artifact
   6 record      lll                 the claim, the evidence, the decision
 ```
@@ -68,10 +69,17 @@ Skills loaded only when the work touches their area. Do not read them
 speculatively; they are reference, not process.
 
 **This stage can never be shipped**, because it is made of things that are
-only true in one repo. A repo adopting this loop starts with an empty stage 3
-and builds its own: `lll skill get codebase-skills` is the interview that does
-it. Each such skill owns one boundary (a language crossing, a framework, a
-database) and catalogues the traps there.
+only true in one repo. No skill named on this page belongs to it.
+
+**Find this repo's stage-3 skills where the repo lists them**: its AGENTS.md
+or CLAUDE.md, or a repo-local index skill that one of those names. That list
+is the only authority; do not assume a skill exists because another repo had
+it.
+
+**If the repo lists none, stage 3 is empty here.** Say so rather than guess,
+and run `lll skill get codebase-skills`: the interview that writes them. Each
+such skill owns one boundary (a language crossing, a framework, a database)
+and catalogues the traps there.
 
 One issue per change. Found a second problem? File it and carry on.
 
@@ -82,24 +90,16 @@ the stack reads as an argument instead of asking a reviewer to trust you.
 
 ## 4. Verify - is it actually true?
 
+`lll skill get verify-gate`
+
 Your project's gate is the one command that must pass before a change lands:
 build, tests, whatever CI enforces. Your repo's AGENTS.md, CONTRIBUTING or CI
 workflow names it.
 
 **The gate is necessary and not sufficient.** It says you broke nothing.
-It does not say you fixed anything. Reproduce the failure the issue describes,
-fix it, then reproduce the fix under the issue's conditions rather than the
-gate's: a throwaway environment, a health check before you trust it, and the
-evidence recorded on the issue.
-
-Two rules that have each cost real time:
-
-- **Read the exit code you actually care about.** A pipeline's status is its
-  LAST command, so `GATE | tail` reports `tail`. Append
-  `echo "GATE_EXIT=$?"` and grep the log for it.
-- **The gate cannot see everything.** Demo-seeding scripts, scratch
-  environments and the release workflow often run outside it. Ask what your
-  change touches and whether the gate looks there.
+It does not say you fixed anything. That skill is the other half: reproduce
+the failure the issue describes, fix it, then reproduce the fix under the
+issue's conditions rather than the gate's, and record the evidence.
 
 Hands to stage 5: a green gate, and evidence from the path a user takes.
 

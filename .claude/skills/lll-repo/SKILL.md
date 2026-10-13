@@ -1,12 +1,12 @@
 ---
 name: lll-repo
-description: This checkout's specifics, layered over the generic skills that ship in the lll binary (software-factory, lll, backlog-loop, merge-gate, codebase-skills). Names the team (LLL on the hosted board), the gate (mise run gate), scratch and dev boards, the archived .private sidecar, and the repo-only skills for stages 2-4. Use whenever working in the lll repository itself, alongside any of the shipped skills. Triggers on "this repo", "the gate", "mise run", "scratch board", "team LLL", "archive", ".private".
+description: This checkout's specifics, layered over the generic skills that ship in the lll binary (software-factory, lll, backlog-loop, verify-gate, merge-gate, codebase-skills). Names the team (LLL on the hosted board), the gate (mise run gate), scratch and dev boards, the archived .private sidecar, and indexes this repo's own skills for stages 2-4. Use whenever working in the lll repository itself, alongside any of the shipped skills. Triggers on "this repo", "the gate", "mise run", "scratch board", "team LLL", "archive", ".private".
 ---
 
 # lll's own repo: the overlay on the shipped skills
 
-The skills in `software-factory`, `lll`, `backlog-loop`, `merge-gate` and
-`codebase-skills` ship inside the binary (`lll skill get NAME`), so they say
+The skills in `software-factory`, `lll`, `backlog-loop`, `verify-gate`,
+`merge-gate` and `codebase-skills` ship inside the binary (`lll skill get NAME`), so they say
 "your team" and "your project's gate". This page fills those blanks for THIS
 repository. It does not ship: `scripts/sync_skills.py` mirrors only the
 portable skills into `skills/`, and `skills/skills_test.go` fails if a
@@ -44,9 +44,11 @@ grep GATE_EXIT gate.log
 `mise run scratch` or the release workflow; that is how seed was broken for
 five days under a green gate.
 
-## Stages 2 to 4 here
+## Stages 2 to 4 here: this repo's skill index
 
-The shipped `software-factory` map leaves these to the repo. In this one:
+The shipped `software-factory` map leaves stages 2 and 3 to the repo and sends
+agents to the repo's own list. This is that list; nothing outside it exists
+here, and none of it ships. In this repo:
 
 - **2 isolate**: `parallel-work` - worktrees, the shared git state a worktree
   does not isolate, ports and servers in parallel, getting the branch out.
@@ -58,8 +60,9 @@ The shipped `software-factory` map leaves these to the repo. In this one:
     drafts a broadcast must not clear.
   - `pocketbase` - anything under `pb/` or `gopb/`: migrations, collection
     rules (empty string means PUBLIC), realtime, auth.
-- **4 verify**: `verify-gate` - an isolated board, `mise run doctor` before you
-  trust it, the browser drivers, where evidence lives.
+- **4 verify**: `verify-gate` (shipped) is the method; `lll-verify` is this
+  repo's tooling for it - an isolated board, `mise run doctor` before you
+  trust it, the browser drivers and feature map, where evidence lives.
 
 ## Running a board by hand
 
@@ -90,8 +93,11 @@ binary path and kills every sibling agent's server. Kill only PIDs you started.
 
 ## Editing the shipped skills
 
-`.claude/skills/<name>/SKILL.md` is the editable source for the five shipped
+`.claude/skills/<name>/SKILL.md` is the editable source for the six shipped
 skills; `skills/` is a committed mirror. After editing one, run
 `python3 scripts/sync_skills.py`. Keep them generic: no team key, no
 `mise run`, no ticket keys, no relative links, and no names of skills that do
-not ship. Anything specific to this repo goes on this page.
+not ship. Anything specific to this repo goes on this page. The gate holds
+this: `sync_skills.py` refuses a relative link or any repo-only skill name,
+bare or backticked, and `--check` fails when a mirrored copy differs from its
+source.

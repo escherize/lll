@@ -14,10 +14,12 @@ It is the shared source for tracking, token identity, recording findings,
 verification and the claim-before-code workflow. Read an issue fully, claim
 it before nontrivial work, record discoveries, and close it after verification.
 
-Those two, with `backlog-loop`, `merge-gate` and `codebase-skills`, ship in
+Those two, with `backlog-loop`, `verify-gate`, `merge-gate` and
+`codebase-skills`, ship in
 the binary and are written for any repo: they say "your team" and "your
 project's gate". This repo's answers (team `LLL`, `mise run gate`, scratch
-boards, the archive, the repo-only skills for stages 2-4) are in
+boards, the archive, and the index of this repo's own skills for stages 2-4)
+are in
 [.claude/skills/lll-repo/SKILL.md](.claude/skills/lll-repo/SKILL.md). Read it
 alongside them.
 <!-- /tracker pointer -->
@@ -38,12 +40,15 @@ alongside them.
 - For working the backlog unattended — which issues an agent may safely take,
   and when it must hand one back instead — read
   [.claude/skills/backlog-loop/SKILL.md](.claude/skills/backlog-loop/SKILL.md).
+- For proving a change against a running board here (scratch boards, the
+  doctor, the browser drivers, where evidence goes), read
+  [.claude/skills/lll-verify/SKILL.md](.claude/skills/lll-verify/SKILL.md).
 - For the half after the pull request — merging, confirming the change reached
   the artifact people install, release ordering, and closing honestly — read
   [.claude/skills/merge-gate/SKILL.md](.claude/skills/merge-gate/SKILL.md).
 
-The `software-factory`, `lll`, `backlog-loop`, `merge-gate` and
-`codebase-skills` skills also ship inside the binary, so an agent working from
+The `software-factory`, `lll`, `backlog-loop`, `verify-gate`, `merge-gate`
+and `codebase-skills` skills also ship inside the binary, so an agent working from
 another repo can read them without this checkout: `lll skill list`,
 `lll skill get software-factory`.
 

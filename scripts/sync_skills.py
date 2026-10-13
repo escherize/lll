@@ -27,7 +27,7 @@ import shutil
 import sys
 from pathlib import Path
 
-PORTABLE = ["software-factory", "lll", "backlog-loop", "merge-gate", "codebase-skills"]
+PORTABLE = ["software-factory", "lll", "backlog-loop", "merge-gate", "codebase-skills", "verify-gate"]
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / ".claude" / "skills"
@@ -54,31 +54,41 @@ def present() -> dict[str, str]:
     }
 
 
+def leaks(want: dict[str, str], repo_only: list[str]) -> list[str]:
+    """What in the shipped bodies points at something the binary does not carry.
+
+    Only SKILL.md is mirrored, so every relative link in a shipped skill is
+    dead in every other repo (LLL-538), whether it names a sibling skill or a
+    file beside it. And a repo-only skill named at all, linked, backticked or
+    bare in a stage table, reads as "go read it" where there is nothing to read
+    (LLL-647, LLL-703: the old map listed lisette-interop, datastar-fragments
+    and pocketbase as plain text inside a code block).
+    """
+    out = []
+    for name, text in want.items():
+        # Inline links, angle brackets stripped, and reference definitions.
+        targets = re.findall(r"\]\(<?([^)\s>]+)>?", text)
+        targets += re.findall(r"(?m)^\s*\[[^\]]+\]:\s*<?([^\s>]+)", text)
+        for target in targets:
+            if not re.match(r"[a-z][a-z0-9+.-]*:|#", target):
+                out.append(f"{name} links to {target}; a relative link is dead outside this repo")
+        for other in repo_only:
+            # Case-sensitive, and not inside a url or path (pocketbase.io/docs).
+            if re.search(rf"(?<![\w./-]){re.escape(other)}(?![\w/-])", text):
+                out.append(f"{name} names {other}, which does not ship")
+    return out
+
+
 def main() -> None:
     check = "--check" in sys.argv[1:]
     want, have = wanted(), present()
 
-    # A shipped skill that links to a skill the binary lacks is a dead link in
-    # every other repo (LLL-538). Name such a skill in plain text instead.
-    dead = [
-        f"{name} links to {target}, which does not ship"
-        for name, text in want.items()
-        for target in re.findall(r"\]\(\.\./([^/)]+)/SKILL\.md\)", text)
-        if target not in PORTABLE
-    ]
-    # Naming a repo-only skill in backticks reads as "go read it", and in any
-    # other repo there is nothing to read (LLL-647). Repo specifics belong in
-    # the lll-repo overlay, which does not ship.
+    # Repo specifics belong in the lll-repo overlay, which does not ship.
     repo_only = sorted(
         d.name for d in SOURCE.iterdir()
         if (d / "SKILL.md").is_file() and d.name not in PORTABLE
     )
-    dead += [
-        f"{name} names `{other}`, which does not ship"
-        for name, text in want.items()
-        for other in repo_only
-        if f"`{other}`" in text
-    ]
+    dead = leaks(want, repo_only)
     if dead:
         for line in dead:
             print(f"  {line}", file=sys.stderr)
