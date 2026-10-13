@@ -114,7 +114,7 @@ lll finding near src/api           # traps already recorded for these paths
 
 # a trap, the moment it costs you time; 'suspected' until you have proof
 printf '%s' "$what_happened" | lll finding create port-probe-races \
-  -t "Port probe races a sibling server" -a ci -p scripts/e2e.sh \
+  -t "Port probe races a sibling server" -a ci --paths scripts/e2e.sh \
   --confidence suspected -b -
 lll finding confirm port-probe-races   # once you have proved it
 
@@ -126,7 +126,7 @@ lll bot create bot-myrepo          # a member for an agent: prints a paste-ready
 ```
 
 `-a` (area) is conventionally a label's name, so issues carrying that label
-surface the doc. `-p` takes comma-separated paths; `lll finding near` matches
+surface the doc. `--paths` takes comma-separated paths; `lll finding near` matches
 by them in both directions.
 
 ## What agents specifically need

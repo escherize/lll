@@ -161,6 +161,9 @@ STOP = re.compile(r"\s(?:#|\|\||\||;|&&|>|<|then)\s|\s->\s|\s{3,}|,\s")
 
 def examples(text):
     """(noun, verb, [args]) for each `lll noun verb ...` in text."""
+    # A shell line continued with a trailing backslash is one command; read
+    # its flags past the first physical line (LLL-690).
+    text = re.sub(r'\\\n[ \t]*', ' ', text)
     for match in EXAMPLE.finditer(text):
         start = match.start()
         before = text[start - 1] if start > 0 else ''
