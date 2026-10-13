@@ -44,6 +44,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 - `lll attach --key 'bad!'` is refused with exit 2, as LLL-628 intended; the
   key check ran only for a retired spelling (LLL-684).
+- `lll skill get software-factory` no longer sends agents in other repos to
+  skills only this repo has (LLL-703). Stage 4 now names `verify-gate`, which
+  ships in generic form (`lll skill list` shows six skills); stage 3 tells the
+  agent to use the list its own repo keeps and, when there is none, to say so
+  and run `codebase-skills`. lll's own stage 2-4 skills are indexed in a
+  repo-local overlay, and its board-driving specifics moved to a repo-only
+  `lll-verify`. The gate's skill check now refuses any relative link and any
+  repo-only skill name, bare or backticked, in a shipped skill; before, a bare
+  list of names inside the stage table passed it. Binaries before 0.9.0, and
+  any `.claude/skills` copy saved from one with `lll skill get`, still carry
+  the old map: upgrade and re-save.
 
 ## [1.0.1] - 2026-10-12
 
