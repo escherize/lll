@@ -6,6 +6,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- The board answers a short issue address: `/t/KEY/7` redirects (303, query
+  kept) to `/t/KEY/issue/KEY-7`, so an issue number is a URL you can type
+  (LLL-704). Only digits match. A viewer who cannot see the team gets the
+  same 404 the issue page gives, and a signed-out request the same 401.
+
 ## [1.1.0] - 2026-10-13
 
 ### Upgrading from 1.0
