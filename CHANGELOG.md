@@ -6,6 +6,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-13
+
+### Upgrading from 1.0
+
+Three exit codes change, each to the code the contract already named (see
+Changed below): `member access NAME --json` and `skill list --json` now exit 0
+instead of 2, and `issue attach`, `issue detach` and `issue download` without a
+file name exit 2 (usage) instead of 1. A script that matched the old codes for
+those commands needs updating. Every other exit code, `--json` field and
+spelling is unchanged.
+
 ### Added
 
 - `lll up` closes its banner with a prompt to paste into a local coding agent
@@ -55,6 +66,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   list of names inside the stage table passed it. Binaries before 0.9.0, and
   any `.claude/skills` copy saved from one with `lll skill get`, still carry
   the old map: upgrade and re-save.
+- The shipped `lll` skill's finding example used `-p scripts/e2e.sh` and said
+  "`-p` takes comma-separated paths"; `finding create` has no `-p`, so the
+  example was refused with exit 2 and filed nothing. It now uses `--paths`
+  (LLL-690). The gate's flag check now reads a command continued with a
+  trailing backslash, which is how this example slipped past it.
 
 ## [1.0.1] - 2026-10-12
 
