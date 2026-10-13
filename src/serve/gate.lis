@@ -564,7 +564,8 @@ pub fn scoped_route(method: string, path: string, writes: bool) -> ScopedVerdict
   }
   let Some(routed) = strings.CutPrefix(path, "/t/") else { return closed }
   let (_, rest, slash) = strings.Cut(routed, "/")
-  if !slash || rest == "" || rest == "issues" || rest == "projects" || rest == "docs" || rest == "search" {
+  if !slash || rest == "" || rest == "issues" || rest == "projects" || rest == "docs" || rest == "search" ||
+     is_issue_number(rest) {
     return ScopedVerdict.Open
   }
   for prefix in ["issue/", "doc/"] {
@@ -573,6 +574,12 @@ pub fn scoped_route(method: string, path: string, writes: bool) -> ScopedVerdict
     }
   }
   closed
+}
+
+/// Whether a /t/KEY/ path segment is an issue number, the short address
+/// /t/KEY/N for /t/KEY/issue/KEY-N (LLL-704). Digits only.
+fn is_issue_number(segment: string) -> bool {
+  segment != "" && strings.Trim(segment, "0123456789") == ""
 }
 
 /// The 404 body a team that does not exist gets (routed_team's words).

@@ -178,6 +178,29 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         doc_link = re.search(r'href="(/issue/ALPHA-\d+)"', page('/t/ALPHA/doc/cross', rw_tok)[1]).group(1)
         assert page(doc_link, rw_tok)[0] == 303
 
+        # --- LLL-704: /t/KEY/N is /t/KEY/issue/KEY-N, answered as the target answers ---
+        full = env['LLL_BOARD_TOKEN']
+        for tok in [full, rw_tok]:
+            for path, want in [('/t/ALPHA/7', '/t/ALPHA/issue/ALPHA-7'),
+                               ('/t/ALPHA/7?x=1', '/t/ALPHA/issue/ALPHA-7?x=1'),
+                               ('/t/alpha/1', '/t/ALPHA/issue/ALPHA-1')]:
+                code, _, headers = page(path, tok)
+                assert code == 303 and headers['Location'] == want, (path, code, dict(headers))
+            # No special case: a missing number is the issue page's own 404.
+            assert page('/t/ALPHA/issue/ALPHA-1', tok)[0] == 200 and page('/t/ALPHA/issue/ALPHA-7', tok)[0] == 404
+            # Only digits: other words keep the router's 404, registered words their pages.
+            for path in ['/t/ALPHA/seven', '/t/ALPHA/7x', '/t/ALPHA/-7', '/t/ALPHA/+7']:
+                assert page(path, tok)[:2] == (404, '404 page not found\n'), path
+            assert page('/t/ALPHA/issues', tok)[0] == 200
+        # Out of scope: the same answer the target gives this viewer, no redirect.
+        for path, target in [('/t/BETA/1', '/t/BETA/issue/BETA-1'), ('/t/NOPE/1', '/t/NOPE/issue/NOPE-1')]:
+            code, body, headers = page(path, rw_tok)
+            assert (code, body) == page(target, rw_tok)[:2] and code == 404 and 'Location' not in headers, (path, code)
+        # Unauthenticated: the gate's answer, as on the target, not the router's 404.
+        code, _, headers = call(board, '/t/ALPHA/7')
+        assert code == call(board, '/t/ALPHA/issue/ALPHA-7')[0] == 401 and 'Location' not in headers, code
+        assert call(board, '/t/ALPHA/seven')[:2] == (404, '404 page not found\n')
+
         # --- search: the hidden team's words find nothing ---
         for path in ['/t/ALPHA/search?q=zebra', '/t/ALPHA/search?q=zebra&raw', '/t/ALPHA/search?q=zebra&palette=1',
                      '/t/ALPHA/search?q=zebra&fragment=1']:

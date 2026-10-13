@@ -276,6 +276,27 @@ fn board_mux(
       }
     }),
   )
+  // LLL-704: an issue number is an address you can type: /t/KEY/7 is
+  // /t/KEY/issue/KEY-7. Digits only, checked before the gate, so any other
+  // unregistered word keeps the router's plain 404. The team is read as the
+  // viewer first, as GET /t/{team} does: a team it cannot see answers 404
+  // here rather than redirecting. A missing number is the issue page's 404.
+  mux.HandleFunc(
+    "GET /t/{team}/{number}",
+    |w: http.ResponseWriter, r: Ref<http.Request>| {
+      let number = r.PathValue("number")
+      if !is_issue_number(number) {
+        http.NotFound(w, r)
+        return
+      }
+      let short = gated(ctx, |gw: http.ResponseWriter, gr: Ref<http.Request>, v: Viewing| {
+        if let Some(t) = routed_team(v.reads, gw, gr) {
+          redirect_with_query(gw, gr, f"/t/{t.key}/issue/{t.key}-{number}")
+        }
+      })
+      short(w, r)
+    },
+  )
   // LLL-405: a doc's address. Team-routed like the board and issue pages,
   // because slugs are unique PER TEAM, not per server - GRDN and LLL both
   // get an `index`, so a bare /doc/SLUG cannot name one record.
