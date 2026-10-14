@@ -16,25 +16,41 @@ import (
 	"github.com/pocketbase/pocketbase/tools/router"
 )
 
-// Older PocketBase servers ignore unknown headers. A flagged CLI create
-// checks this authenticated endpoint before writing rather than assuming
-// that sending Idempotency-Key established a guarantee.
-func registerIssueIdempotencyRoutes(routes *router.Router[*core.RequestEvent]) {
-	routes.GET("/api/lll/issues/idempotency", func(e *core.RequestEvent) error {
-		return e.JSON(http.StatusOK, map[string]bool{"supported": true})
-	}).Bind(apis.RequireAuth())
+// Older PocketBase servers ignore unknown headers. A flagged CLI create or
+// comment checks its collection's authenticated endpoint before writing
+// rather than assuming that sending Idempotency-Key established a guarantee.
+// Each collection has its own endpoint because support arrived separately: a
+// server with keyed issues (LLL-438) may predate keyed comments (LLL-700).
+func registerIdempotencyRoutes(routes *router.Router[*core.RequestEvent]) {
+	for _, collection := range []string{"issues", "comments"} {
+		routes.GET("/api/lll/"+collection+"/idempotency", func(e *core.RequestEvent) error {
+			return e.JSON(http.StatusOK, map[string]bool{"supported": true})
+		}).Bind(apis.RequireAuth())
+	}
 }
 
-func registerIssueIdempotency(app core.App) {
+// registerIdempotency binds keyed creation for issues, scoped per team
+// (LLL-438), and for comments, scoped per issue (LLL-700). A comment cannot
+// move to another issue (LLL-678), so its reservation stays where it was made.
+func registerIdempotency(app core.App) {
+	registerKeyedCreate(app, "issues", "team", "creator")
+	registerKeyedCreate(app, "comments", "issue", "author")
+}
+
+// registerKeyedCreate makes a create on collection idempotent under an
+// Idempotency-Key header. scope is the field the key is unique within, and
+// owner the member field forced to the authenticated member before the
+// payload is fingerprinted, so one member's retry never matches another's.
+func registerKeyedCreate(app core.App, collection, scope, owner string) {
 	// Metadata is server-owned, including when an API client supplies fields
 	// directly. Updates preserve the original creation fingerprint.
-	app.OnRecordUpdateRequest("issues").BindFunc(func(e *core.RecordRequestEvent) error {
+	app.OnRecordUpdateRequest(collection).BindFunc(func(e *core.RecordRequestEvent) error {
 		for _, name := range []string{"idempotency_key", "idempotency_fingerprint"} {
 			e.Record.Set(name, e.Record.Original().GetString(name))
 		}
 		return e.Next()
 	})
-	app.OnRecordCreateRequest("issues").BindFunc(func(e *core.RecordRequestEvent) error {
+	app.OnRecordCreateRequest(collection).BindFunc(func(e *core.RecordRequestEvent) error {
 		e.Record.Set("idempotency_key", "")
 		e.Record.Set("idempotency_fingerprint", "")
 		key := strings.TrimSpace(e.Request.Header.Get("Idempotency-Key"))
@@ -59,7 +75,7 @@ func registerIssueIdempotency(app core.App) {
 			}
 		}
 		if e.Auth != nil && e.Auth.Collection().Name == "members" {
-			payload["creator"] = e.Auth.Id
+			payload[owner] = e.Auth.Id
 		}
 		canonical, err := json.Marshal(payload)
 		if err != nil {
@@ -73,9 +89,9 @@ func registerIssueIdempotency(app core.App) {
 		var reused *core.Record
 		err = originalApp.RunInTransaction(func(tx core.App) error {
 			e.App = tx
-			existing, err := tx.FindFirstRecordByFilter("issues",
-				"team={:team} && idempotency_key={:key}",
-				dbx.Params{"team": e.Record.GetString("team"), "key": key})
+			existing, err := tx.FindFirstRecordByFilter(collection,
+				scope+"={:scope} && idempotency_key={:key}",
+				dbx.Params{"scope": e.Record.GetString(scope), "key": key})
 			if err == nil {
 				if existing.GetString("idempotency_fingerprint") != fingerprint {
 					return router.NewApiError(http.StatusConflict,

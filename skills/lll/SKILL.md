@@ -188,6 +188,16 @@ creation fields and context when retrying. A replay returns the current issue
 without reverting subsequent edits. The server must support keyed creation;
 the CLI checks support before writing. Unkeyed creates remain independent.
 
+**Make retried comments idempotent the same way.** A comment can be saved
+while the client gives up waiting, and a plain retry posts it twice. Use
+`lll issue comment KEY-12 -b "..." --idempotency-key KEY` with a key derived
+from the intent, for example `handoff:2026-10-14`, and keep it for every retry.
+Keys are scoped per issue: the same key on another issue makes a separate
+comment. A matching retry reports `Reused the comment` (`reused: true` with
+`--json`) and exits 0; a changed body is a 409 conflict and exits 4. The
+fingerprint includes the agent label, so retry with the same `--agent`. The
+CLI checks server support before writing and refuses on an older server.
+
 ## Always document friction and feature requests
 
 **This is not optional and it is not a nicety.** Every agent hits the same walls,
