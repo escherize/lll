@@ -127,6 +127,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 		if err != nil {
 			return err
 		}
+		stampActor(issue, by)
 		if fields.IfUnmodifiedSince != nil {
 			if err := checkUnmodified(issue, *fields.IfUnmodifiedSince); err != nil {
 				return err
@@ -136,6 +137,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 		if err != nil {
 			return err
 		}
+		stampActor(held, by)
 		currentID := ""
 		if held != nil {
 			currentID = held.Id

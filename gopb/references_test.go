@@ -60,7 +60,7 @@ func TestReferenceTransactionConcurrencyAndRollback(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := appendReference(app, issue.Id, fmt.Sprintf("gh#%d", i+1))
+			_, err := appendReference(app, issue.Id, fmt.Sprintf("gh#%d", i+1), releaser{})
 			errors <- err
 		}()
 	}
@@ -79,14 +79,14 @@ func TestReferenceTransactionConcurrencyAndRollback(t *testing.T) {
 		t.Fatal(saved.PublicExport())
 	}
 	before := saved.GetString("refs")
-	if _, err := appendReference(app, issue.Id, strings.Repeat("x", 2001)); err == nil {
+	if _, err := appendReference(app, issue.Id, strings.Repeat("x", 2001), releaser{}); err == nil {
 		t.Fatal("oversize append succeeded")
 	}
 	team.Set("archived", true)
 	if err := app.Save(team); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := appendReference(app, issue.Id, "gh#99"); err == nil {
+	if _, err := appendReference(app, issue.Id, "gh#99", releaser{}); err == nil {
 		t.Fatal("archived append succeeded")
 	}
 	saved, _ = app.FindRecordById("issues", issue.Id)

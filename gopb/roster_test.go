@@ -99,10 +99,10 @@ func TestClaimRefusalHidesAHolderOutsideTheRoster(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
+	if _, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = acquireClaim(app, issueID, beta, "")
+	_, err = acquireClaim(app, issueID, releaser{memberID: beta, agent: ""})
 	if err == nil || err.Error() != "issue is already claimed by a hidden member" {
 		t.Fatalf("scoped caller: %v", err)
 	}

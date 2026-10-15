@@ -34,13 +34,14 @@ func mergeReference(existing, reference string) (referenceOutcome, error) {
 	return referenceOutcome{Refs: existing + separator + reference, Added: true}, nil
 }
 
-func appendReference(app core.App, issueID, reference string) (referenceOutcome, error) {
+func appendReference(app core.App, issueID, reference string, by releaser) (referenceOutcome, error) {
 	var result referenceOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
 		if err != nil {
 			return err
 		}
+		stampActor(issue, by)
 		team, err := tx.FindRecordById("teams", issue.GetString("team"))
 		if err != nil {
 			return err
@@ -72,7 +73,7 @@ func registerReferenceRoutes(routes *router.Router[*core.RequestEvent], writes *
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		result, err := appendReference(re.App, re.Request.PathValue("issue"), body.Ref)
+		result, err := appendReference(re.App, re.Request.PathValue("issue"), body.Ref, routeActor(re))
 		if err == nil {
 			return re.JSON(http.StatusOK, result)
 		}

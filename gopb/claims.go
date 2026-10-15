@@ -54,13 +54,15 @@ func agentsDiffer(held *core.Record, agent string) bool {
 	return held.GetString("agent") != "" && agent != "" && held.GetString("agent") != agent
 }
 
-func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, error) {
+func acquireClaim(app core.App, issueID string, by releaser) (ClaimOutcome, error) {
+	memberID, agent := by.memberID, by.agent
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
 		if err != nil {
 			return err
 		}
+		stampActor(issue, by)
 		member, err := tx.FindRecordById("members", memberID)
 		if err != nil {
 			return err
@@ -69,6 +71,7 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 		if err != nil {
 			return err
 		}
+		stampActor(held, by)
 		alreadyOwned := held != nil
 		if held != nil && held.GetString("member") != memberID {
 			name := rosterName(tx, memberID, held.GetString("member"), "someone else")
@@ -84,6 +87,7 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 				return err
 			}
 			held = core.NewRecord(collection)
+			stampActor(held, by)
 			held.Set("issue", issueID)
 			held.Set("member", memberID)
 			held.Set("agent", agent)
@@ -114,11 +118,15 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 // agent is the releasing session's label (LLL-521). The same member under a
 // different non-empty label than the holder's is another session, and like
 // another member it needs force.
+//
+// origin is the request's self-asserted host, for the audit log (LLL-609),
+// which every record a releaser writes is stamped for (stampActor).
 type releaser struct {
 	memberID string
 	agent    string
 	force    bool
 	reason   string
+	origin   string
 }
 
 // byline names a member and, when it has one, its session label.
@@ -144,10 +152,12 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 		if err != nil {
 			return err
 		}
+		stampActor(issue, by)
 		held, err := currentClaim(tx, issueID)
 		if err != nil {
 			return err
 		}
+		stampActor(held, by)
 		if held == nil {
 			return &claimRejection{"not_claimed", "is not claimed"}
 		}
@@ -207,10 +217,12 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 		if err != nil {
 			return err
 		}
+		stampActor(issue, by)
 		held, err := currentClaim(tx, issueID)
 		if err != nil {
 			return err
 		}
+		stampActor(held, by)
 		currentID := ""
 		if held != nil {
 			currentID = held.Id
@@ -290,6 +302,7 @@ func registerFinishRelease(app core.App) {
 		if !finishReleases(held, from, to, by, query.Get("keep_claim") == "true") {
 			return e.Next()
 		}
+		stampActor(held, requestActor(e))
 		original := e.App
 		defer func() { e.App = original }()
 		return original.RunInTransaction(func(tx core.App) error {
@@ -402,6 +415,7 @@ func recordForcedRelease(tx core.App, issue, held *core.Record, by releaser) err
 	comment.Set("author", by.memberID)
 	comment.Set("server_record", true)
 	comment.Set("body", body)
+	stampActor(comment, by)
 	return tx.Save(comment)
 }
 
@@ -416,13 +430,15 @@ func recordForcedRelease(tx core.App, issue, held *core.Record, by releaser) err
 // that the work is still alive, which no one else can make. A sibling agent
 // on the holder's token is "someone else" when both carry different labels
 // (LLL-521), the same test acquireClaim applies.
-func renewClaim(app core.App, issueID, expectedClaimID, memberID, agent string) (ClaimOutcome, error) {
+func renewClaim(app core.App, issueID, expectedClaimID string, by releaser) (ClaimOutcome, error) {
+	memberID, agent := by.memberID, by.agent
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		held, err := currentClaim(tx, issueID)
 		if err != nil {
 			return err
 		}
+		stampActor(held, by)
 		if held == nil {
 			return &claimRejection{"not_claimed", "is not claimed"}
 		}

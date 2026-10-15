@@ -176,6 +176,10 @@ so a gap looks exactly like a quiet board. A long-running agent keeps the time
 of the last event it handled and, on every start and reconnect, runs
 `lll issue list --since <that time>` before trusting the stream. A fleet
 coordinator missed three cards reaching done by relying on watch alone.
+`issue list --since` misses comments and claims, which do not change the
+issue; `lll activity --since CURSOR` does not. It reads the server's audit
+log of every issue, comment and claim write in order, with who made it, and
+prints the next cursor on stderr (with `--json`, the last item's `seq`).
 
 **Make retried creates idempotent.** Use `lll issue create --idempotency-key KEY`
 when a run might lose the creation response. Derive the key once from the

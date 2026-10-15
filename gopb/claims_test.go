@@ -115,12 +115,12 @@ func TestClaimTransitionsRollbackBothWrites(t *testing.T) {
 		return e.Next()
 	})
 	fail = true
-	if _, err := acquireClaim(app, issueID, alpha, ""); err == nil {
+	if _, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""}); err == nil {
 		t.Fatal("expected failure")
 	}
 	assertClaimState(t, app, issueID, "", "")
 	fail = false
-	held, err := acquireClaim(app, issueID, alpha, "")
+	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,11 +133,11 @@ func TestClaimTransitionsRollbackBothWrites(t *testing.T) {
 
 func TestClaimIdempotencyAndUnrelatedAssignment(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	first, err := acquireClaim(app, issueID, alpha, "")
+	first, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := acquireClaim(app, issueID, alpha, "")
+	again, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil || !again.AlreadyOwned || again.ClaimID != first.ClaimID || again.Created != first.Created {
 		t.Fatalf("idempotent claim: %#v %v", again, err)
 	}
@@ -162,7 +162,7 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 			member = beta
 		}
 		wg.Add(1)
-		go func() { defer wg.Done(); _, _ = acquireClaim(app, issueID, member, "") }()
+		go func() { defer wg.Done(); _, _ = acquireClaim(app, issueID, releaser{memberID: member, agent: ""}) }()
 	}
 	wg.Wait()
 	held, err := currentClaim(app, issueID)
@@ -173,7 +173,7 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 	if _, err := releaseClaim(app, issueID, held.Id, releaser{memberID: held.GetString("member")}); err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := acquireClaim(app, issueID, beta, "")
+	replacement, err := acquireClaim(app, issueID, releaser{memberID: beta, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,33 +191,33 @@ func TestConcurrentClaimantsAndStaleRelease(t *testing.T) {
 // member-level idempotency every existing caller relies on.
 func TestClaimAgentLabels(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	first, err := acquireClaim(app, issueID, alpha, "wt-a")
+	first, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-a"})
 	if err != nil || first.Agent != "wt-a" {
 		t.Fatalf("labelled claim: %#v %v", first, err)
 	}
-	_, err = acquireClaim(app, issueID, alpha, "wt-b")
+	_, err = acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-b"})
 	var rejected *claimRejection
 	if !errors.As(err, &rejected) || rejected.Error() != "issue is already claimed by Alpha (agent wt-a)" {
 		t.Fatalf("differing label accepted or misreported: %v", err)
 	}
 	for _, agent := range []string{"wt-a", ""} {
-		again, err := acquireClaim(app, issueID, alpha, agent)
+		again, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: agent})
 		if err != nil || !again.AlreadyOwned || again.ClaimID != first.ClaimID || again.Agent != "wt-a" {
 			t.Fatalf("idempotent claim with %q: %#v %v", agent, again, err)
 		}
 	}
-	if _, err := acquireClaim(app, issueID, beta, "wt-a"); !errors.As(err, &rejected) {
+	if _, err := acquireClaim(app, issueID, releaser{memberID: beta, agent: "wt-a"}); !errors.As(err, &rejected) {
 		t.Fatalf("another member took the hold: %v", err)
 	}
 	assertClaimState(t, app, issueID, alpha, alpha)
 	if _, err := releaseClaim(app, issueID, first.ClaimID, releaser{memberID: alpha}); err != nil {
 		t.Fatal(err)
 	}
-	unlabelled, err := acquireClaim(app, issueID, alpha, "")
+	unlabelled, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	labelled, err := acquireClaim(app, issueID, alpha, "wt-b")
+	labelled, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-b"})
 	if err != nil || !labelled.AlreadyOwned || labelled.ClaimID != unlabelled.ClaimID {
 		t.Fatalf("unlabelled hold refused a labelled session: %#v %v", labelled, err)
 	}
@@ -227,7 +227,7 @@ func TestClaimAgentLabels(t *testing.T) {
 // force, and a forced release leaves a comment naming both members.
 func TestReleaseRequiresHolderOrForce(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, alpha, "")
+	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestReleaseRequiresHolderOrForce(t *testing.T) {
 	assertClaimState(t, app, issueID, "", "")
 	assertComments(t, app, issueID)
 
-	held, err = acquireClaim(app, issueID, alpha, "")
+	held, err = acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestReleaseRequiresHolderOrForce(t *testing.T) {
 	assertClaimState(t, app, issueID, "", "")
 	assertComments(t, app, issueID, beta+": Beta force-released Alpha's claim.\n\nReason: Alpha's agent crashed")
 
-	held, err = acquireClaim(app, issueID, alpha, "")
+	held, err = acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestReleaseRequiresHolderOrForce(t *testing.T) {
 // no label on either side releases as the holder.
 func TestReleaseRefusesADifferentAgentLabel(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	held, err := acquireClaim(app, issueID, alpha, "wt-a")
+	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestReleaseRefusesADifferentAgentLabel(t *testing.T) {
 	assertComments(t, app, issueID, forcedComment)
 
 	for _, agent := range []string{"wt-a", ""} {
-		held, err := acquireClaim(app, issueID, alpha, "wt-a")
+		held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-a"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -305,7 +305,7 @@ func TestReleaseRefusesADifferentAgentLabel(t *testing.T) {
 			t.Fatalf("release with %q: %#v %v", agent, outcome, err)
 		}
 	}
-	held, err = acquireClaim(app, issueID, alpha, "")
+	held, err = acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestReleaseRefusesADifferentAgentLabel(t *testing.T) {
 // claim stays where it was.
 func TestForcedReleaseRollsBackWithoutItsComment(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, alpha, "")
+	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}

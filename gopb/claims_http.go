@@ -54,7 +54,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		// Clearing the assignee releases the claim, so the caller is a
 		// releaser like /release's, superuser included (LLL-516).
-		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason), origin: originHost(re.Request)}
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}
@@ -91,7 +91,8 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member, body.Agent)
+		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"),
+			releaser{memberID: body.Member, agent: body.Agent, origin: originHost(re.Request)})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
@@ -126,7 +127,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		// the comment is the only record the release happened. (A superuser
 		// can still DELETE the record directly - claims.deleteRule is null,
 		// not "nobody" - but that is the admin API, not the release path.)
-		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason), origin: originHost(re.Request)}
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}
@@ -158,7 +159,7 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
 			return err
 		}
-		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason)}
+		by := releaser{agent: body.Agent, force: body.Force, reason: strings.TrimSpace(body.Reason), origin: originHost(re.Request)}
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}
@@ -193,7 +194,8 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, memberID, body.Agent)
+		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID,
+			releaser{memberID: memberID, agent: body.Agent, origin: originHost(re.Request)})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 }

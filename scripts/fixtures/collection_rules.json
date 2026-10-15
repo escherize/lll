@@ -1,4 +1,11 @@
 {
+  "audit_events": {
+    "createRule": null,
+    "deleteRule": null,
+    "listRule": "@request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team)",
+    "updateRule": null,
+    "viewRule": "@request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team)"
+  },
   "claims": {
     "createRule": null,
     "deleteRule": null,

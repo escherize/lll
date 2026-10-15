@@ -992,6 +992,10 @@ fn request_options(
     // LLL-399: the optimistic-write precondition, "" for none.
     if stamp != "" { h.Set("If-Unmodified-Since", stamp) }
     if key != "" { h.Set("Idempotency-Key", key) }
+    // LLL-609: the audit log records who asked; both are self-asserted.
+    let agent = os.Getenv("LLL_AGENT")
+    if agent != "" { h.Set("X-LLL-Agent", agent) }
+    if let Ok(host) = os.Hostname() { h.Set("X-LLL-Origin-Host", host) }
   }
   let resp = match http_client(budget).Do(req) {
     Ok(r) => r,
