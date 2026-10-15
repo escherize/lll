@@ -23,6 +23,16 @@ Then run `mise run release-check CUT=<sha>` and fix every FAIL before you go on.
 Main is green and deployed at the cut, no security work is half-landed, and
 version skew works in both directions. See the table above.
 
+## Client/server compatibility and migration rehearsal
+
+Before tagging, follow [the upgrade procedure](upgrading.md). Run
+`scripts/rehearse_upgrade.py` with the published baseline and the candidate
+binary, and retain its JSON report with both hashes on the release issue.
+Publish which pairs and capabilities were actually checked, including safe
+unsupported-feature refusal. Confirm a pre-upgrade backup can be started with
+its matching old binary; a version-skew warning is not a compatibility test.
+This synthetic rehearsal is separate from the agent DX fleet below.
+
 ## 5. Agent DX fleet
 
 Run a small agent-dx fleet: 5 workers over the cases that the release touched.
@@ -61,5 +71,6 @@ A green release workflow is not proof that people can install the release.
 
 - CLI: never rewrite or move a published tag. Ship a patch release
   (`v<version+patch>`) through steps 6 and 7.
-- Server: redeploy Fly's previous image. If data is damaged, restore from a
-  `pb_data` volume snapshot as in `docs/hosted-recovery.md`.
+- Server: stop the new server and restore a pre-upgrade backup with its
+  matching old image. Do not assume the previous image can read migrated data.
+  See `docs/upgrading.md` and `docs/hosted-recovery.md`.
