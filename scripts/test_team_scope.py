@@ -557,12 +557,18 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert record('bot-boss')['teams'] == made['teams'], 'narrowing a worker narrowed its creator'
         # Revoking the creator (its owner cleared) succeeds, detaches and
         # narrows what it created, and its old token rotates none of them.
-        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[0] == 200, 'control: the creator rotates'
+        w2_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[1]['token']
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w2_tok)[0] == 200, 'control: the minted token works'
         revoke = call(api, f"/api/collections/members/records/{w1['id']}", {'owner': ''}, su, 'PATCH')
         assert revoke[0] == 200, revoke[:2]
         assert record('bot-boss-w2')['created_by'] == '' and record('bot-boss-w2')['teams'] == [alpha['id']], record('bot-boss-w2')
-        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[0] == 403, \
+        # bot-boss-w1 was itself created by bot-boss, so losing its owner
+        # detaches it too and strands its own token: 401 rather than 403.
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[0] == 401, \
             'a creator with no owner rotated its old worker'
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w2_tok)[0] == 401, \
+            'the revoked creator still acts as its worker with the token it minted'
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, boss_tok)[0] == 200, 'the owner re-mints it'
         out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.

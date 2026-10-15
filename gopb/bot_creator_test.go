@@ -252,6 +252,10 @@ func TestRevokingTheCreatorDetachesAndNarrowsItsWorkers(t *testing.T) {
 			if got.GetString("created_by") != "" {
 				t.Fatalf("bot-w1 still names its creator after %s", revoke)
 			}
+			// The tokens the creator minted for it stop working.
+			if got.TokenKey() == w.TokenKey() {
+				t.Fatalf("bot-w1 kept its token key after %s, so the creator's copy still works", revoke)
+			}
 			if a := ownAccess(got); a.all || len(a.teams) > 1 || (len(a.teams) == 1 && a.teams[0] != f.alpha) {
 				t.Fatalf("bot-w1 widened after %s: %+v", revoke, a)
 			}

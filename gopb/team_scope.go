@@ -217,7 +217,8 @@ func narrowCreated(app core.App, m *core.Record) error {
 // detachStaleCreator clears created_by on an update when the creator no
 // longer shares the bot's human owner: the creator lost its owner or was
 // re-owned, or the bot was. The bot is then an ordinary bot of its owner:
-// the creator stops rotating it and stops bounding it, and checkCreator
+// the creator stops rotating it and stops bounding it, every token minted
+// for it so far stops working, and checkCreator
 // cannot refuse a save that narrows or revokes. A created_by the update
 // itself sets is left for checkCreator to judge.
 func detachStaleCreator(app core.App, m *core.Record) {
@@ -231,6 +232,10 @@ func detachStaleCreator(app core.App, m *core.Record) {
 	}
 	if creator.GetString("owner") == "" || creator.GetString("owner") != m.GetString("owner") {
 		m.Set("created_by", "")
+		// The creator holds every token it minted for this bot. Detaching
+		// strands them, so a revoked creator cannot keep acting as it; the
+		// bot's owner re-mints with 'lll bot rotate'.
+		m.RefreshTokenKey()
 	}
 }
 
