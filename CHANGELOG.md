@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- Predictable upgrade guidance and a loopback-only binary-to-binary migration
+  and stopped-backup restore rehearsal, with exact tested-pair hashes (LLL-706).
+
 - Issue view and next JSON include covered blocker refs (using each visible
   blocker's own team key), comment author names and explicit server-written
   comment markers. Hidden identities remain hidden (LLL-691).

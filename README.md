@@ -352,3 +352,6 @@ page over SSE; [Datastar](https://data-star.dev) morphs them into the DOM.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+For server-first rollout, tested client/server pairs, isolated migration and
+restore rehearsals, see [Predictable upgrades](docs/upgrading.md).
