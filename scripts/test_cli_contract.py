@@ -218,6 +218,22 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         missing = code(3, 'api', 'GET', '/api/collections/issues/records/nope', '--fail')
         assert '"status":404' in missing.stdout.replace(' ', ''), missing.stdout
         code(6, 'api', 'GET', '/api/collections/issues/records', '--fail', token_override='not.a.token')
+        # Covered integration fields must work without reading expand.
+        viewed = as_json('issue', 'view', 'CON-3', '--json')
+        authored = next(c for c in viewed['comments'] if c['id'] == made['id'])
+        assert authored['author_name'] == 'contract-owner', authored
+        assert authored['server_record'] is False, authored
+        assert viewed['blocked_by_refs'] == [], viewed['blocked_by_refs']
+        code(0, 'issue', 'release', 'CON-2', '--force', '--reason', 'contract proof', token_override=other_token)
+        forced = as_json('issue', 'view', 'CON-2', '--json')['comments']
+        server_note = next(c for c in forced if c.get('server_record'))
+        assert server_note['author_name'] == 'other' and server_note['author'] == other['id'], server_note
+        # A visible blocker needs no expand parsing or second lookup.
+        blocker = as_json('issue', 'view', 'CON-1', '--json')
+        code(0, 'issue', 'block', 'CON-3', 'CON-1')
+        viewed = as_json('issue', 'view', 'CON-3', '--json')
+        assert viewed['blocked_by_refs'] == [{'id': blocker['id'], 'key': 'CON-1',
+                                             'title': 'first', 'state': 'done'}], viewed['blocked_by_refs']
     finally:
         child.terminate()
         try:
