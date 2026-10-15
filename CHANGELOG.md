@@ -15,6 +15,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   forced release preserves the holder separately and expiry identifies the
   system. Old-server attribution is explicitly unknown (LLL-642).
 
+- Issue view and next JSON include covered blocker refs (using each visible
+  blocker's own team key), comment author names and explicit server-written
+  comment markers. Hidden identities remain hidden (LLL-691).
+
 - JSON watch issue events carry covered key, priority name and creator name
   beside the raw record, including ready transitions (LLL-694).
 
