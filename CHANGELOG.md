@@ -44,8 +44,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   created. The server records the coordinator in the member's new
   `created_by` field (members cannot set it), `lll member list` and
   `lll member access` show it, and the coordinator may rotate those bots'
-  tokens. When the coordinator loses or changes its owner (or its owner is
-  deleted), the bots it created are detached: `created_by` is cleared, they
+  tokens while it can write. When the coordinator loses or changes its owner,
+  is deleted, or its owner is deleted, the bots it created are detached:
+  `created_by` is cleared, they
   are narrowed, and every token minted for them stops working, so the owner
   re-mints with `lll bot rotate`. A read-only bot is still refused, and a bot with no owner still gets
   "a bot cannot own a bot". The board's "Add a bot" is unchanged.

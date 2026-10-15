@@ -154,6 +154,14 @@ func registerMemberScopeDefault(app core.App) {
 			setAccess(e.Record, kept)
 		}
 		detachStaleCreator(e.App, e.Record)
+		// The creator holds every token it minted for this bot. Losing
+		// created_by any way (detached here, the creator deleted, which
+		// PocketBase clears with a save, or a superuser clearing it) strands
+		// them, so the old creator cannot keep acting as the bot; its owner
+		// re-mints with 'lll bot rotate' (LLL-709 review F2).
+		if before.GetString("created_by") != "" && e.Record.GetString("created_by") == "" {
+			e.Record.RefreshTokenKey()
+		}
 		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				if err := checkOwner(e.App, e.Record); err != nil {
@@ -232,10 +240,6 @@ func detachStaleCreator(app core.App, m *core.Record) {
 	}
 	if creator.GetString("owner") == "" || creator.GetString("owner") != m.GetString("owner") {
 		m.Set("created_by", "")
-		// The creator holds every token it minted for this bot. Detaching
-		// strands them, so a revoked creator cannot keep acting as it; the
-		// bot's owner re-mints with 'lll bot rotate'.
-		m.RefreshTokenKey()
 	}
 }
 

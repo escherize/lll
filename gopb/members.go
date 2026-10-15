@@ -127,7 +127,35 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 // rotateBot authorizes auth to rotate the bot named name, refreshes its
 // token key and mints a token from the persisted record. Errors are
 // *router.ApiError, ready to return from the route.
+//
+// One transaction, reading the caller and the bot inside it (LLL-709
+// review F1): auth is the record the request authenticated with, read
+// before a concurrent revocation or narrowing may have committed, and Save
+// writes every column, so a stale copy would overwrite a committed detach
+// or narrowing and mint a token for it.
 func rotateBot(app core.App, auth *core.Record, superuser bool, name string, duration int64) (string, *core.Record, error) {
+	var token string
+	var fresh *core.Record
+	err := app.RunInTransaction(func(tx core.App) error {
+		caller := auth
+		if auth != nil && !auth.IsSuperuser() {
+			reread, err := tx.FindRecordById("members", auth.Id)
+			if err != nil {
+				return router.NewUnauthorizedError("the token's member no longer exists", nil)
+			}
+			caller = reread
+		}
+		var err error
+		token, fresh, err = rotateBotIn(tx, caller, superuser, name, duration)
+		return err
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return token, fresh, nil
+}
+
+func rotateBotIn(app core.App, auth *core.Record, superuser bool, name string, duration int64) (string, *core.Record, error) {
 	bot, err := app.FindFirstRecordByFilter(
 		"members", "name = {:name} && kind = 'bot'",
 		dbx.Params{"name": name},
@@ -142,6 +170,9 @@ func rotateBot(app core.App, auth *core.Record, superuser bool, name string, dur
 	// creator re-owned or left without an owner rotates nothing.
 	createdByCaller := auth != nil && bot.GetString("created_by") != "" && auth.Id == bot.GetString("created_by") &&
 		auth.GetString("owner") != "" && auth.GetString("owner") == bot.GetString("owner")
+	if createdByCaller && !effectiveAccess(app, auth).rw {
+		return "", nil, router.NewForbiddenError("a read-only bot cannot rotate the bots it created; ask their owner", nil)
+	}
 	if createdByCaller && !effectiveAccess(app, auth).covers(effectiveAccess(app, bot)) {
 		return "", nil, router.NewForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
 	}
