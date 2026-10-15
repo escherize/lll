@@ -116,53 +116,64 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 		if body.Duration < 0 {
 			return re.BadRequestError("duration must be 0 or more", nil)
 		}
-		bot, err := re.App.FindFirstRecordByFilter(
-			"members", "name = {:name} && kind = 'bot'",
-			dbx.Params{"name": body.Name},
-		)
+		token, fresh, err := rotateBot(re.App, re.Auth, re.HasSuperuserAuth(), body.Name, body.Duration)
 		if err != nil {
-			return re.BadRequestError("no bot member by that name", nil)
-		}
-		// The bot that created this one (LLL-709) mints its token too: it
-		// needs the first one to hand to its worker, and it already holds
-		// every token it minted. Never past its own access right now.
-		// Only while the creator still shares the bot's human owner: a
-		// creator re-owned or left without an owner rotates nothing.
-		createdByCaller := re.Auth != nil && bot.GetString("created_by") != "" && re.Auth.Id == bot.GetString("created_by") &&
-			re.Auth.GetString("owner") != "" && re.Auth.GetString("owner") == bot.GetString("owner")
-		if createdByCaller && !effectiveAccess(re.App, re.Auth).covers(effectiveAccess(re.App, bot)) {
-			return re.ForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
-		}
-		if !re.HasSuperuserAuth() && !createdByCaller {
-			if re.Auth == nil || re.Auth.Id != bot.GetString("owner") {
-				// A bot outside the caller's roster answers like a missing
-				// one, so the refusal does not confirm a hidden name (LLL-551).
-				if re.Auth == nil || !rosterSees(re.App, re.Auth, bot) {
-					return re.BadRequestError("no bot member by that name", nil)
-				}
-				return re.ForbiddenError("only the bot's owner or a superuser can rotate its token", nil)
-			}
-			// A fresh token for a bot wider than its owner would hand the
-			// owner access it no longer has (narrowed after minting the bot).
-			if !accessCovers(re.Auth, bot) {
-				return re.ForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
-			}
-		}
-		// RefreshTokenKey sets an autogenerate modifier: the new key is
-		// written on save, which is what strands the old tokens. The fresh
-		// token is minted from a re-read so it signs with the persisted key.
-		bot.RefreshTokenKey()
-		if err := re.App.Save(bot); err != nil {
-			return re.InternalServerError("failed to invalidate the previous token", err)
-		}
-		fresh, err := re.App.FindRecordById("members", bot.Id)
-		if err != nil {
-			return re.InternalServerError("failed to reload the bot after rotation", err)
-		}
-		token, err := fresh.NewStaticAuthToken(time.Duration(body.Duration) * time.Second)
-		if err != nil {
-			return re.InternalServerError("failed to generate the rotated token", err)
+			return err
 		}
 		return re.JSON(200, map[string]any{"token": token, "record": fresh})
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
+}
+
+// rotateBot authorizes auth to rotate the bot named name, refreshes its
+// token key and mints a token from the persisted record. Errors are
+// *router.ApiError, ready to return from the route.
+func rotateBot(app core.App, auth *core.Record, superuser bool, name string, duration int64) (string, *core.Record, error) {
+	bot, err := app.FindFirstRecordByFilter(
+		"members", "name = {:name} && kind = 'bot'",
+		dbx.Params{"name": name},
+	)
+	if err != nil {
+		return "", nil, router.NewBadRequestError("no bot member by that name", nil)
+	}
+	// The bot that created this one (LLL-709) mints its token too: it
+	// needs the first one to hand to its worker, and it already holds
+	// every token it minted. Never past its own access right now.
+	// Only while the creator still shares the bot's human owner: a
+	// creator re-owned or left without an owner rotates nothing.
+	createdByCaller := auth != nil && bot.GetString("created_by") != "" && auth.Id == bot.GetString("created_by") &&
+		auth.GetString("owner") != "" && auth.GetString("owner") == bot.GetString("owner")
+	if createdByCaller && !effectiveAccess(app, auth).covers(effectiveAccess(app, bot)) {
+		return "", nil, router.NewForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
+	}
+	if !superuser && !createdByCaller {
+		if auth == nil || auth.Id != bot.GetString("owner") {
+			// A bot outside the caller's roster answers like a missing
+			// one, so the refusal does not confirm a hidden name (LLL-551).
+			if auth == nil || !rosterSees(app, auth, bot) {
+				return "", nil, router.NewBadRequestError("no bot member by that name", nil)
+			}
+			return "", nil, router.NewForbiddenError("only the bot's owner or a superuser can rotate its token", nil)
+		}
+		// A fresh token for a bot wider than its owner would hand the
+		// owner access it no longer has (narrowed after minting the bot).
+		if !accessCovers(auth, bot) {
+			return "", nil, router.NewForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
+		}
+	}
+	// RefreshTokenKey sets an autogenerate modifier: the new key is
+	// written on save, which is what strands the old tokens. The fresh
+	// token is minted from a re-read so it signs with the persisted key.
+	bot.RefreshTokenKey()
+	if err := app.Save(bot); err != nil {
+		return "", nil, router.NewInternalServerError("failed to invalidate the previous token", err)
+	}
+	fresh, err := app.FindRecordById("members", bot.Id)
+	if err != nil {
+		return "", nil, router.NewInternalServerError("failed to reload the bot after rotation", err)
+	}
+	token, err := fresh.NewStaticAuthToken(time.Duration(duration) * time.Second)
+	if err != nil {
+		return "", nil, router.NewInternalServerError("failed to generate the rotated token", err)
+	}
+	return token, fresh, nil
 }
