@@ -197,3 +197,29 @@ func TestNarrowingTheCreatorNarrowsWhatItCreated(t *testing.T) {
 		t.Fatalf("after the creator's delete: created_by %q owner %q", got.GetString("created_by"), got.GetString("owner"))
 	}
 }
+
+// Narrowing the owner leaves the bots' records as they were (the rules cap
+// them). A later save of the creator, such as a token rotation, must still
+// succeed, and leaves the worker within the owner.
+func TestSavingTheCreatorAfterItsOwnerNarrowedStillSaves(t *testing.T) {
+	f := newCreatorFixture(t)
+	f.coord.Set("scope", "all")
+	if err := f.app.Save(f.coord); err != nil {
+		t.Fatal(err)
+	}
+	w := f.save(t, "bot-w1", botKind, f.human.Id, f.coord.Id, nil)
+	f.human.Set("scope", "teams")
+	f.human.Set("teams", []string{f.alpha})
+	if err := f.app.Save(f.human); err != nil {
+		t.Fatal(err)
+	}
+	// Rotating the creator's token saves it with its access unchanged.
+	f.coord = f.reload(t, f.coord)
+	f.coord.RefreshTokenKey()
+	if err := f.app.Save(f.coord); err != nil {
+		t.Fatalf("saving the creator after its owner narrowed: %v", err)
+	}
+	if got := ownAccess(f.reload(t, w)); got.all || !slices.Equal(got.teams, []string{f.alpha}) {
+		t.Fatalf("bot-w1 kept %+v, want ALPHA (its owner's)", got)
+	}
+}

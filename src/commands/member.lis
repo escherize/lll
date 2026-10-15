@@ -167,6 +167,7 @@ fn member_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> 
     let capped = cap.map_or("", |o| f" (capped by its owner, {o.name})")
     let access = member_access(effective, keys)
     let access = if access == "" { access } else { access + capped }
+    let access = access + created_by_note(m, members.items)
     if access == "" {
       out = out.line(
         f"{display.table_cell(m.name)}\t{display.table_cell(shown_email(m))}",
@@ -178,6 +179,14 @@ fn member_list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> 
     }
   }
   Ok(out)
+}
+
+/// " (created by bot-coord)" for a bot another bot created (LLL-709), or "".
+/// A creator outside the caller's roster reads as a hidden member.
+fn created_by_note(m: models.Member, members: Slice<models.Member>) -> string {
+  if m.created_by.is_empty() { return "" }
+  let by = members.find(|o| o.id == m.created_by).map_or("a hidden member", |o| o.name)
+  f" (created by {by})"
 }
 
 /// A member's email as the caller may read it. Every member has one, so an
@@ -402,8 +411,10 @@ otherwise an administrator enables login later with 'lll member set-password'.
 
 This makes people, not bots: the bot- prefix is reserved. For an agent, run
 'lll bot create bot-NAME', which makes a bot member you own and prints its
-token once in a prompt to paste into the agent. A bot cannot create bots;
-agents sharing one bot tell their sessions apart with --agent NAME." +
+token once in a prompt to paste into the agent. A read-write bot with a
+human owner may run it too: the new bot is owned by that person and never
+does more than the bot that created it. Agents sharing one bot tell their
+sessions apart with --agent NAME." +
   flags.section(spec)
 }
 
@@ -453,7 +464,7 @@ fn member_add(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if strings.HasPrefix(name, "bot-") {
     return Err(pb.failed(
       f"'{name}' is a bot name: the bot- prefix is reserved to bot members
-a read-write member creates it with 'lll bot create {name}' (owned by you, never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
+a read-write member creates it with 'lll bot create {name}' (owned by you, or by your owner when you are a bot; never more access than you have); a read-only member cannot create bots, so ask whoever invited you",
     ))
   }
 
@@ -715,6 +726,11 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   if !set_teams && !edit_teams && !set_mode {
     if p.given("--json") { return json_value(with_team_keys(m, teams), "member") }
     out = out.line(f"{m.name}: {before}")
+    if !m.created_by.is_empty() {
+      // LLL-709: a bot another bot created, owned by that bot's owner.
+      let by = records.member_by_id(ctx, m.created_by).map_or("a hidden member", |c| c.name)
+      out = out.line(f"  created by: {by}")
+    }
     return Ok(out.then(owner_cap(ctx, m, key_of)?))
   }
   let given = [

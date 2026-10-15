@@ -35,6 +35,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   separate comment. A keyed comment checks server support before writing, so a
   1.1.0 or older server refuses it with "upgrade the server" instead of
   ignoring the key; unkeyed comments keep their existing behavior (LLL-700).
+- A read-write bot with a human owner can run `lll bot create bot-NAME`, so a
+  coordinator bot mints its own worker bots (LLL-709). The new bot is owned by
+  the coordinator's owner, not by the coordinator, so ownership stays one hop
+  and every access rule is unchanged. It starts with the coordinator's teams
+  and mode and can never have more: the server refuses a wider one (code
+  `bot_exceeds_owner`), and narrowing the coordinator narrows the bots it
+  created. The server records the coordinator in the member's new
+  `created_by` field (members cannot set it), `lll member list` and
+  `lll member access` show it, and the coordinator may rotate those bots'
+  tokens. A read-only bot is still refused, and a bot with no owner still gets
+  "a bot cannot own a bot". The board's "Add a bot" is unchanged.
 
 ## [1.1.0] - 2026-10-13
 

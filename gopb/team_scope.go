@@ -110,6 +110,11 @@ func registerMemberScopeDefault(app core.App) {
 				def = ownAccess(owner)
 			}
 		}
+		// A bot another bot created (LLL-709) starts with its creator's
+		// access, which may be narrower than the owner they share.
+		if creator, err := e.App.FindRecordById("members", e.Record.GetString("created_by")); err == nil {
+			def = effectiveAccess(e.App, creator)
+		}
 		if e.Record.GetString("scope") == "" {
 			if def.all {
 				e.Record.Set("scope", "all")
@@ -148,7 +153,7 @@ func registerMemberScopeDefault(app core.App) {
 			}
 			setAccess(e.Record, kept)
 		}
-		for _, field := range []string{"kind", "owner", "scope", "teams", "mode"} {
+		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				if err := checkOwner(e.App, e.Record); err != nil {
 					return err
@@ -156,8 +161,43 @@ func registerMemberScopeDefault(app core.App) {
 				break
 			}
 		}
-		return e.Next()
+		if err := e.Next(); err != nil {
+			return err
+		}
+		return narrowCreated(e.App, e.Record)
 	})
+}
+
+// narrowCreated keeps every bot m created (created_by, LLL-709) within m's
+// access after m changes. Those bots share m's owner, so the rules narrow
+// them with the owner already; this covers narrowing m itself, which the
+// rules cannot see. m's process holds the tokens of the bots it created, so
+// they must not keep access m lost. Each save narrows what that bot created
+// in turn.
+func narrowCreated(app core.App, m *core.Record) error {
+	if m.Collection().Fields.GetByName("created_by") == nil {
+		return nil // a test fixture's members collection without the field
+	}
+	created, err := app.FindRecordsByFilter("members", "created_by = {:id}", "", 0, 0, dbx.Params{"id": m.Id})
+	if err != nil {
+		return err
+	}
+	// m's effective access, not its own: the bot shares m's owner, and an
+	// owner narrowed earlier must not leave the narrowed bot wider than the
+	// owner, which checkOwner would refuse.
+	limit := effectiveAccess(app, m)
+	for _, bot := range created {
+		own := ownAccess(bot)
+		kept := own.within(limit)
+		if kept.covers(own) {
+			continue
+		}
+		setAccess(bot, kept)
+		if err := app.Save(bot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // setAccess writes a to m's scope, teams and mode.
@@ -185,13 +225,18 @@ func setAccess(m *core.Record, a access) {
 //   - an owner that is a bot or has an owner itself;
 //   - an owner on a member that owns members;
 //   - a bot that owns members;
-//   - an owned member wider than its owner.
+//   - an owned member wider than its owner;
+//   - a bot another bot created (created_by) that breaks checkCreator.
 //
-// Checked when a member is created and when its kind, owner or access
-// changes. Narrowing an owner is not checked: what it owns narrows with it.
+// A bot with a human owner still creates bots: they are owned by that
+// person, not by the bot (LLL-709). Checked when a member is created and
+// when its kind, owner, created_by or access changes. Narrowing an owner is not checked: what it owns narrows with it.
 // An owner id that does not exist is left to the relation validator.
 func checkOwner(app core.App, m *core.Record) error {
 	name := m.GetString("name")
+	if err := checkCreator(app, m); err != nil {
+		return err
+	}
 	// A member being created owns nothing yet (and its id may be empty,
 	// which would match every unowned member).
 	var owns *core.Record
@@ -213,6 +258,15 @@ func checkOwner(app core.App, m *core.Record) error {
 	if err != nil {
 		return nil
 	}
+	if owner.GetString("kind") == botKind && owner.GetString("owner") != "" {
+		human := owner.GetString("owner")
+		if h, err := app.FindRecordById("members", human); err == nil {
+			human = h.GetString("name")
+		}
+		return router.NewBadRequestError(
+			"a bot cannot own a bot: "+owner.GetString("name")+" is a bot, and a bot creates bots for its own owner, "+
+				human+". Give "+name+" the owner "+human+" ('lll bot create' does this)", nil)
+	}
 	if owner.GetString("kind") == botKind {
 		return router.NewBadRequestError(
 			"a bot cannot own a bot: "+owner.GetString("name")+" is a bot. Create "+name+
@@ -233,20 +287,64 @@ func checkOwner(app core.App, m *core.Record) error {
 	return nil
 }
 
+// checkCreator holds a bot another bot created (created_by, LLL-709) to what
+// made creating it safe: it is a bot, owned by its creator's owner (so
+// ownership stays one hop), and no wider than its creator's effective access.
+// Checked for every caller, like the rest of checkOwner. A creator id that
+// does not exist is left to the relation validator.
+func checkCreator(app core.App, m *core.Record) error {
+	if m.GetString("created_by") == "" {
+		return nil
+	}
+	creator, err := app.FindRecordById("members", m.GetString("created_by"))
+	if err != nil {
+		return nil
+	}
+	name, by := m.GetString("name"), creator.GetString("name")
+	if m.GetString("kind") != botKind || creator.GetString("kind") != botKind {
+		return router.NewBadRequestError("only a bot records the bot that created it: created_by names a bot, and "+
+			name+" or "+by+" is not one", nil)
+	}
+	if creator.GetString("owner") == "" {
+		return router.NewBadRequestError("a bot that "+by+" creates is owned by the creating bot's owner, and "+
+			by+" has none. A bot with no owner cannot create bots; ask an administrator", nil)
+	}
+	if m.GetString("owner") != creator.GetString("owner") {
+		human := creator.GetString("owner")
+		if h, err := app.FindRecordById("members", human); err == nil {
+			human = h.GetString("name")
+		}
+		return router.NewBadRequestError("a bot that "+by+" creates is owned by the creating bot's owner, "+
+			human+". Give "+name+" the owner "+human+" ('lll bot create' does this)", nil)
+	}
+	if !effectiveAccess(app, creator).covers(ownAccess(m)) {
+		return withCode(router.NewBadRequestError(
+			"a bot never exceeds the bot that created it: "+name+" would have wider access than "+by+
+				". Give it only teams and a mode "+by+" has", nil), "bot_exceeds_owner")
+	}
+	return nil
+}
+
 // accessCovers reports whether member a holds at least b's access: every team
 // b sees, and write if b writes.
 func accessCovers(a, b *core.Record) bool {
-	if b.GetString("mode") == "rw" && a.GetString("mode") != "rw" {
+	return ownAccess(a).covers(ownAccess(b))
+}
+
+// covers reports whether a holds at least b: every team b sees, and write if
+// b writes.
+func (a access) covers(b access) bool {
+	if b.rw && !a.rw {
 		return false
 	}
-	if a.GetString("scope") == "all" {
+	if a.all {
 		return true
 	}
-	if b.GetString("scope") == "all" {
+	if b.all {
 		return false
 	}
-	for _, team := range b.GetStringSlice("teams") {
-		if !slices.Contains(a.GetStringSlice("teams"), team) {
+	for _, team := range b.teams {
+		if !slices.Contains(a.teams, team) {
 			return false
 		}
 	}

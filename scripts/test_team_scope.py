@@ -51,6 +51,10 @@ def call(base, path, body=None, token='', method=None, headers=None):
     return resp.status, text, resp.headers
 
 
+def member_names_su(api, su):
+    return {m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']}
+
+
 with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
     root = Path(directory)
     home = root / 'home'
@@ -477,6 +481,80 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/members/records', dict(bot_body, name='bot-theirs', owner=plain['id']), boss_tok)[0] == 400
         sub = call(api, '/api/collections/members/records', dict(bot_body, name='bot-sub', owner=made['id']), su)
         assert sub[0] == 400 and 'bot cannot own a bot' in sub[1]['message'], sub[:2]
+        # LLL-709: a read-write bot with a human owner creates a bot for that
+        # owner. Ownership stays one hop; the server records the creating bot.
+        bot_env = dict(cli_ro, LLL_TOKEN=bot_tok)
+        out = lll('bot', 'bot-boss-w1', '--team', 'ALPHA', env=bot_env)
+        assert out.returncode == 0 and 'owned by boss, created by bot-boss' in out.stdout, out.stdout + out.stderr
+        w1_tok = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
+
+        def record(name):
+            return next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+                        if m['name'] == name)
+
+        w1 = record('bot-boss-w1')
+        assert (w1['owner'], w1['created_by'], w1['scope'], sorted(w1['teams']), w1['mode']) == \
+            (boss['id'], made['id'], 'teams', sorted([alpha['id'], beta['id']]), 'rw'), w1
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w1_tok)[0] == 200, 'the worker token works'
+        out = lll('member', 'list', env=boss_env)
+        assert 'bot-boss-w1' in out.stdout and '(created by bot-boss)' in out.stdout, out.stdout + out.stderr
+        out = lll('member', 'access', 'bot-boss-w1', env=boss_env)
+        assert 'created by: bot-boss' in out.stdout, out.stdout + out.stderr
+        # Never wider than the creator, never another person's, never a
+        # forged creator, never a person.
+        by_bot = call(api, '/api/collections/members/records',
+                      dict(bot_body, name='bot-w-wide', owner=boss['id'], scope='all'), bot_tok)
+        assert by_bot[0] == 400 and by_bot[1]['data'].get('code') == 'bot_exceeds_owner', by_bot[:2]
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='bot-w-theirs', owner=plain['id']), bot_tok)[0] == 400
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='bot-w-forged', owner=boss['id'], created_by=plain['id']), bot_tok)[0] == 400
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='w-person', kind='person', owner=''), bot_tok)[0] == 400
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='bot-human-forged', owner=boss['id'], created_by=made['id']), boss_tok)[0] == 400, \
+            'a person named a bot as the creator of its own bot'
+        assert call(api, f"/api/collections/members/records/{w1['id']}", {'created_by': ''}, boss_tok, 'PATCH')[0] in (400, 404)
+        assert call(api, f"/api/collections/members/records/{w1['id']}", {'teams': [alpha['id']]}, bot_tok, 'PATCH')[0] in (400, 404)
+        assert not {'bot-w-wide', 'bot-w-theirs', 'bot-w-forged', 'w-person', 'bot-human-forged'} & {
+            m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']}
+        # The creating bot rotates what it created, and nothing else of its owner's.
+        rotated_w1 = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w1'}, bot_tok)
+        assert rotated_w1[0] == 200, rotated_w1[:2]
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w1_tok)[0] == 401, 'rotation kept the old token'
+        w1_tok = rotated_w1[1]['token']
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss'}, w1_tok)[0] == 403, 'a worker rotated its creator'
+        sibling = call(api, '/api/collections/members/records', dict(bot_body, name='bot-boss-sib', email='sib@example.test', owner=boss['id']), boss_tok)
+        assert sibling[0] == 200, sibling[:2]
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-sib'}, bot_tok)[0] == 403, 'a bot rotated its owner\'s other bot'
+        # A read-only bot, and a bot with no owner, are refused.
+        ro_bot = call(api, '/api/collections/members/records',
+                      dict(bot_body, name='bot-boss-ro', email='ro@example.test', owner=boss['id'], mode='ro'), boss_tok)
+        assert ro_bot[0] == 200, ro_bot[:2]
+        ro_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-ro'}, boss_tok)[1]['token']
+        out = lll('bot', 'bot-ro-w', '--team', 'ALPHA', env=dict(cli_ro, LLL_TOKEN=ro_tok))
+        assert out.returncode != 0 and 'bot-ro-w' not in member_names_su(api, su), out.stdout + out.stderr
+        ro_raw = call(api, '/api/collections/members/records',
+                      dict(bot_body, name='bot-ro-raw', email='ro-raw@example.test', owner=boss['id']), ro_tok)
+        assert ro_raw[0] == 403 and 'Read-only access' in ro_raw[1]['message'] and 'bot-ro-raw' not in member_names_su(api, su), \
+            ('the server let a read-only bot create a bot', ro_raw[:2])
+        orphan = call(api, '/api/collections/members/records', dict(bot_body, name='bot-orphan', email='orphan@example.test'), su)
+        assert orphan[0] == 200 and orphan[1]['owner'] == '', orphan[:2]
+        orphan_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-orphan'}, su)[1]['token']
+        out = lll('bot', 'bot-orphan-w', '--team', 'ALPHA', env=dict(cli_ro, LLL_TOKEN=orphan_tok))
+        assert out.returncode != 0 and "bot cannot own a bot: bot-orphan is a bot. Create bot-orphan-w with its human " \
+            "owner's token, or with administrator credentials for a bot with no owner" in out.stderr, out.stdout + out.stderr
+        # Narrowing a creator narrows what it created, down the chain: the
+        # coordinator holds those tokens.
+        w2 = call(api, '/api/collections/members/records', dict(bot_body, name='bot-boss-w2', email='w2@example.test', owner=boss['id']), w1_tok)
+        assert w2[0] == 200 and w2[1]['created_by'] == w1['id'], w2[:2]
+        w2_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[1]['token']
+        assert 'beta bot work' in {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=w2_tok)[1]['items']}
+        call(api, f"/api/collections/members/records/{w1['id']}", {'teams': [alpha['id']]}, su, 'PATCH')
+        assert record('bot-boss-w2')['teams'] == [alpha['id']], record('bot-boss-w2')
+        w2_titles = {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=w2_tok)[1]['items']}
+        assert 'alpha bot work' in w2_titles and 'beta bot work' not in w2_titles, w2_titles
+        assert record('bot-boss')['teams'] == made['teams'], 'narrowing a worker narrowed its creator'
         out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.

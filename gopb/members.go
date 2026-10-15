@@ -39,6 +39,23 @@ func registerMemberGuards(app core.App) {
 		}
 		return e.Next()
 	})
+	// Which bot created a bot is the server's word (LLL-709), like an
+	// issue's creator (provenance.go): a bot's create records the bot, and a
+	// person's records nobody. A bot with no owner records nobody either, so
+	// checkOwner refuses it exactly as before: a bot cannot own a bot. The
+	// rules refuse created_by in a member's body; this overwrite is the
+	// second lock. checkCreator then holds the new bot to its creator's owner
+	// and access. A superuser names one or not.
+	app.OnRecordCreateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		if isMember(e) {
+			createdBy := ""
+			if e.Auth.GetString("kind") == botKind && e.Auth.GetString("owner") != "" && e.Record.GetString("kind") == botKind {
+				createdBy = e.Auth.Id
+			}
+			e.Record.Set("created_by", createdBy)
+		}
+		return e.Next()
+	})
 	app.OnRecordAuthWithPasswordRequest("members").BindFunc(func(e *core.RecordAuthWithPasswordRequestEvent) error {
 		// Fires after the identity lookup and before the password check, so
 		// the refusal names the account kind instead of grading a password a
@@ -84,7 +101,7 @@ func checkMemberKind(record *core.Record, creating bool) error {
 // credentials at the next request).
 //
 // Authorization is superuser or the bot's owner - the same rule impersonate
-// would have if it knew about ownership. Superuser-only is not enough:
+// would have if it knew about ownership - or the bot that created it. Superuser-only is not enough:
 // the human who created the bot is the one who saw a token leak.
 func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 	routes.POST("/api/lll/bots/rotate", func(re *core.RequestEvent) error {
@@ -106,7 +123,14 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 		if err != nil {
 			return re.BadRequestError("no bot member by that name", nil)
 		}
-		if !re.HasSuperuserAuth() {
+		// The bot that created this one (LLL-709) mints its token too: it
+		// needs the first one to hand to its worker, and it already holds
+		// every token it minted. Never past its own access right now.
+		createdByCaller := re.Auth != nil && bot.GetString("created_by") != "" && re.Auth.Id == bot.GetString("created_by")
+		if createdByCaller && !effectiveAccess(re.App, re.Auth).covers(effectiveAccess(re.App, bot)) {
+			return re.ForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
+		}
+		if !re.HasSuperuserAuth() && !createdByCaller {
 			if re.Auth == nil || re.Auth.Id != bot.GetString("owner") {
 				// A bot outside the caller's roster answers like a missing
 				// one, so the refusal does not confirm a hidden name (LLL-551).
