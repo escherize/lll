@@ -48,6 +48,8 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | agent | text |  |  |
 | author_kind | select |  | values: system |
 | server_record | bool |  |  |
+| idempotency_key | text |  |  |
+| idempotency_fingerprint | text |  |  |
 
 ## docs (base)
 

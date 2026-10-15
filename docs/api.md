@@ -54,6 +54,22 @@ unknown headers. `lll issue create --idempotency-key KEY` checks this before
 writing and reports `Reused` for matching retries. The lll skill gives a recipe
 for deriving a stable key.
 
+## Retried comments
+
+`POST /api/collections/comments/records` accepts the same
+`Idempotency-Key: <stable-key>` header, with the same rules as issue creation,
+except that keys are scoped per issue. The same key on another issue makes a
+separate comment. A comment cannot move to another issue, so its key stays
+reserved on the issue it was written on. The fingerprint uses canonical JSON,
+including the agent label and the enforced member author. A matching retry
+returns the current comment with `reused: true`; a changed body returns `409`.
+
+Check `GET /api/lll/comments/idempotency` for `{"supported":true}` before
+relying on the header. A server that supports keyed issues may predate keyed
+comments, so the issue endpoint does not answer for comments.
+`lll issue comment --idempotency-key KEY` checks this before writing and
+reports `Reused the comment` for matching retries.
+
 ## Webhooks
 
 `POST /api/collections/webhooks/records` registers a URL that receives the

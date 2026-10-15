@@ -17,6 +17,20 @@ pub fn create_comment(
   create(ctx, caller, collection_path("comments"), comment, "comment")
 }
 
+/// create_comment with an idempotency key, scoped per issue (LLL-700): a
+/// retry with the same key and body answers with the comment the first
+/// attempt saved. Refused, with nothing sent, by a server that does not
+/// support keyed comments.
+pub fn create_comment_once(
+  ctx: pb.Client,
+  comment: models.NewComment,
+  key: string,
+) -> Result<string, pb.CliError> {
+  require_keyed_writes(ctx, "comments", "comment")?
+  let body = encode(comment, "comment")?
+  ctx.post_idempotent(collection_path("comments"), body, key)
+}
+
 #[json]
 struct CommentBody { body: string }
 
