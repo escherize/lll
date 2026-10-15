@@ -21,6 +21,7 @@ fn unsupported_activity_registration_never_posts() {
     panic("must refuse unsupported activity before writing")
   };
   assert e.message.contains("upgrade the server")
+  assert seen.receive() == Some("GET /.well-known/lll")
   assert seen.receive() == Some("GET /api/lll/activity")
   seen.close()
   assert seen.receive() == None

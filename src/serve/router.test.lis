@@ -27,6 +27,7 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
     let (status, body) = router_get(base + "/.well-known/lll")
     assert status == 200
     assert strings.Contains(body, "web_url")
+    assert strings.Contains(body, "\"capabilities\":[\"issues.idempotency\",\"comments.idempotency\",\"webhooks.activity\"]")
     let (status, _) = router_get(base + "/static/theme.css")
     assert status == 401
   }

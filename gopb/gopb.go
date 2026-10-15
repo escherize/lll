@@ -323,11 +323,20 @@ func upsertSuperuser(app core.App, email, password string) error {
 // notices version skew (LLL-652). A direct API listener cannot infer the
 // public board origin, so web_url appears only when the operator advertises
 // it; the combined board listener advertises its own origin independently,
-// without trusting forwarded headers.
-func apiDiscovery(version, boardURL string) map[string]string {
-	doc := map[string]string{"service": "lll", "version": version}
+// without trusting forwarded headers. Both list Capabilities (LLL-710).
+func apiDiscovery(version, boardURL string) map[string]any {
+	doc := map[string]any{"service": "lll", "version": version, "capabilities": Capabilities()}
 	if boardURL != "" {
 		doc["web_url"] = boardURL
 	}
 	return doc
+}
+
+// Capabilities names what this server supports that an older 1.x server may
+// not (LLL-710). The CLI reads the list from /.well-known/lll and refuses a
+// command whose capability is missing, before writing. Add a name when a
+// feature ships; never remove or rename one. A server without the list
+// predates it, so the CLI asks that feature's own support route instead.
+func Capabilities() []string {
+	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity"}
 }

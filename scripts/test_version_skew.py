@@ -19,6 +19,8 @@ from board_startup import wait_for_endpoints
 
 binary = str(Path(sys.argv[1]).resolve())
 MARK = 'this lll is'
+# LLL-710: both discovery documents list the same capabilities (gopb.Capabilities).
+CAPABILITIES = ['issues.idempotency', 'comments.idempotency', 'webhooks.activity']
 STUB_BODY = b'{"items":[],"totalItems":0,"page":1,"perPage":200}'
 
 
@@ -123,7 +125,7 @@ with tempfile.TemporaryDirectory(prefix='lll-version-skew-') as directory:
             token = json.load(resp)['token']
         with urllib.request.urlopen(board + '/.well-known/lll', timeout=10) as resp:
             advertised = json.load(resp)
-        assert advertised == {'service': 'lll', 'web_url': '.', 'version': mine}, advertised
+        assert advertised == {'service': 'lll', 'web_url': '.', 'version': mine, 'capabilities': CAPABILITIES}, advertised
         out = subprocess.run([binary, 'team', 'list', '--json'], cwd=root, env=dict(env, LLL_URL=board, LLL_TOKEN=token),
                              capture_output=True, timeout=30)
         assert out.returncode == 0, out.stderr.decode()
@@ -137,7 +139,7 @@ with tempfile.TemporaryDirectory(prefix='lll-version-skew-') as directory:
         api = endpoints['db_url']
         with urllib.request.urlopen(api + '/.well-known/lll', timeout=10) as resp:
             advertised = json.load(resp)
-        assert advertised == {'service': 'lll', 'version': mine}, advertised
+        assert advertised == {'service': 'lll', 'version': mine, 'capabilities': CAPABILITIES}, advertised
         out = subprocess.run([binary, 'team', 'list', '--json'], cwd=root, env=dict(env, LLL_URL=api, LLL_TOKEN=token),
                              capture_output=True, timeout=30)
         assert out.returncode == 0, out.stderr.decode()
