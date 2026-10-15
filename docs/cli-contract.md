@@ -148,12 +148,16 @@ Every issue `--json` prints the same object: `issue list` per item,
 
 `issue view --json` and `issue next --json` add `comments` (each a comment
 record, below), `docs` and `findings` (each a doc record, below).
+They also add `blocked_by_refs`: an array of `{id, key, title, state}` for
+visible blockers, in `blocked_by` order. Keys use each blocker's own team.
+Hidden or deleted blockers are omitted from refs; their ids remain in
+`blocked_by`, so missing refs do not mean the issue is ready.
 
 ### Other records
 
 | Record | Covered fields |
 |---|---|
-| comment | `id`, `issue`, `author`, `author_kind`, `agent`, `body`, `created`, `updated` |
+| comment | `id`, `issue`, `author`, `author_name`, `author_kind`, `server_record`, `agent`, `body`, `created`, `updated` |
 | doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `author_name`, `last_editor_name`, `created`, `updated` |
 | team | `id`, `key`, `name`, `accent`, `emoji`, `archived` |
 | member | `id`, `name`, `email`, `kind`, `owner`, `scope`, `teams`, `mode`, `team_keys` |
@@ -215,6 +219,12 @@ minor release. `lll api --schema` prints the current reference. For a bulk
 read the CLI covers, prefer its `--json`: `lll issue list --json` carries
 each issue's claim, so reading claims through
 `lll api GET /api/collections/claims/records` is no longer needed for that.
+
+In `issue view --json` and `issue next --json`, comment `author_name` is
+`"hidden member"` for an inaccessible author and `""` for an empty relation.
+`server_record` is always a boolean: true for server-written comments,
+including forced-release notes attributed to a member and expiry notes
+with `author_kind: "system"`. These fields need no extra member lookup.
 
 ### Display fields on watch events
 
