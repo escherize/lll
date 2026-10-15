@@ -81,7 +81,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 
 	registerIssueProvenance(app)
 	registerDocAuthor(app)
-	registerIssueIdempotency(app)
+	registerIdempotency(app)
 	registerWebhookDelivery(app)
 	registerWebhookRecords(app)
 	registerMemberGuards(app)
@@ -149,7 +149,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 
 	var issueUpdates issueWriteLocks
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		registerIssueIdempotencyRoutes(e.Router)
+		registerIdempotencyRoutes(e.Router)
 		registerClaimRoutes(e.Router, &issueUpdates)
 		registerBotRoutes(e.Router)
 		registerAccessRoute(e.Router)
