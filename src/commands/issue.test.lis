@@ -722,3 +722,32 @@ fn an_empty_agenda_names_my_own_held_claims() {
   assert nothing_to_do_message(NothingToDo { reason: Idle.Empty, mine: ["FLEET-8", "FLEET-9"] }).contains("; you hold claims on FLEET-8, FLEET-9")
 }
 
+
+fn held_as(issue: string, member: string, agent: string) -> models.Claim {
+  models.Claim { issue: models.IssueId(issue), member: models.MemberId(member), agent, .. }
+}
+
+/// LLL-693 (1.0 replay case 13): a loop that crashed after claiming gets its
+/// own ready claim back from 'next --claim'; a sibling session's does not.
+#[test]
+fn next_claim_resumes_only_my_own_session_hold() {
+  let me = Some(models.MemberId("me"))
+  let ordered = [agenda_issue("i1", 1, "in-progress"), agenda_issue("i2", 2, "todo")]
+  let resumed = |holds: Slice<models.Claim>, agent: string| {
+    resumable_claim(ordered, holds, me, agent).map_or(0, |i| i.number)
+  }
+  // My session's hold comes back, first in agenda order.
+  let both = [held_as("i2", "me", "loop-a"), held_as("i1", "me", "loop-a")]
+  assert resumed(both, "loop-a") == 1
+  // A sibling session's labelled hold is not mine; neither is another member's.
+  let others = [held_as("i1", "me", "loop-b"), held_as("i2", "bob", "loop-a")]
+  assert resumed(others, "loop-a") == 0
+  // An unlabelled caller is not handed a labelled hold.
+  assert resumed([held_as("i1", "me", "loop-a")], "") == 0
+  // An unlabelled hold matches any label, as everywhere else.
+  let unlabelled = [held_as("i1", "me", "loop-b"), held_as("i2", "me", "")]
+  assert resumed(unlabelled, "loop-a") == 2
+  assert resumed([held_as("i2", "me", "")], "") == 2
+  // A superuser holds nothing.
+  assert resumable_claim(ordered, [held_as("i1", "me", "")], None, "").is_none()
+}

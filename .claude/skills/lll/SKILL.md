@@ -108,7 +108,8 @@ The commands an agent reaches for most, in the 0.8 spellings. Each has
 `--help` with the full flag list.
 
 ```sh
-lll issue next --claim             # take the next ready, unclaimed issue (prints its key)
+lll issue next --claim             # take the next ready, unclaimed issue (prints its key);
+                                   # with none left, resumes your own held one (same --agent)
 lll search "claim expiry"          # issues, comments and docs, ranked
 lll finding near src/api           # traps already recorded for these paths
 
