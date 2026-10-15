@@ -492,7 +492,11 @@ password in its own data directory's .lll-admin.json."),
       fmt.Println(f"could not open a browser: {e.message}")
     }
   }
-  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"), agent))
+  // LLL-710: the board advertises this binary's capabilities only when it
+  // serves its own API. An adopted API may be older, so the board's discovery
+  // then omits the list and clients ask that API's support routes instead.
+  let capabilities = if starting { Some(gopb.Capabilities()) } else { None }
+  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"), capabilities, agent))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no

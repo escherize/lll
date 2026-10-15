@@ -31,7 +31,7 @@ code, not on the error text.
 | Code | Meaning | Examples |
 |---|---|---|
 | 0 | Success | |
-| 1 | Error | server failure (5xx), server unreachable, a rejected value |
+| 1 | Error | server failure (5xx), server unreachable, a rejected value; a server that lacks a capability the command needs (below) |
 | 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`, `LLL_TEAM`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`); no team configured for a command that needs one (fix: `--team KEY` or `lll attach`) |
 | 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams |
 | 4 | Refused or conflict | the claim is held by someone else; release or renew without the claim; closing or deleting a claimed issue without `--force`; creating a bot that exists; a read-only member writing; an `--if-unchanged-since` mismatch; a declined delete confirmation |
@@ -253,6 +253,32 @@ This is live notification, not an audit or replay log. Reconnect does not
 replay gaps, and `issue list --since` misses comment/claim-only activity.
 
 Activity delivery is opt-in. Plain watch and webhook registrations without
-`--activity` keep issue-only delivery. Activity webhook creation checks the
-authenticated `/api/lll/activity` support endpoint before sending any POST;
+`--activity` keep issue-only delivery. Activity webhook creation checks that
+the server supports it (see Server capabilities) before sending any POST;
 an unsupported server is an error, never a silent issue-only registration.
+
+## Server capabilities
+
+A server's unauthenticated `GET /.well-known/lll` names its `version` and
+lists its `capabilities`, for example
+`{"service":"lll","version":"1.2.0","capabilities":["issues.idempotency","comments.idempotency","webhooks.activity"]}`.
+A name, once listed, is never removed or renamed.
+
+| Capability | Commands that need it |
+|---|---|
+| `issues.idempotency` | `issue create --idempotency-key` |
+| `comments.idempotency` | `issue comment --idempotency-key` |
+| `webhooks.activity` | `webhook add --activity` |
+
+Before such a command writes anything, the CLI reads the list. A capability
+missing from it is refused with exit 1 and a message naming the server's
+version: `this server (1.2.0) does not support --idempotency-key; upgrade the
+server before retrying this comment`. Nothing is sent. The list is absent
+when the server predates it (1.1.0 and older), and from a board that `lll up`
+started over an API it did not start, since that API may be older than the
+board. Without the list, for these three, the CLI asks the feature's own authenticated support route
+(`/api/lll/issues/idempotency`, `/api/lll/comments/idempotency`,
+`/api/lll/activity`), as it did before the list existed, and refuses the same
+way when that route answers 404. Discovery is read without credentials, gives
+up after 2 seconds, and any failure reads as an absent list. Commands that need no capability never read
+the list. The version-skew warning is separate and unchanged.

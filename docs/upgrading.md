@@ -22,9 +22,14 @@ issue-only. Use `watch --activity` or register a receiver with
 authenticated `/api/lll/activity` capability before any POST; an older server
 is refused rather than silently creating an issue-only registration.
 
+The server lists what it supports in `GET /.well-known/lll` (`capabilities`),
+and the CLI refuses a command whose capability is missing before it writes.
+A server without the list (1.1.0 and older, or a board started over an
+adopted API) is asked through each feature's support route instead; see [Server capabilities](cli-contract.md#server-capabilities).
+
 Features described in Unreleased may be deployed on main before a published
-CLI includes their flags. Check the installed help and the feature's support
-endpoint; equal version strings alone do not prove equal capabilities.
+CLI includes their flags. Check the installed help and the server's
+capability list; equal version strings alone do not prove equal capabilities.
 
 An unsupported keyed write is refused **before the POST**. Do not remove the
 key and retry automatically: that would give up the duplicate-write guarantee.

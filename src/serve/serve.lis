@@ -69,6 +69,7 @@ fn api_proxy(
   mux: mut Ref<http.ServeMux>,
   base: string,
   admin_ui: bool,
+  capabilities: Option<Slice<string>>,
 ) -> Result<(), pb.CliError> {
   let Ok(target) = url.Parse(base) else {
     return Err(pb.failed(f"cannot proxy the API: '{base}' is not a url"))
@@ -78,7 +79,7 @@ fn api_proxy(
   let proxy = gopb.NewAPIProxy(target)
   // /api/ is the REST surface every client speaks. The administration UI
   // shares that upstream only when the operator explicitly enables it.
-  mux.HandleFunc("GET /.well-known/lll", board_discovery)
+  mux.HandleFunc("GET /.well-known/lll", |w: http.ResponseWriter, _r: Ref<http.Request>| board_discovery(w, capabilities))
   mux.Handle("/api/", proxy)
   if admin_ui {
     mux.Handle("/_/", proxy)
@@ -95,6 +96,7 @@ pub fn run_server(
   port: int,
   refresh: Option<fn() -> Result<string, pb.CliError>>,
   admin_ui: bool,
+  capabilities: Option<Slice<string>>,
   trailer: Slice<string>,
 ) -> Result<(), pb.CliError> {
   // `lll up` resolved the gate's token (generated when unset) into these
@@ -169,7 +171,7 @@ pub fn run_server(
     bridge(ctx, events, hub)
   }
 
-  let mux = board_mux(ctx, boot, hub, board_member, admin_ui)?
+  let mux = board_mux(ctx, boot, hub, board_member, admin_ui, capabilities)?
 
   // Bind BEFORE announcing: "board <url>" is the promise that the board is
   // accepting connections, and e2e_web.sh curls the URL the moment the line
@@ -209,6 +211,7 @@ fn board_mux(
   hub: Hub,
   board_member: records.Actor,
   admin_ui: bool,
+  capabilities: Option<Slice<string>>,
 ) -> Result<http.Handler, pb.CliError> {
   let mut mux: mut Ref<http.ServeMux> = http.NewServeMux()
   let boot_key = boot.key
@@ -221,7 +224,7 @@ fn board_mux(
   // deferred rather than rejected).
   //
   // Registered FIRST so the board's own routes cannot shadow /api/.
-  api_proxy(mux, ctx.url()?, admin_ui)?
+  api_proxy(mux, ctx.url()?, admin_ui, capabilities)?
   // Invite links (LLL-544) sit outside the gate: the visitor has no board
   // credential until the redemption hands it one (serve/join.lis).
   mux.HandleFunc("GET /join/{code}", |w: http.ResponseWriter, r: Ref<http.Request>| join_page(ctx, w, r))

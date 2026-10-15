@@ -1,0 +1,82 @@
+import "go:encoding/json"
+import "go:io"
+import "go:net/http"
+import "go:strings"
+import "go:time"
+
+import "pb"
+
+#[json]
+struct Discovery {
+  service: string,
+  version: string,
+  capabilities: Option<Slice<string>>,
+}
+
+#[json]
+struct RouteSupport { supported: bool }
+
+/// LLL-710: refuse, before anything is written, unless the server supports
+/// `capability`. A server's GET /.well-known/lll lists what it supports. A
+/// server whose document has no `capabilities` field predates the list (1.1.0
+/// and older), so the client falls back to the feature's own support route,
+/// `legacy_route`, which answers 404 on a server without the feature. The
+/// refusal is exit 1 and names the server's version when it advertises one.
+pub fn require_capability(
+  ctx: pb.Client,
+  capability: string,
+  legacy_route: string,
+  unsupported: string,
+) -> Result<(), pb.CliError> {
+  let server = discovery(ctx)
+  let refusal = || {
+    let who = if server.version == "" { "this server" } else { f"this server ({server.version})" }
+    pb.failed(f"{who} does not support {unsupported}")
+  }
+  if let Some(listed) = server.capabilities {
+    if listed.contains(capability) { return Ok(()) }
+    return Err(refusal())
+  }
+  let response = ctx
+    .get(legacy_route)
+    .map_err(|e| if e.status == 404 { refusal() } else { e })?
+  let mut support = RouteSupport { .. }
+  json
+    .Unmarshal(response.bytes(), &support)
+    .map_err(|e| pb.failed(f"decoding {capability} support: {e}"))?
+  if !support.supported { return Err(refusal()) }
+  Ok(())
+}
+
+/// The server's discovery document: unauthenticated, 2s, no redirects, like
+/// the skew probe, so a server that never answers delays a write briefly.
+/// Any failure, or a document that is not lll's, reads as an empty one: no
+/// version and no capability list, so the support route decides.
+fn discovery(ctx: pb.Client) -> Discovery {
+  let Ok(base) = ctx.url() else {
+    return Discovery { .. }
+  }
+  let client = http.Client {
+    Timeout: 2 * time.Second,
+    CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)),
+    ..,
+  }
+  let Ok(response) = client.Get(strings.TrimSuffix(base, "/") + "/.well-known/lll") else {
+    return Discovery { .. }
+  }
+  let Some(body) = response.Body else {
+    return Discovery { .. }
+  }
+  defer body.Close()
+  if response.StatusCode != 200 { return Discovery { .. } }
+  let Ok(bytes) = io.ReadAll(io.LimitReader(body, 4097)) else {
+    return Discovery { .. }
+  }
+  if bytes.length() > 4096 { return Discovery { .. } }
+  let mut doc = Discovery { .. }
+  if json.Unmarshal(bytes, &doc).is_err() {
+    return Discovery { .. }
+  }
+  if doc.service != "lll" { return Discovery { .. } }
+  doc
+}

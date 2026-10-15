@@ -8,6 +8,16 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- The server's `GET /.well-known/lll` lists its `capabilities`
+  (`issues.idempotency`, `comments.idempotency`, `webhooks.activity`). Before
+  `issue create --idempotency-key`, `issue comment --idempotency-key` or
+  `webhook add --activity` writes anything, the CLI checks the list and
+  refuses a missing capability with exit 1: "this server (VERSION) does not
+  support ...; upgrade the server". A server without the list (1.1.0 and
+  older, or a board `lll up` started over an API it adopted) is still asked
+  through each feature's support route, as before. The version-skew warning
+  is unchanged (LLL-710).
+
 - Query watch and webhook registrations with `--activity` deliver comment
   and claim activity within the
   selected team/project/filter, including renewals and releases without an
