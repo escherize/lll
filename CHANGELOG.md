@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- Issue view and next JSON include covered blocker refs (using each visible
+  blocker's own team key), comment author names and explicit server-written
+  comment markers. Hidden identities remain hidden (LLL-691).
+
 - The board answers a short issue address: `/t/KEY/7` redirects (303, query
   kept) to `/t/KEY/issue/KEY-7`, so an issue number is a URL you can type
   (LLL-704). Only digits match. A viewer who cannot see the team gets the

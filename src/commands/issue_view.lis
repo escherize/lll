@@ -292,6 +292,14 @@ fn view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   Ok(out)
 }
 
+#[json]
+struct BlockerRef {
+  id: models.IssueId,
+  key: string,
+  title: string,
+  state: string,
+}
+
 /// Keep every server field intact while exposing the handoff context that
 /// the normal view already shows. RawMessage preserves unknown fields and
 /// exact numbers instead of decoding arbitrary records through float64.
@@ -305,11 +313,29 @@ fn issue_view_json(
   // The list's issue object (key, claim, RFC3339 timestamps) plus what only
   // the view carries, so one parser reads every issue --json (LLL-645).
   let mut fields = issue_json(record.bytes() as json.RawMessage, claim)?.clone()
-  let comments_json = match json.Marshal(comments) {
-    Ok(data) => contract_json(data as json.RawMessage, 0),
-    Err(e) => return Err(pb.failed(f"encoding comments: {e}")),
+  let mut named_comments: Slice<Map<string, json.RawMessage>> = []
+  for comment in comments {
+    let mut named = Map.new<string, json.RawMessage>()
+    let raw = encode_json(comment, "comment")?
+    json.Unmarshal(raw, &named).map_err(|e| pb.failed(f"decoding comment: {e}"))?
+    named["author_name"] = encode_json(display.member_name(comment.author, comment.expand.author.name, ""), "comment author name")?
+    named_comments = named_comments.append(named)
   }
-  fields["comments"] = if comments.is_empty() { "[]".bytes() as json.RawMessage } else { comments_json }
+  fields["comments"] = contract_json(encode_json(named_comments, "comments")?, 0)
+  let mut issue = models.Issue { .. }
+  json.Unmarshal(record.bytes(), &issue).map_err(|e| pb.failed(f"decoding issue: {e}"))?
+  let mut refs: Slice<BlockerRef> = []
+  for id in issue.blocked_by {
+    if let Some(blocker) = issue.expand.blocked_by.find(|b| b.id == id) {
+      if blocker.expand.team.key != "" {
+        refs = refs.append(BlockerRef {
+          id: blocker.id, key: f"{blocker.expand.team.key}-{blocker.number}",
+          title: blocker.title, state: blocker.state().map_or("", |state| state.wire()),
+        })
+      }
+    }
+  }
+  fields["blocked_by_refs"] = encode_json(refs, "blocker refs")?
   fields["docs"] = contract_json(doc_context_json(docs)?, 0)
   fields["findings"] = contract_json(doc_context_json(findings)?, 0)
   match json.Marshal(fields) {
