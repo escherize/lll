@@ -1664,7 +1664,7 @@ done
 # know. `lll watch --help` is generated from the watch spec; the completions
 # entry for the verb-less watch noun reads the same table.
 comp_watch=$("$LIN" completions bash | grep -F "watch,*)" | head -1 | sed "s/.*words='//;s/'.*//")
-assert_contains "$comp_watch" "--state --assignee --label --project --search --ready --json" \
+assert_contains "$comp_watch" "--state --assignee --label --project --activity --search --ready --json" \
   "watch completions carry exactly the watch spec's flags"
 comp_doc=$("$LIN" completions bash | grep -F "doc,new" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \
