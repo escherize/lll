@@ -7,7 +7,13 @@ migrate((app) => {
   claims.fields.add(new TextField({name: "event_agent", max: 64}));
   claims.fields.add(new TextField({name: "event_source", max: 16}));
   app.save(claims);
+  const webhooks = app.findCollectionByNameOrId("webhooks");
+  webhooks.fields.add(new BoolField({name: "activity"}));
+  app.save(webhooks);
 }, (app) => {
+  const webhooks = app.findCollectionByNameOrId("webhooks");
+  webhooks.fields.removeByName("activity");
+  app.save(webhooks);
   const claims = app.findCollectionByNameOrId("claims");
   for (const name of ["event_actor", "event_agent", "event_source"]) claims.fields.removeByName(name);
   app.save(claims);

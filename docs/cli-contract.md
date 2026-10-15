@@ -228,7 +228,7 @@ These are additive covered fields; readers should tolerate new envelope fields.
 
 ### Comment and claim activity
 
-`watch --json` also emits `comments` and `claims` topics for issues matching
+`watch --activity --json` also emits `comments` and `claims` topics for issues matching
 its filters (`--ready` includes only ready parents). These keep the raw
 `record` and add `key`, `author` (actor member id), `author_name`, `author_kind`
 (`person`, `bot`, `system`, `superuser`, or empty when unknown) and `agent`.
@@ -241,3 +241,8 @@ limited to the team's shared roster.
 
 This is live notification, not an audit or replay log. Reconnect does not
 replay gaps, and `issue list --since` misses comment/claim-only activity.
+
+Activity delivery is opt-in. Plain watch and webhook registrations without
+`--activity` keep issue-only delivery. Activity webhook creation checks the
+authenticated `/api/lll/activity` support endpoint before sending any POST;
+an unsupported server is an error, never a silent issue-only registration.

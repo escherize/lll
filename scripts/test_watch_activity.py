@@ -31,7 +31,9 @@ deliveries = queue.Queue()
 class Receiver(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         assert self.headers.get('X-LLL-Secret') == 'activity-test-secret'
-        deliveries.put((time.monotonic(), json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+        payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        payload['_receiver_path'] = self.path
+        deliveries.put((time.monotonic(), payload))
         self.send_response(204)
         self.end_headers()
 
@@ -95,8 +97,10 @@ try:
             target = issue('Wake this coordinator', project['id'])
             excluded = issue('Outside project', other_project['id'])
             key = 'ACT-' + str(target['number'])
-            request('/api/collections/webhooks/records', {'team': team['id'], 'project': project['id'],
-                    'url': f'http://127.0.0.1:{receiver.server_port}/events', 'secret': 'activity-test-secret'}, token)
+            cli('webhook', 'add', f'http://127.0.0.1:{receiver.server_port}/events', '--project', 'Selected',
+                '--secret', 'activity-test-secret', '--activity')
+            cli('webhook', 'add', f'http://127.0.0.1:{receiver.server_port}/legacy', '--project', 'Selected',
+                '--secret', 'activity-test-secret')
 
             def member(name, **extra):
                 return request('/api/collections/members/records', dict(name=name, email=name + '@example.invalid',
@@ -109,10 +113,10 @@ try:
             bot = member('bot-hidden-activity', kind='bot', owner=owner['id'], scope='all', mode='rw')
             bot_token = impersonate(bot)
 
-            def start_watch(name, who, ready=False):
+            def start_watch(name, who, ready=False, activity=True):
                 out, err = root / (name + '.jsonl'), root / (name + '.stderr')
                 with out.open('w') as stdout, err.open('w') as stderr:
-                    p = subprocess.Popen([binary, 'watch', '--project', 'Selected', '--json', *(['--ready'] if ready else [])],
+                    p = subprocess.Popen([binary, 'watch', '--project', 'Selected', '--json', *(['--ready'] if ready else []), *(['--activity'] if activity else [])],
                         env=dict(client, LLL_TOKEN=who), cwd=root, stdout=stdout, stderr=stderr)
                 watchers.append(p)
                 deadline = time.monotonic() + 15
@@ -126,6 +130,7 @@ try:
             full_out = start_watch('full', token)
             guest_out = start_watch('guest', guest_token)
             ready_out = start_watch('ready', token, ready=True)
+            default_out = start_watch('default', token, activity=False)
 
             def events(path):
                 return [json.loads(line) for line in path.read_text().rsplit('\n', 1)[0].splitlines() if line]
@@ -197,6 +202,8 @@ try:
             assert {e['action'] for e in claim_deliveries} == {'create', 'update', 'delete'}, claim_deliveries
             deleted = next(e for e in claim_deliveries if e['action'] == 'delete')
             assert deleted['author'] == operator['id'] and deleted['record']['member'] == owner['id'], deleted
+            assert events(default_out) and all(e['topic'] == 'issues' for e in events(default_out)), events(default_out)
+            assert all(e['topic'] == 'issues' for e in received if e['_receiver_path'] == '/legacy'), received
             hidden_webhook = next(e for e in received if e['record']['id'] == hidden['id'])
             assert hidden_webhook['author_name'] == 'hidden member' and 'bot-hidden-activity' not in json.dumps(hidden_webhook)
             print(json.dumps({'watch_seconds': round(watch_latency, 3), 'webhook_seconds': round(webhook_latency, 3),

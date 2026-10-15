@@ -20,6 +20,7 @@ import "flags"
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
 pub fn watch_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Watch).append([
+    flags.Flag { name: "--activity", help: "also stream comment and claim activity; default: issue events only", .. },
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag {
       name: "--ready",
@@ -51,14 +52,15 @@ fn watch(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
 fn watch_stream(ctx: pb.Client, p: flags.Parsed) -> Result<(), pb.CliError> {
   let filters = filters_from(p, p.one("--search"))?
   let json_mode = p.given("--json")
-  if p.given("--ready") { return watch_ready(ctx, filters, p.given("--json")) }
+  let with_activity = p.given("--activity")
+  if p.given("--ready") { return watch_ready(ctx, filters, json_mode, with_activity) }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
   let scope = configured_scope(ctx)?
 
   let criteria = resolve_issue_filter(ctx, scope, filters)?
   let topic = realtime.topic_with_options("issues", query.filter(criteria), "team,assignee,creator")?
-  let activity = activity_topics(criteria)?
+  let activity = if with_activity { activity_topics(criteria)? } else { [] }
   let topics = [topic].append(activity...)
   let ch = realtime.subscribe(ctx, topics, realtime.DeadToken.Exit)?
   fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
@@ -151,7 +153,10 @@ That covers labels, project, description and emoji. Use --json for the record.
 JSON issue events also carry key, priority_name and creator_name beside the
 record. The record retains its fields; a hidden creator is named hidden member.
 
-The stream also carries comment and claim events for matching issues.
+With --activity, the stream also carries comment and claim events for matching
+issues. Without it, the issue-only default is unchanged. For example:
+
+  lll watch --project Fleet --activity --json
 Claim acquisition, renewal (update) and release (delete) have their own events,
 even when no issue field changes. Re-claiming an existing hold without --renew
 makes no write and emits nothing. JSON topics distinguish issues, comments and
@@ -460,13 +465,13 @@ fn comment_matches_until(text: string, action: string, body: string) -> bool {
 /// does NOT exit: the stream stays alive and announces the first issue that
 /// becomes ready. Events for issues that are ready keep streaming, as the
 /// plain query watch does.
-fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Result<(), pb.CliError> {
+fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool, with_activity: bool) -> Result<(), pb.CliError> {
   let scope = configured_scope(ctx)?
   let criteria = resolve_issue_filter(ctx, scope, filters)?
   let filter = query.filter(criteria)
   // blocked_by expand, so each event record carries its blockers' states.
   let topic = realtime.topic_with_options("issues", filter, "team,assignee,creator,blocked_by")?
-  let activity = activity_topics(criteria)?
+  let activity = if with_activity { activity_topics(criteria)? } else { [] }
   let ch = realtime.subscribe(ctx, [topic].append(activity...), realtime.DeadToken.Exit)?
   // blocked_by expanded on every page, so readiness can be decided locally.
   let mut tail = "&expand=team,assignee,creator,blocked_by,labels&sort=created,id"

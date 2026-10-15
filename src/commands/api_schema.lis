@@ -237,5 +237,6 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | created | autodate |  | set on create |
 | secret_set | bool |  |  |
 | creator | relation |  | relation to members |
+| activity | bool |  |  |
 "
 }

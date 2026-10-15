@@ -153,6 +153,9 @@ func webhookDeliverEvent(app core.App, topic, action string, record, issue *core
 		log.Printf("webhook: matching registrations for delivery failed: %v", err)
 		return
 	}
+	if topic != "issues" {
+		hooks = slices.DeleteFunc(hooks, func(hook *core.Record) bool { return !hook.GetBool("activity") })
+	}
 	if len(hooks) == 0 {
 		return
 	}

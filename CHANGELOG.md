@@ -8,7 +8,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
-- Query watch and webhooks deliver comment and claim activity within the
+- Query watch and webhook registrations with `--activity` deliver comment
+  and claim activity within the
   selected team/project/filter, including renewals and releases without an
   issue update. Activity includes the issue key and authenticated actor;
   forced release preserves the holder separately and expiry identifies the

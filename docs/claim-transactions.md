@@ -110,7 +110,9 @@ do not update the issue record. New streams receive current snapshots on
 connection; metadata refreshes preserve title/comment drafts and the separate
 description boundary.
 
-`lll watch` streams issues, comments and claims for matching issues. Claim
+`lll watch --activity` streams issues, comments and claims for matching issues.
+The default watch and existing webhook registrations stay issue-only. Register
+with `lll webhook add URL --activity` for activity deliveries. Claim
 acquisition, renewal and release produce their own create/update/delete events,
 even without an issue update. A plain re-claim of your hold makes no write.
 A claim's holder stays in `record.member`; activity `author` names the actual
