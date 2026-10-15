@@ -153,6 +153,11 @@ try:
     events = [json.loads(l) for l in open(json_out).read().splitlines()]
     # The stream carries issue records only - never a claims or comments topic.
     assert {e['topic'] for e in events} == {'issues'}, events
+    for event in events:
+        assert event['key'] == 'WCTR-' + str(event['record']['number']), event
+        assert event['priority_name'] == 'none', event
+        assert event['creator_name'] == me['name'], event
+
     assert [e['action'] for e in events] == ['update'] * 6, events
 finally:
     for process in watchers:

@@ -74,3 +74,18 @@ fn until_matches_existing_created_and_edited_comments_but_not_deletions() {
   assert !comment_matches_until("ready", "delete", "ready")
   assert !comment_matches_until("", "create", "anything")
 }
+
+#[test]
+fn issue_event_names_are_outside_the_unchanged_record() {
+  let issue = models.Issue {
+    number: 7, priority_wire: 2, creator: "hidden",
+    expand: models.IssueExpand { team: models.Team { key: "TEAM", .. }, .. }, ..
+  }
+  let data = "{\"action\":\"ready\",\"record\":{\"future\":9007199254740993,\"title\":\"文档✨\"}}"
+  let out = issue_event_json(data, issue)
+  assert out.contains("\"key\":\"TEAM-7\"")
+  assert out.contains("\"priority_name\":\"high\"")
+  assert out.contains("\"creator_name\":\"hidden member\"")
+  assert out.contains("\"record\":{\"future\":9007199254740993,\"title\":\"文档✨\"}")
+  assert issue_event_json(data, models.Issue { .. }) == data
+}
