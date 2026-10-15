@@ -555,6 +555,14 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         w2_titles = {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=w2_tok)[1]['items']}
         assert 'alpha bot work' in w2_titles and 'beta bot work' not in w2_titles, w2_titles
         assert record('bot-boss')['teams'] == made['teams'], 'narrowing a worker narrowed its creator'
+        # Revoking the creator (its owner cleared) succeeds, detaches and
+        # narrows what it created, and its old token rotates none of them.
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[0] == 200, 'control: the creator rotates'
+        revoke = call(api, f"/api/collections/members/records/{w1['id']}", {'owner': ''}, su, 'PATCH')
+        assert revoke[0] == 200, revoke[:2]
+        assert record('bot-boss-w2')['created_by'] == '' and record('bot-boss-w2')['teams'] == [alpha['id']], record('bot-boss-w2')
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[0] == 403, \
+            'a creator with no owner rotated its old worker'
         out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.

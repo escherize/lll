@@ -126,7 +126,10 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 		// The bot that created this one (LLL-709) mints its token too: it
 		// needs the first one to hand to its worker, and it already holds
 		// every token it minted. Never past its own access right now.
-		createdByCaller := re.Auth != nil && bot.GetString("created_by") != "" && re.Auth.Id == bot.GetString("created_by")
+		// Only while the creator still shares the bot's human owner: a
+		// creator re-owned or left without an owner rotates nothing.
+		createdByCaller := re.Auth != nil && bot.GetString("created_by") != "" && re.Auth.Id == bot.GetString("created_by") &&
+			re.Auth.GetString("owner") != "" && re.Auth.GetString("owner") == bot.GetString("owner")
 		if createdByCaller && !effectiveAccess(re.App, re.Auth).covers(effectiveAccess(re.App, bot)) {
 			return re.ForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
 		}

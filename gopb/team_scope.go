@@ -153,6 +153,7 @@ func registerMemberScopeDefault(app core.App) {
 			}
 			setAccess(e.Record, kept)
 		}
+		detachStaleCreator(e.App, e.Record)
 		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				if err := checkOwner(e.App, e.Record); err != nil {
@@ -189,15 +190,48 @@ func narrowCreated(app core.App, m *core.Record) error {
 	for _, bot := range created {
 		own := ownAccess(bot)
 		kept := own.within(limit)
-		if kept.covers(own) {
+		// And within the bot's own owner, which m may no longer share: a
+		// narrowing save must never be one checkOwner refuses.
+		if owner, err := app.FindRecordById("members", bot.GetString("owner")); err == nil {
+			kept = kept.within(ownAccess(owner))
+		} else if bot.GetString("owner") != "" {
+			// The owner is being deleted: PocketBase clears this bot's
+			// owner with its own save, which leaves it nothing (above)
+			// and detaches it. A save now would fail on the dead relation.
 			continue
 		}
+		shared := m.GetString("owner") != "" && m.GetString("owner") == bot.GetString("owner")
+		if kept.covers(own) && shared {
+			continue
+		}
+		// The save detaches the bot when the owners no longer match
+		// (detachStaleCreator).
 		setAccess(bot, kept)
 		if err := app.Save(bot); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// detachStaleCreator clears created_by on an update when the creator no
+// longer shares the bot's human owner: the creator lost its owner or was
+// re-owned, or the bot was. The bot is then an ordinary bot of its owner:
+// the creator stops rotating it and stops bounding it, and checkCreator
+// cannot refuse a save that narrows or revokes. A created_by the update
+// itself sets is left for checkCreator to judge.
+func detachStaleCreator(app core.App, m *core.Record) {
+	id := m.GetString("created_by")
+	if id == "" || id != m.Original().GetString("created_by") {
+		return
+	}
+	creator, err := app.FindRecordById("members", id)
+	if err != nil {
+		return
+	}
+	if creator.GetString("owner") == "" || creator.GetString("owner") != m.GetString("owner") {
+		m.Set("created_by", "")
+	}
 }
 
 // setAccess writes a to m's scope, teams and mode.

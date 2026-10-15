@@ -223,3 +223,41 @@ func TestSavingTheCreatorAfterItsOwnerNarrowedStillSaves(t *testing.T) {
 		t.Fatalf("bot-w1 kept %+v, want ALPHA (its owner's)", got)
 	}
 }
+
+// Revoking a creator must never be refused because of what it created
+// (LLL-709 security review): clearing its owner, re-owning it, or deleting
+// the human detaches its workers (created_by cleared) and narrows them, and
+// the revoking save succeeds.
+func TestRevokingTheCreatorDetachesAndNarrowsItsWorkers(t *testing.T) {
+	for _, revoke := range []string{"clear owner", "re-own", "delete human"} {
+		t.Run(revoke, func(t *testing.T) {
+			f := newCreatorFixture(t)
+			w := f.save(t, "bot-w1", botKind, f.human.Id, f.coord.Id, nil)
+			w2 := f.save(t, "bot-w2", botKind, f.human.Id, w.Id, nil)
+			var err error
+			switch revoke {
+			case "clear owner":
+				f.coord.Set("owner", "")
+				err = f.app.Save(f.coord)
+			case "re-own":
+				f.coord.Set("owner", f.other.Id)
+				err = f.app.Save(f.coord)
+			case "delete human":
+				err = f.app.Delete(f.human)
+			}
+			if err != nil {
+				t.Fatalf("%s was refused: %v", revoke, err)
+			}
+			got := f.reload(t, w)
+			if got.GetString("created_by") != "" {
+				t.Fatalf("bot-w1 still names its creator after %s", revoke)
+			}
+			if a := ownAccess(got); a.all || len(a.teams) > 1 || (len(a.teams) == 1 && a.teams[0] != f.alpha) {
+				t.Fatalf("bot-w1 widened after %s: %+v", revoke, a)
+			}
+			if revoke != "delete human" && f.reload(t, w2).GetString("created_by") != w.Id {
+				t.Fatalf("bot-w2 lost its creator, which still shares its owner")
+			}
+		})
+	}
+}
