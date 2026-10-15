@@ -98,6 +98,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	registerClaimedIssueDeleteGuard(app)
 	registerSystemCommentGuard(app)
 	registerIssueNumbering(app)
+	registerClaimEventActors(app)
 	registerClaimExpiry(app)
 	registerRealtimeKeepalive(app, realtimeKeepalive)
 	// LLL-235: a team key is uppercase, whoever writes it. Keys were stored

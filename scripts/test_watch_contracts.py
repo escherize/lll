@@ -127,7 +127,7 @@ try:
     ok('issue', 'claim', held)
     ok('issue', 'update', tagged, '--title', 'Gets a label (sentinel)')
     text = wait_for(text_out, f'{tagged} changed')
-    assert held not in text, text
+    assert f'{held} claim acquired by' in text and f'{held} claim update by' in text, text
     # A claim that assigns writes the issue: one update event. First sight of
     # a record prints 'changed'; after that, field transitions.
     ok('issue', 'claim', free)
@@ -143,7 +143,7 @@ try:
     assert out == f'Updated {tagged}: labels-=bug\n', out
     deadline = time.time() + 10
     while time.time() < deadline:
-        lines = [l.split(' ', 1)[1] for l in open(text_out).read().splitlines()]
+        lines = [l.split(' ', 1)[1] for l in open(text_out).read().splitlines() if ' claim ' not in l]
         if lines.count(f'{tagged} changed') == 4:
             break
         time.sleep(0.1)
@@ -151,8 +151,10 @@ try:
                      f'{free} update assignee: {me["name"]} -> none'] + [f'{tagged} changed'] * 3, lines
     time.sleep(0.5)
     events = [json.loads(l) for l in open(json_out).read().splitlines()]
-    # The stream carries issue records only - never a claims or comments topic.
-    assert {e['topic'] for e in events} == {'issues'}, events
+    claim_events = [e for e in events if e['topic'] == 'claims']
+    assert [e['action'] for e in claim_events] == ['create', 'update', 'create', 'delete'], claim_events
+    events = [e for e in events if e['topic'] == 'issues']
+    assert events, events
     for event in events:
         assert event['key'] == 'WCTR-' + str(event['record']['number']), event
         assert event['priority_name'] == 'none', event
@@ -418,8 +420,8 @@ for text in observed + [
     'Status lines go to stderr, never stdout',
     '10:42:11 ENG-12 changed',
     'That covers labels, project, description and emoji.',
-    'The stream carries issue records only: no comment or claim events.',
-    "and 'lll issue claim --renew' print nothing.",
+    'The stream also carries comment and claim events for matching issues.',
+    'makes no write and emits nothing.',
     'Every connect and reconnect checks the token with one read.',
     'watch prints one line naming the fix and exits 1:',
     dead_line.split(': it was')[0] + ': ...',

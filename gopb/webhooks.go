@@ -56,19 +56,23 @@ var webhookHTTPClient = &http.Client{Timeout: 10 * time.Second}
 var webhookRetryDelays = [...]time.Duration{time.Second, 4 * time.Second}
 
 func registerWebhookDelivery(app core.App) {
-	deliver := func(action string, e *core.RecordEvent) error {
-		webhookDeliver(app, action, e.Record)
-		return e.Next()
+	for _, collection := range []string{"issues", "comments", "claims"} {
+		deliver := func(action string, e *core.RecordEvent) error {
+			issue := e.Record
+			if collection != "issues" {
+				parent, err := app.FindRecordById("issues", e.Record.GetString("issue"))
+				if err != nil {
+					return e.Next()
+				} // parent deletion is represented by its issue event
+				issue = parent
+			}
+			webhookDeliverEvent(app, collection, action, e.Record, issue)
+			return e.Next()
+		}
+		app.OnRecordAfterCreateSuccess(collection).BindFunc(func(e *core.RecordEvent) error { return deliver("create", e) })
+		app.OnRecordAfterUpdateSuccess(collection).BindFunc(func(e *core.RecordEvent) error { return deliver("update", e) })
+		app.OnRecordAfterDeleteSuccess(collection).BindFunc(func(e *core.RecordEvent) error { return deliver("delete", e) })
 	}
-	app.OnRecordAfterCreateSuccess("issues").BindFunc(func(e *core.RecordEvent) error {
-		return deliver("create", e)
-	})
-	app.OnRecordAfterUpdateSuccess("issues").BindFunc(func(e *core.RecordEvent) error {
-		return deliver("update", e)
-	})
-	app.OnRecordAfterDeleteSuccess("issues").BindFunc(func(e *core.RecordEvent) error {
-		return deliver("delete", e)
-	})
 }
 
 // registerWebhookRecords keeps a webhook's secret write-only and stamps its
@@ -132,6 +136,10 @@ func webhookCreatorReads(app core.App, hook *core.Record) bool {
 // A registration whose creator lost read access to the team is skipped and
 // logged.
 func webhookDeliver(app core.App, action string, issue *core.Record) {
+	webhookDeliverEvent(app, "issues", action, issue, issue)
+}
+
+func webhookDeliverEvent(app core.App, topic, action string, record, issue *core.Record) {
 	hooks, err := app.FindRecordsByFilter(
 		"webhooks",
 		"team = {:team} && (project = '' || project = null || project = {:project})",
@@ -149,6 +157,9 @@ func webhookDeliver(app core.App, action string, issue *core.Record) {
 		return
 	}
 	payload, err := webhookPayload(app, action, issue)
+	if topic != "issues" {
+		payload, err = webhookActivityPayload(app, topic, action, record, issue)
+	}
 	if err != nil {
 		log.Printf("webhook: encoding %s payload failed: %v", action, err)
 		return
@@ -167,7 +178,7 @@ func webhookDeliver(app core.App, action string, issue *core.Record) {
 // assignee expanded so a receiver can print an issue key (ENG-12) without a
 // second request. The expand is set on a clone, never on the record the
 // request is still using.
-func webhookPayload(app core.App, action string, issue *core.Record) ([]byte, error) {
+func webhookIssue(app core.App, issue *core.Record) *core.Record {
 	clone := issue.Clone()
 	expand := map[string]any{}
 	if id := clone.GetString("team"); id != "" {
@@ -188,6 +199,11 @@ func webhookPayload(app core.App, action string, issue *core.Record) ([]byte, er
 		}
 	}
 	clone.SetExpand(expand)
+	return clone
+}
+
+func webhookPayload(app core.App, action string, issue *core.Record) ([]byte, error) {
+	clone := webhookIssue(app, issue)
 	return json.Marshal(struct {
 		Topic  string       `json:"topic"`
 		Action string       `json:"action"`

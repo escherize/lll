@@ -54,7 +54,7 @@ func agentsDiffer(held *core.Record, agent string) bool {
 	return held.GetString("agent") != "" && agent != "" && held.GetString("agent") != agent
 }
 
-func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, error) {
+func acquireClaim(app core.App, issueID, memberID, agent string, actors ...releaser) (ClaimOutcome, error) {
 	var outcome ClaimOutcome
 	err := app.RunInTransaction(func(tx core.App) error {
 		issue, err := tx.FindRecordById("issues", issueID)
@@ -87,6 +87,11 @@ func acquireClaim(app core.App, issueID, memberID, agent string) (ClaimOutcome, 
 			held.Set("issue", issueID)
 			held.Set("member", memberID)
 			held.Set("agent", agent)
+			by := releaser{memberID: memberID, agent: agent}
+			if len(actors) > 0 {
+				by = actors[0]
+			}
+			claimEventBy(held, by)
 			if err := tx.Save(held); err != nil {
 				return err
 			}
@@ -160,6 +165,7 @@ func releaseClaim(app core.App, issueID, expectedClaimID string, by releaser) (C
 			return err
 		}
 		cleared := issue.GetString("assignee") == memberID
+		claimEventBy(held, by)
 		if err := tx.Delete(held); err != nil {
 			return err
 		}
@@ -234,6 +240,7 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 			outcome = ClaimOutcome{ClaimID: held.Id, MemberID: held.GetString("member"), MemberName: name,
 				Agent: held.GetString("agent"), Created: held.GetString("created"), AlreadyOwned: effect == ClaimKept, Forced: effect == ClaimForceReleased}
 			if effect != ClaimKept {
+				claimEventBy(held, by)
 				if err := tx.Delete(held); err != nil {
 					return err
 				}
@@ -294,6 +301,7 @@ func registerFinishRelease(app core.App) {
 		defer func() { e.App = original }()
 		return original.RunInTransaction(func(tx core.App) error {
 			e.App = tx
+			claimEventBy(held, by)
 			if err := tx.Delete(held); err != nil {
 				return err
 			}
@@ -438,6 +446,7 @@ func renewClaim(app core.App, issueID, expectedClaimID, memberID, agent string) 
 			return &claimRejection{"claim_held", fmt.Sprintf("the claim is held by %s (agent %s); only the holder renews it",
 				name, held.GetString("agent"))}
 		}
+		claimEventBy(held, releaser{memberID: memberID, agent: agent})
 		if err := tx.Save(held); err != nil {
 			return err
 		}
