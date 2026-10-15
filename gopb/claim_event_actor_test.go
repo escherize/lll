@@ -18,6 +18,7 @@ func TestClaimEventsKeepReleaserSeparateAndIdentifyExpiry(t *testing.T) {
 	if err := app.Save(collection); err != nil {
 		t.Fatal(err)
 	}
+	registerClaimEventActors(app)
 	type seen struct{ actor, agent, source, holder string }
 	var deleted []seen
 	app.OnRecordAfterDeleteSuccess("claims").BindFunc(func(e *core.RecordEvent) error {
@@ -51,5 +52,23 @@ func TestClaimEventsKeepReleaserSeparateAndIdentifyExpiry(t *testing.T) {
 	}
 	if len(deleted) != 2 || deleted[1] != (seen{"", "", "system", holder}) {
 		t.Fatalf("expiry impersonated a holder: %+v", deleted)
+	}
+	third, err := acquireClaim(app, issue, holder, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := app.FindRecordById("claims", third.ClaimID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.GetString("event_actor") != holder {
+		t.Fatal("fixture has no previous actor")
+	}
+	// An unlabelled model/cascade delete has no authenticated releaser.
+	if err := app.Delete(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 3 || deleted[2] != (seen{"", "", "", holder}) {
+		t.Fatalf("cascade replayed a past actor: %+v", deleted)
 	}
 }

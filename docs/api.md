@@ -97,3 +97,19 @@ the server actually enforces), not hand-typed; regenerate after schema
 changes with `mise run api-schema`. The gate verifies the two agree —
 `gen_api_schema.py --check` runs in e2e and fails naming what drifted, so the
 reference cannot silently fall behind the schema again (LLL-435).
+
+## Opt-in comment and claim activity
+
+Existing webhook registrations and `lll watch` remain issue-only. Use
+`lll watch --activity --json` for live comment and claim events, or
+`lll webhook add URL --activity` for a receiver in the selected team/project.
+The CLI checks authenticated `GET /api/lll/activity` (`{"supported":true}`)
+before creating an activity webhook. An older server is refused before POST.
+Raw API registrations opt in with `activity:true`; omitted or false keeps the
+legacy default. Check support before relying on that field on an old server.
+
+Activity envelopes carry topic, action, raw record, issue key, actor member
+id/name/kind and agent label. A claim's holder is separate from its releasing
+actor. Scope rules apply to subscriptions; shared webhook names use the team's
+shared roster. Delivery is live-only, with no replay or durable outbox claim.
+See the CLI contract and `watch --help` for reconciling reconnect gaps.

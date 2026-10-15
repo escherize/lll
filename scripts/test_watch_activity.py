@@ -166,6 +166,12 @@ try:
             assert watch_latency < 10 and webhook_latency < 10
             wait_event(ready_out, "comments", "create", comment["id"])
 
+            retry_args = ('issue', 'comment', key, '-b', 'retry wake-up', '--agent', 'retry-writer',
+                          '--idempotency-key', 'activity-retry', '--json')
+            first_retry = json.loads(cli(*retry_args))
+            second_retry = json.loads(cli(*retry_args))
+            assert first_retry['id'] == second_retry['id'] and second_retry.get('reused') is True
+            wait_event(full_out, 'comments', 'create', first_retry['id'])
             request('/api/lll/issues/' + target['id'] + '/claim',
                     {'agent': 'worker', 'event_actor': operator['id'], 'event_source': 'system'}, token)
             acquired = wait_event(full_out, 'claims', 'create')
@@ -204,6 +210,8 @@ try:
             assert deleted['author'] == operator['id'] and deleted['record']['member'] == owner['id'], deleted
             assert events(default_out) and all(e['topic'] == 'issues' for e in events(default_out)), events(default_out)
             assert all(e['topic'] == 'issues' for e in received if e['_receiver_path'] == '/legacy'), received
+            assert sum(e['topic'] == 'comments' and e['record']['id'] == first_retry['id'] for e in events(full_out)) == 1
+            assert sum(e['topic'] == 'comments' and e['record']['id'] == first_retry['id'] for e in received) == 1
             hidden_webhook = next(e for e in received if e['record']['id'] == hidden['id'])
             assert hidden_webhook['author_name'] == 'hidden member' and 'bot-hidden-activity' not in json.dumps(hidden_webhook)
             print(json.dumps({'watch_seconds': round(watch_latency, 3), 'webhook_seconds': round(webhook_latency, 3),
