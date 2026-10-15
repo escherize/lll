@@ -336,6 +336,10 @@ pub struct Command {
   /// Sub-verbs: 'lll issue comment edit KEY N'. A word that is none of them
   /// is the command's own first positional.
   pub verbs: Slice<Command>,
+  /// One real invocation, printed under "Example:" at the end of the verb's
+  /// help (LLL-702). scripts/test_doc_examples.py runs every one against a
+  /// scratch board, so an example that stops working fails the gate.
+  pub example: string,
   pub run: fn(CommandInput) -> Result<output.Output, pb.CliError>,
 }
 

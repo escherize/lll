@@ -1565,7 +1565,7 @@ assert_contains "$out" "was not blocked by" "unblocking twice says so"
 set +e
 out=$(env LLL_URL=$URL "$LIN" issue depends "$DC" 2>&1)
 set -e
-assert_contains "$out" "lll issue block KEY-123 BLOCKER" "a guessed dependency verb is pointed at block"
+assert_contains "$out" "lll issue block $DC BLOCKER" "a guessed dependency verb is pointed at block"
 
 # --- --json emits one jq-parseable object per line ---
 wait_for_line "$WATCH_JSON" "Watched todo issue" "watch --json captured the create"
@@ -2397,7 +2397,7 @@ assert_contains "$out" "did you mean 'lll issue list'" "plural noun names the si
 set +e
 out=$("$LIN" issue assign ENG-1 bob 2>&1)
 set -e
-assert_contains "$out" "lll issue claim KEY-123" "a synonym verb is pointed at the verb (fleet replay: assign, 5/30)"
+assert_contains "$out" "lll issue claim ENG-1" "a synonym verb is pointed at the verb (fleet replay: assign, 5/30)"
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --paths "src/pb" --body "every short flag has a long one")
 assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --paths included"
 out=$("$LIN" --help)
@@ -2409,13 +2409,13 @@ out=$(LLL_URL=$URL "$LIN" issue comment add ENG-1 -b "hi" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "issue comment add: expected nonzero exit"
-assert_contains "$out" "'lll issue comment KEY-123 \"body\"' adds one" "comment add names the form that adds"
+assert_contains "$out" "'lll issue comment ENG-1 \"body\"' adds one" "comment add names the form that adds"
 set +e
 out=$(LLL_URL=$URL "$LIN" issue comment list ENG-1 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "issue comment list: expected nonzero exit"
-assert_contains "$out" "'lll issue comment KEY-123' lists the comments" "comment list names the listing form"
+assert_contains "$out" "'lll issue comment ENG-1' lists the comments" "comment list names the listing form"
 assert_contains "$out" "the sub-verbs are edit and delete" "comment list names the real sub-verbs"
 set +e
 out=$(LLL_URL=$URL "$LIN" issue view list 2>&1)
@@ -2594,7 +2594,7 @@ env $E "$LIN" issue view "$CK2" --json | python3 -c 'import json,sys; d=json.loa
 CK3=$(env $E "$LIN" issue create -t "Update finishes" | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
 out=$(env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state done)
-assert_contains "$out" "Updated $CK3: state=done; released your claim (assignee kept)" "update --state done releases the holder's claim"
+assert_contains "$out" "Updated $CK3: state=done; released bryan's claim; assignee unchanged" "update --state done releases the holder's claim"
 env $E "$LIN" issue view "$CK3" --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["claim"] is None; assert d["assignee_name"] == "bryan"'
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue update "$CK3" --state todo >/dev/null
 env $E LLL_TOKEN="$BRYAN_TOK" LLL_ME=bryan "$LIN" issue claim "$CK3" >/dev/null
