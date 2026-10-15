@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- Predictable upgrade guidance and a loopback-only binary-to-binary migration
+  and stopped-backup restore rehearsal, with exact tested-pair hashes (LLL-706).
+
 - The board answers a short issue address: `/t/KEY/7` redirects (303, query
   kept) to `/t/KEY/issue/KEY-7`, so an issue number is a URL you can type
   (LLL-704). Only digits match. A viewer who cannot see the team gets the
