@@ -215,3 +215,11 @@ minor release. `lll api --schema` prints the current reference. For a bulk
 read the CLI covers, prefer its `--json`: `lll issue list --json` carries
 each issue's claim, so reading claims through
 `lll api GET /api/collections/claims/records` is no longer needed for that.
+
+### Display fields on watch events
+
+Issue events from `watch --json` (including `--ready`) and `issue watch --json`
+carry `key`, `priority_name` and `creator_name` beside `topic`, `action` and
+`record`. The raw `record` keeps its fields. `creator_name` is an empty string
+when there is no creator and `"hidden member"` when the creator is inaccessible.
+These are additive covered fields; readers should tolerate new envelope fields.
