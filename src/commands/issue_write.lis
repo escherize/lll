@@ -573,6 +573,11 @@ fn comment(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     body_set = true
   }
   let agent = if body_set { agent_label(ctx, p)? } else { "" }
+  let key = strings.TrimSpace(p.one("--idempotency-key"))
+  if p.given("--idempotency-key") {
+    if key == "" { return Err(flags.usage_error("--idempotency-key must not be empty")) }
+    if !body_set { return Err(flags.usage_error(f"--idempotency-key keys a new comment; give its body\nusage: {usage}")) }
+  }
 
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
@@ -601,11 +606,21 @@ fn comment(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     author_name = a.name
   }
 
-  let created = writes.create_comment(ctx, pb.Caller.Process, models.NewComment { issue: issue.id, author, agent, body })?
+  let new_comment = models.NewComment { issue: issue.id, author, agent, body }
+  let created = if key == "" {
+    writes.create_comment(ctx, pb.Caller.Process, new_comment)?
+  } else {
+    writes.create_comment_once(ctx, new_comment, key)?
+  }
   if p.given("--json") { return Ok(json_body(created)) }
+  let mut reuse = CreationReuse { .. }
+  if let Err(e) = json.Unmarshal(created.bytes(), &reuse) {
+    return Err(pb.failed(f"decoding comment reuse: {e}"))
+  }
   // Show the authenticated author at the write, so token switches are visible.
   let as_who = if author_name == "" { "with no author; use a member token from 'lll login' or 'lll token create'" } else { f"as {display.byline(author_name, agent)}" }
-  Ok(output.line(f"Commented on {issue.expand.team.key}-{issue.number} {as_who}"))
+  let action = if reuse.reused { "Reused the comment on" } else { "Commented on" }
+  Ok(output.line(f"{action} {issue.expand.team.key}-{issue.number} {as_who}"))
 }
 
 /// Thin wrapper over the GitHub CLI: gh owns pushing checks, prompts, and

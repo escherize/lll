@@ -417,6 +417,13 @@ fn issue_comment_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--idempotency-key",
+      value: true,
+      hint: "key",
+      help: "retry the same comment with a stable key: reuse the comment, or refuse a changed body\nscoped per issue; requires a server supporting keyed comments",
+      ..,
+    },
+    flags.Flag {
       name: "--json",
       help: "print the comments as a JSON list, or with a body the new comment's record",
       ..,

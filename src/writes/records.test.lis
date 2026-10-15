@@ -1,0 +1,54 @@
+import "go:net/http"
+import "go:net/http/httptest"
+
+import "config"
+import "models"
+import "pb"
+
+fn keyed_client(url: string) -> pb.Client {
+  pb.Client.new(config.given(config.Config { url, token: "t", .. }, config.Sources { .. }, config.Env { .. }))
+}
+
+fn keyed_comment() -> models.NewComment {
+  models.NewComment { issue: models.IssueId("i1"), body: "same body", .. }
+}
+
+/// LLL-700: a server that predates keyed comments ignores the header, so a
+/// retry there would post a second comment. The CLI asks first and sends
+/// nothing when the answer is 404.
+#[test]
+fn a_keyed_comment_is_refused_unsent_by_an_older_server() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    if let Some(u) = r.URL { let _ = seen.send(f"{r.Method} {u.Path}") }
+    w.WriteHeader(404)
+    let _ = w.Write("{\"status\":404,\"message\":\"The requested resource wasn't found.\",\"data\":{}}".bytes())
+  }))
+  defer server.Close()
+  let Err(e) = create_comment_once(keyed_client(server.URL), keyed_comment(), "k1") else {
+    panic("an older server must refuse a keyed comment")
+  };
+  assert e.message == "this server does not support --idempotency-key; upgrade the server before retrying this comment"
+  assert seen.receive() == Some("GET /api/lll/comments/idempotency")
+  seen.close()
+  // Nothing after the check: no comment was posted.
+  assert seen.receive() == None
+}
+
+#[test]
+fn a_keyed_comment_carries_its_key_to_the_comments_collection() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    if let Some(u) = r.URL {
+      let key = r.Header.map_or("", |h| h.Get("Idempotency-Key"))
+      let _ = seen.send(f"{r.Method} {u.Path} key={key}")
+    }
+    w.Header().Set("Content-Type", "application/json")
+    let _ = w.Write("{\"supported\":true,\"id\":\"c1\",\"reused\":true}".bytes())
+  }))
+  defer server.Close()
+  let assert Ok(body) = create_comment_once(keyed_client(server.URL), keyed_comment(), "k1")
+  assert body.contains("\"reused\":true")
+  assert seen.receive() == Some("GET /api/lll/comments/idempotency key=")
+  assert seen.receive() == Some("POST /api/collections/comments/records key=k1")
+}

@@ -19,6 +19,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   kept) to `/t/KEY/issue/KEY-7`, so an issue number is a URL you can type
   (LLL-704). Only digits match. A viewer who cannot see the team gets the
   same 404 the issue page gives, and a signed-out request the same 401.
+- `lll issue comment --idempotency-key KEY` reuses a comment when the same
+  issue, key and comment body are retried, and refuses a changed body with 409
+  (exit 4). Keys are scoped per issue: the same key on another issue makes a
+  separate comment. A keyed comment checks server support before writing, so a
+  1.1.0 or older server refuses it with "upgrade the server" instead of
+  ignoring the key; unkeyed comments keep their existing behavior (LLL-700).
 
 ## [1.1.0] - 2026-10-13
 
