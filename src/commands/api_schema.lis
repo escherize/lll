@@ -30,6 +30,9 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | created | autodate |  | set on create |
 | updated | autodate |  | set on create; refreshed on update |
 | agent | text |  |  |
+| event_actor | relation |  | relation to members |
+| event_agent | text |  |  |
+| event_source | text |  |  |
 
 ## comments (base)
 
@@ -236,5 +239,6 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | created | autodate |  | set on create |
 | secret_set | bool |  |  |
 | creator | relation |  | relation to members |
+| activity | bool |  |  |
 "
 }

@@ -8,12 +8,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
-- Predictable upgrade guidance and a loopback-only binary-to-binary migration
-  and stopped-backup restore rehearsal, with exact tested-pair hashes (LLL-706).
+- Query watch and webhook registrations with `--activity` deliver comment
+  and claim activity within the
+  selected team/project/filter, including renewals and releases without an
+  issue update. Activity includes the issue key and authenticated actor;
+  forced release preserves the holder separately and expiry identifies the
+  system. Old-server attribution is explicitly unknown (LLL-642).
 
 - Issue view and next JSON include covered blocker refs (using each visible
   blocker's own team key), comment author names and explicit server-written
   comment markers. Hidden identities remain hidden (LLL-691).
+
+- Predictable upgrade guidance and a loopback-only binary-to-binary migration
+  and stopped-backup restore rehearsal, with exact tested-pair hashes (LLL-706).
 
 - JSON watch issue events carry covered key, priority name and creator name
   beside the raw record, including ready transitions (LLL-694).

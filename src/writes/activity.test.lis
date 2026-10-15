@@ -1,0 +1,41 @@
+import "go:net/http"
+import "go:net/http/httptest"
+import "config"
+import "models"
+import "pb"
+
+fn activity_client(url: string) -> pb.Client {
+  pb.Client.new(config.given(config.Config { url, token: "t", .. }, config.Sources { .. }, config.Env { .. }))
+}
+
+#[test]
+fn unsupported_activity_registration_never_posts() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    if let Some(u) = r.URL { let _ = seen.send(f"{r.Method} {u.Path}") }
+    w.WriteHeader(404)
+    let _ = w.Write("{\"status\":404,\"message\":\"not supported\"}".bytes())
+  }))
+  defer server.Close()
+  let Err(e) = create_webhook(activity_client(server.URL), models.NewWebhook { activity: true, .. }) else {
+    panic("must refuse unsupported activity before writing")
+  };
+  assert e.message.contains("upgrade the server")
+  assert seen.receive() == Some("GET /api/lll/activity")
+  seen.close()
+  assert seen.receive() == None
+}
+
+#[test]
+fn ordinary_webhooks_keep_the_legacy_write_path() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    if let Some(u) = r.URL { let _ = seen.send(f"{r.Method} {u.Path}") }
+    let _ = w.Write("{\"id\":\"hook\"}".bytes())
+  }))
+  defer server.Close()
+  let assert Ok(_) = create_webhook(activity_client(server.URL), models.NewWebhook { .. })
+  assert seen.receive() == Some("POST /api/collections/webhooks/records")
+  seen.close()
+  assert seen.receive() == None
+}

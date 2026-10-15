@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "models"
 import "pb"
 
@@ -309,6 +310,13 @@ pub fn create_webhook(
   ctx: pb.Client,
   hook: models.NewWebhook,
 ) -> Result<string, pb.CliError> {
+  if hook.activity {
+    let unsupported = "this server does not support activity webhooks; upgrade the server before registering --activity"
+    let response = ctx.get("/api/lll/activity").map_err(|e| if e.status == 404 { pb.failed(unsupported) } else { e })?
+    let mut support = ActivitySupport { .. }
+    json.Unmarshal(response.bytes(), &support).map_err(|e| pb.failed(f"decoding activity support: {e}"))?
+    if !support.supported { return Err(pb.failed(unsupported)) }
+  }
   create(ctx, pb.Caller.Process, collection_path("webhooks"), hook, "webhook")
 }
 
@@ -343,3 +351,6 @@ pub fn create_view(
   let _ = create(ctx, caller, collection_path("views"), view, "request")?
   Ok(())
 }
+
+#[json]
+struct ActivitySupport { supported: bool }

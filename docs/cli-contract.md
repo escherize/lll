@@ -182,7 +182,9 @@ them.
 `claim`; use `issue list --project NAME --json` for the issue object.
 
 `lll watch --json` prints one event per line. Its timestamps are RFC3339;
-the event shape (`topic`, `action`, `record`) is not covered yet.
+the covered envelope has `topic`, `action` and `record`. Consumers must ignore
+unknown topics/actions and additional fields. Issue record fields follow the
+issue contract above; the activity metadata is described below.
 
 ## Empty lists
 
@@ -233,3 +235,24 @@ carry `key`, `priority_name` and `creator_name` beside `topic`, `action` and
 `record`. The raw `record` keeps its fields. `creator_name` is an empty string
 when there is no creator and `"hidden member"` when the creator is inaccessible.
 These are additive covered fields; readers should tolerate new envelope fields.
+
+### Comment and claim activity
+
+`watch --activity --json` also emits `comments` and `claims` topics for issues matching
+its filters (`--ready` includes only ready parents). These keep the raw
+`record` and add `key`, `author` (actor member id), `author_name`, `author_kind`
+(`person`, `bot`, `system`, `superuser`, or empty when unknown) and `agent`.
+Claim create/update/delete mean acquired/updated (including renewal)/released;
+a repeated claim with no write emits nothing. A claim's holder remains
+`record.member`; the releaser is not assumed to be the holder. Names and kinds
+of inaccessible actors remain hidden. Old servers lacking claim attribution
+leave the actor unknown. Webhooks use the same activity envelope, with names
+limited to the team's shared roster.
+
+This is live notification, not an audit or replay log. Reconnect does not
+replay gaps, and `issue list --since` misses comment/claim-only activity.
+
+Activity delivery is opt-in. Plain watch and webhook registrations without
+`--activity` keep issue-only delivery. Activity webhook creation checks the
+authenticated `/api/lll/activity` support endpoint before sending any POST;
+an unsupported server is an error, never a silent issue-only registration.

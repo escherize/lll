@@ -584,6 +584,7 @@ pub struct Webhook {
   pub id: string,
   pub url: string,
   pub secret_set: bool,
+  pub activity: bool,
   pub team: TeamId,
   pub project: ProjectId,
   pub expand: WebhookExpand,
@@ -602,6 +603,8 @@ pub struct NewWebhook {
   pub url: string,
   #[json(omitempty)]
   pub secret: string,
+  #[json(omitempty)]
+  pub activity: bool,
 }
 
 /// POST body for /api/lll/bots/rotate (LLL-407): re-mint the named bot's

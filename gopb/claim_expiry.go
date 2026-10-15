@@ -105,6 +105,7 @@ func expireClaim(app core.App, snapshot *core.Record, cutoff, now time.Time) boo
 			}
 			announce = issue
 		}
+		claimEventActor(claim, "", "", "system")
 		return tx.Delete(claim)
 	})
 	if err != nil {
