@@ -1,5 +1,6 @@
 import "go:net/http"
 import "go:net/http/httptest"
+import "go:time"
 
 import "config"
 import "models"
@@ -60,6 +61,32 @@ fn a_capability_missing_from_the_list_refuses_unsent() {
   assert seen.receive() == Some("GET /.well-known/lll")
   seen.close()
   assert seen.receive() == None
+}
+
+/// A discovery endpoint that never answers costs the 2s probe limit, not the
+/// request budget; the support route then decides.
+#[test]
+fn a_hanging_discovery_falls_back_quickly() {
+  let seen = Channel.buffered<string>(8)
+  let release = Channel.new<bool>()
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else { return };
+    let _ = seen.send(f"{r.Method} {u.Path}")
+    if u.Path == "/.well-known/lll" {
+      let _ = release.receive()
+      return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    let _ = w.Write("{\"supported\":true,\"id\":\"x\"}".bytes())
+  }))
+  defer server.Close()
+  defer release.close()
+  let started = time.Now()
+  let assert Ok(_) = create_webhook(capability_client(server.URL), models.NewWebhook { activity: true, .. })
+  assert time.Since(started) < 5 * time.Second
+  assert seen.receive() == Some("GET /.well-known/lll")
+  assert seen.receive() == Some("GET /api/lll/activity")
+  assert seen.receive() == Some("POST /api/collections/webhooks/records")
 }
 
 /// A 1.1.0 server names its version but has no list: the client asks the

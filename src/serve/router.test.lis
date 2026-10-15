@@ -12,8 +12,8 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
   defer upstream_a.Close()
   let mut upstream_b = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream-b".bytes()) }))
   defer upstream_b.Close()
-  let Ok(router_a) = board_mux(test_client(upstream_a.URL, "", ""), models.Team { key: "AAA", .. }, router_test_hub(), records.Actor { .. }, false) else { panic("first router failed") };
-  let Ok(router_b) = board_mux(test_client(upstream_b.URL, "", ""), models.Team { key: "BBB", .. }, router_test_hub(), records.Actor { .. }, false) else { panic("second router failed") };
+  let Ok(router_a) = board_mux(test_client(upstream_a.URL, "", ""), models.Team { key: "AAA", .. }, router_test_hub(), records.Actor { .. }, false, Some(["cap.a"])) else { panic("first router failed") };
+  let Ok(router_b) = board_mux(test_client(upstream_b.URL, "", ""), models.Team { key: "BBB", .. }, router_test_hub(), records.Actor { .. }, false, Some(["cap.a"])) else { panic("second router failed") };
   let mut board_a = httptest.NewServer(router_a)
   defer board_a.Close()
   let mut board_b = httptest.NewServer(router_b)
@@ -27,12 +27,27 @@ fn board_routers_are_independent_and_leave_default_mux_untouched() {
     let (status, body) = router_get(base + "/.well-known/lll")
     assert status == 200
     assert strings.Contains(body, "web_url")
-    assert strings.Contains(body, "\"capabilities\":[\"issues.idempotency\",\"comments.idempotency\",\"webhooks.activity\"]")
+    assert strings.Contains(body, "\"capabilities\":[\"cap.a\"]")
     let (status, _) = router_get(base + "/static/theme.css")
     assert status == 401
   }
   let (status, _) = router_get(default_server.URL + "/.well-known/lll")
   assert status == 404
+}
+
+/// LLL-710: a board proxying an API it did not start (an adopted, possibly
+/// older one) must not advertise its own binary's capabilities for it.
+#[test]
+fn a_board_over_an_adopted_api_advertises_no_capabilities() {
+  let mut upstream = httptest.NewServer(http.HandlerFunc(|w, _r| { let _ = w.Write("upstream".bytes()) }))
+  defer upstream.Close()
+  let Ok(router) = board_mux(test_client(upstream.URL, "", ""), models.Team { key: "ADO", .. }, router_test_hub(), records.Actor { .. }, false, None) else { panic("router failed") };
+  let mut board = httptest.NewServer(router)
+  defer board.Close()
+  let (status, body) = router_get(board.URL + "/.well-known/lll")
+  assert status == 200
+  assert strings.Contains(body, "\"version\"")
+  assert !strings.Contains(body, "capabilities")
 }
 
 #[test]
@@ -49,7 +64,7 @@ fn administration_ui_requires_explicit_router_opt_in(t: TestContext) {
 }
 
 fn check_admin_router(t: TestContext, upstream: string, enabled: bool) {
-  let Ok(router) = board_mux(test_client(upstream, "", ""), models.Team { key: "ADM", .. }, router_test_hub(), records.Actor { .. }, enabled) else { panic("router failed") };
+  let Ok(router) = board_mux(test_client(upstream, "", ""), models.Team { key: "ADM", .. }, router_test_hub(), records.Actor { .. }, enabled, None) else { panic("router failed") };
   let mut board = httptest.NewServer(router)
   defer board.Close()
   for path in ["/_", "/_/", "/_/assets/app.js"] {
@@ -122,6 +137,7 @@ fn every_non_get_request_must_come_from_the_boards_own_origin() {
     router_test_hub(),
     records.Actor { .. },
     false,
+    None,
   ) else {
     panic("router failed")
   }

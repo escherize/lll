@@ -24,8 +24,8 @@ is refused rather than silently creating an issue-only registration.
 
 The server lists what it supports in `GET /.well-known/lll` (`capabilities`),
 and the CLI refuses a command whose capability is missing before it writes.
-A server without the list (1.1.0 and older) is asked through each feature's
-support route instead; see [Server capabilities](cli-contract.md#server-capabilities).
+A server without the list (1.1.0 and older, or a board started over an
+adopted API) is asked through each feature's support route instead; see [Server capabilities](cli-contract.md#server-capabilities).
 
 Features described in Unreleased may be deployed on main before a published
 CLI includes their flags. Check the installed help and the server's

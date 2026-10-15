@@ -273,10 +273,12 @@ A name, once listed, is never removed or renamed.
 Before such a command writes anything, the CLI reads the list. A capability
 missing from it is refused with exit 1 and a message naming the server's
 version: `this server (1.2.0) does not support --idempotency-key; upgrade the
-server before retrying this comment`. Nothing is sent. A server with no
-`capabilities` field predates the list (1.1.0 and older): for these three, the
-CLI asks the feature's own authenticated support route
+server before retrying this comment`. Nothing is sent. The list is absent
+when the server predates it (1.1.0 and older), and from a board that `lll up`
+started over an API it did not start, since that API may be older than the
+board. Without the list, for these three, the CLI asks the feature's own authenticated support route
 (`/api/lll/issues/idempotency`, `/api/lll/comments/idempotency`,
 `/api/lll/activity`), as it did before the list existed, and refuses the same
-way when that route answers 404. Commands that need no capability never read
+way when that route answers 404. Discovery is read without credentials, gives
+up after 2 seconds, and any failure reads as an absent list. Commands that need no capability never read
 the list. The version-skew warning is separate and unchanged.
