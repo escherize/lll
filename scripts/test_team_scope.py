@@ -162,6 +162,30 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         # Created with no scope or mode: the creator's, never blank.
         plain, _ = member('plain')
         assert (plain['scope'], plain['mode']) == ('all', 'rw'), plain
+        # A bot must not mint an ownerless person to escape its owner's cap.
+        person_owner, person_owner_token = member('person-owner')
+        for actor_name, owner in [('bot-owned-actor', person_owner['id']), ('bot-ownerless-actor', '')]:
+            code, actor, _ = call(api, '/api/collections/members/records', {
+                'name': actor_name, 'kind': 'bot', 'owner': owner,
+                'email': actor_name + '@example.test', 'password': 'pw12345678',
+                'passwordConfirm': 'pw12345678', 'scope': 'all', 'mode': 'rw'}, su)
+            assert code == 200, actor
+            code, minted, _ = call(api, '/api/collections/members/impersonate/' + actor['id'], {'duration': 3600}, su)
+            assert code == 200, minted
+            actor_token = minted['token']
+            for index, new_owner in enumerate(('', person_owner['id'])):
+                escaped = call(api, '/api/collections/members/records', {
+                    'name': f'escape-{actor_name}-{index}', 'kind': 'person',
+                    'email': f'escape-{actor_name}-{index}@example.test',
+                    'password': 'pw12345678', 'passwordConfirm': 'pw12345678',
+                    'owner': new_owner, 'scope': 'all', 'mode': 'rw'}, actor_token)
+                assert escaped[0] == 400, ('bot created a person outside its lifetime', escaped[:2])
+        # A person retains the ordinary person-provisioning path.
+        allowed = call(api, '/api/collections/members/records', {
+            'name': 'human-created-person', 'kind': 'person',
+            'email': 'human-created-person@example.test',
+            'password': 'pw12345678', 'passwordConfirm': 'pw12345678'}, person_owner_token)
+        assert allowed[0] == 200, allowed[:2]
         # Read-only: sees ALPHA, writes nothing, custom routes included.
         ro_rec, ro = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
         assert {i['title'] for i in call(api, '/api/collections/issues/records', token=ro)[1]['items']} == \
