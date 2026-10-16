@@ -136,7 +136,7 @@ func registerMemberScopeDefault(app core.App) {
 		return e.Next()
 	})
 	app.OnRecordUpdate("members").BindFunc(func(e *core.RecordEvent) error {
-		before := e.Record.Original()
+		before := keepCommitted(e.App, e.Record)
 		// Losing the owner must not widen a bot back to its own fields
 		// (fail closed, LLL-543 security review). A superuser clearing it
 		// leaves the bot what it could do at that moment: its access within
@@ -153,7 +153,7 @@ func registerMemberScopeDefault(app core.App) {
 			}
 			setAccess(e.Record, kept)
 		}
-		detachStaleCreator(e.App, e.Record)
+		detachStaleCreator(e.App, e.Record, before)
 		// The creator holds every token it minted for this bot. Losing
 		// created_by any way (detached here, the creator deleted, which
 		// PocketBase clears with a save, or a superuser clearing it) strands
@@ -175,6 +175,50 @@ func registerMemberScopeDefault(app core.App) {
 		}
 		return narrowCreated(e.App, e.Record)
 	})
+}
+
+// guardedMemberFields are the member columns a save must not roll back:
+// who owns and created the member, what it may do, and its token key.
+var guardedMemberFields = []string{"kind", "owner", "created_by", "scope", "teams", "mode", core.FieldNameTokenKey}
+
+// keepCommitted returns the member as stored now and keeps, on m, every
+// committed value the save did not itself change (LLL-709 review F5,
+// LLL-713). PocketBase's update handler loads the record before its
+// transaction and Save writes every column, so a member's own PATCH (a bot
+// may PATCH itself) would otherwise write back a stale copy: undoing a
+// narrowing, a detach, or a rotation that stranded a leaked token. A value
+// the save changes, against the record it loaded, is the save's own and is
+// kept as sent. The password hash is guarded the same way. This runs inside
+// the write, so the read sees every committed save.
+func keepCommitted(app core.App, m *core.Record) *core.Record {
+	stored, err := app.FindRecordById("members", m.Id)
+	if err != nil {
+		return m.Original()
+	}
+	loaded := m.Original()
+	if loaded.Id == "" {
+		// Built in memory and created, never loaded: PocketBase fills
+		// Original only from a database read, so there is nothing stale
+		// to compare, and the stored row is the before state.
+		return stored
+	}
+	for _, field := range guardedMemberFields {
+		if !slices.Equal(stored.GetStringSlice(field), loaded.GetStringSlice(field)) &&
+			slices.Equal(m.GetStringSlice(field), loaded.GetStringSlice(field)) {
+			m.Set(field, stored.Get(field))
+		}
+	}
+	if passwordHash(stored) != passwordHash(loaded) && passwordHash(m) == passwordHash(loaded) {
+		m.SetRaw("password", stored.GetRaw("password"))
+	}
+	return stored
+}
+
+func passwordHash(r *core.Record) string {
+	if v, ok := r.GetRaw("password").(*core.PasswordFieldValue); ok {
+		return v.Hash
+	}
+	return ""
 }
 
 // narrowCreated keeps every bot m created (created_by, LLL-709) within m's
@@ -229,9 +273,9 @@ func narrowCreated(app core.App, m *core.Record) error {
 // for it so far stops working, and checkCreator
 // cannot refuse a save that narrows or revokes. A created_by the update
 // itself sets is left for checkCreator to judge.
-func detachStaleCreator(app core.App, m *core.Record) {
+func detachStaleCreator(app core.App, m, before *core.Record) {
 	id := m.GetString("created_by")
-	if id == "" || id != m.Original().GetString("created_by") {
+	if id == "" || id != before.GetString("created_by") {
 		return
 	}
 	creator, err := app.FindRecordById("members", id)

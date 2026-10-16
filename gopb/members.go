@@ -56,6 +56,17 @@ func registerMemberGuards(app core.App) {
 		}
 		return e.Next()
 	})
+	// A member update through the records API runs in one transaction
+	// (LLL-709 review F5, LLL-713). PocketBase saves outside one, and reads
+	// outside the write, so keepCommitted's re-read of the stored row could
+	// itself be stale by the time the row is written. In a transaction the
+	// read and the write hold the one write connection together.
+	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		return e.App.RunInTransaction(func(tx core.App) error {
+			e.App = tx
+			return e.Next()
+		})
+	})
 	app.OnRecordAuthWithPasswordRequest("members").BindFunc(func(e *core.RecordAuthWithPasswordRequestEvent) error {
 		// Fires after the identity lookup and before the password check, so
 		// the refusal names the account kind instead of grading a password a

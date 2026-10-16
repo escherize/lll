@@ -51,6 +51,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   re-mints with `lll bot rotate`. A read-only bot is still refused, and a bot with no owner still gets
   "a bot cannot own a bot". The board's "Add a bot" is unchanged.
 
+### Fixed
+
+- A member's own update (a bot may PATCH itself) no longer writes back a
+  stale copy of its record. A leaked bot token spamming self-updates could
+  survive its owner's `lll bot rotate`, and could undo a narrowing that
+  landed while the update was in flight. Member updates now run in one
+  transaction, and a save keeps the committed owner, creator, access, token
+  key and password it did not itself change (LLL-713).
+
 ## [1.1.0] - 2026-10-13
 
 ### Upgrading from 1.0

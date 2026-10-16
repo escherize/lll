@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -569,6 +570,44 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/issues/records?perPage=1', token=w2_tok)[0] == 401, \
             'the revoked creator still acts as its worker with the token it minted'
         assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, boss_tok)[0] == 200, 'the owner re-mints it'
+        # LLL-713 / review F5: a bot's own PATCH loads its row before the write;
+        # racing self-PATCHes must not write back a narrowing or a rotation
+        # they never saw. Both sides are counted so a pass is not vacuous.
+        def spam_self(tok, member_id, ok, stop):
+            while not stop.is_set():
+                if call(api, f'/api/collections/members/records/{member_id}', {'emailVisibility': False}, tok, 'PATCH')[0] == 200:
+                    ok.append(1)
+
+        def racing(tok, member_id, act):
+            ok, stop = [], threading.Event()
+            threads = [threading.Thread(target=spam_self, args=(tok, member_id, ok, stop)) for _ in range(8)]
+            for th in threads:
+                th.start()
+            result = act()
+            stop.set()
+            for th in threads:
+                th.join()
+            return result, len(ok)
+
+        lost = survived = patched = 0
+        for n in range(6):
+            c = call(api, '/api/collections/members/records',
+                     dict(bot_body, name=f'bot-race-c{n}', email=f'race-c{n}@example.test', owner=boss['id']), boss_tok)[1]
+            c_tok = call(api, '/api/lll/bots/rotate', {'name': c['name']}, boss_tok)[1]['token']
+            w = call(api, '/api/collections/members/records',
+                     dict(bot_body, name=f'bot-race-w{n}', email=f'race-w{n}@example.test', owner=boss['id']), c_tok)[1]
+            w_tok = call(api, '/api/lll/bots/rotate', {'name': w['name']}, c_tok)[1]['token']
+            code, count = racing(w_tok, w['id'], lambda: call(
+                api, f"/api/collections/members/records/{c['id']}", {'teams': [alpha['id']]}, su, 'PATCH')[0])
+            assert code == 200
+            patched += count
+            lost += len(record(w['name'])['teams']) != 1
+            rotated, count = racing(w_tok, w['id'], lambda: call(api, '/api/lll/bots/rotate', {'name': w['name']}, boss_tok)[0])
+            assert rotated == 200
+            patched += count
+            survived += call(api, '/api/collections/issues/records?perPage=1', token=w_tok)[0] == 200
+        assert patched > 0, 'control: no racing self-PATCH succeeded'
+        assert (lost, survived) == (0, 0), f'{lost} narrowings lost and {survived} rotated tokens survived over {patched} self-PATCHes'
         out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.
