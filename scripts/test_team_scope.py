@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -608,6 +609,44 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
             survived += call(api, '/api/collections/issues/records?perPage=1', token=w_tok)[0] == 200
         assert patched > 0, 'control: no racing self-PATCH succeeded'
         assert (lost, survived) == (0, 0), f'{lost} narrowings lost and {survived} rotated tokens survived over {patched} self-PATCHes'
+        # Review F6: renames, bot creates and other writes share one lock
+        # order (the name lock, then the write transaction), so a mix of them
+        # never waits out the name lock's 5s timeout.
+        _, plain_tok = member_login('plain')
+        stats = {'rename': [], 'bot': [], 'issue': []}
+        bad = []
+        mix_stop = threading.Event()
+
+        def timed(kind, fn):
+            n = 0
+            while not mix_stop.is_set():
+                n += 1
+                started = time.monotonic()
+                code = fn(n)
+                stats[kind].append(time.monotonic() - started)
+                if code != 200:
+                    bad.append((kind, code))
+
+        actors = [
+            ('rename', lambda n: call(api, f"/api/collections/members/records/{plain['id']}",
+                                      {'name': f'plain{n % 2}'}, plain_tok, 'PATCH')[0]),
+            ('bot', lambda n: call(api, '/api/collections/members/records',
+                                   dict(bot_body, name=f'bot-mix-{n}', email=f'mix-{n}@example.test', owner=boss['id']),
+                                   boss_tok)[0]),
+            ('issue', lambda n: call(api, '/api/collections/issues/records',
+                                     {'team': alpha['id'], 'title': f'mix {n}', 'state': 'todo'}, boss_tok)[0]),
+        ]
+        mix = [threading.Thread(target=timed, args=a) for a in actors]
+        for th in mix:
+            th.start()
+        time.sleep(6)
+        mix_stop.set()
+        for th in mix:
+            th.join()
+        call(api, f"/api/collections/members/records/{plain['id']}", {'name': 'plain'}, plain_tok, 'PATCH')
+        slowest = {k: round(max(v), 2) for k, v in stats.items()}
+        assert all(stats.values()) and not bad and max(slowest.values()) < 1, \
+            ('writes waited on each other', {k: len(v) for k, v in stats.items()}, slowest, bad[:5])
         out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.
