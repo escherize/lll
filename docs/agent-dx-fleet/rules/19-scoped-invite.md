@@ -42,6 +42,9 @@ only FLEET. Create nothing else.
 
 ## Environment
 
+You are provisioned as a person (`fleet-worker-NN`), since bots cannot invite
+people. Your existing wrapper supplies that identity.
+
 Your instance is already running. Do not open `conn.txt`: it holds your credentials, and the wrapper reads it
 for you. Never type, paste, print or quote a token, this one or any other. The controller-provided wrapper reads
 conn.txt without shell eval, clears inherited LLL/XDG settings, sets

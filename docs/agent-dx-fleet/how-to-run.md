@@ -1,10 +1,20 @@
 # Running the approved lll DX cases
 
-The approved scope is case 01 followed by case 06 (create an issue; it was
-case 05 before the 1.0 plan renumbered the cases 01-20), ten fresh workers per
-case, with at most three active workers. Use fresh agents, not follow-up tasks to
-agents that have learned the CLI. Worker model: gpt-5.6-luna. Each run gets a
-new parent-model reviewer reading every raw report, call audit and REST result.
+## Choose the run scope
+
+For a release, follow `docs/release-checklist.md`: five fresh workers across
+the cases touched by that release, with at most three active workers. Record
+the chosen cases and worker count on the release issue before provisioning.
+Pair cases need even counts; the total can mix independent and paired cases.
+The older ten-worker case01/case06 runs in `plan.md` are a research baseline,
+not the size or case restriction for every release. Explicit user scope wins.
+
+Use fresh agents, not follow-up tasks that have already learned the CLI.
+Use the configured cheap worker model when available; otherwise record an
+available equivalent before launching, never claim the unavailable model ran.
+A new parent-model reviewer reads every raw report, call audit and REST result.
+Keep release evidence on its release issue; historical research evidence
+belongs to its original issue.
 
 Build the intended source revision and record the commit and binary SHA256.
 Run `python3 scripts/test_agent_dx_fleet.py` and `mise run fleet-test` before
@@ -17,7 +27,9 @@ path, `--binary` pointing to the built binary, and its exact `--commit` and
 binary and wrapper/startup code and records their fingerprints before accepting
 JSON lines on stdin. Worktree edits cannot change code beneath live workers.
 
-Send `{"action":"provision","case":"01","run":1}` (`"workers"` defaults to 10).
+For a five-worker single-case release run, send
+`{"action":"provision","case":"01","run":1,"workers":5}`. Always name the
+worker count: the controller default of ten exists for historical research.
 Launch workers only after the controller reports them all ready. Give each
 worker only its case rules (`docs/agent-dx-fleet/rules/NN-<slug>.md`, named in
 the provision reply), number, directory and `lll` wrapper path. In the pair
@@ -48,19 +60,19 @@ review.md and summaries.json. Assemble run.json with summaries, review,
 checker results and fingerprint, then run the shared tally.py and save stdout.
 The owner uses the audits and ground truth, not worker done claims.
 
-Pass requires ten exact artifacts and fewer than two workers with a tool-owned
+Pass requires every provisioned artifact and fewer than two workers with a tool-owned
 failed invocation. Repeated tool failure classes get their own claimed issue
 and verified fix. Then stop the old case and rerun the same case with fresh
 instances and agents before advancing. Record harness/task-design corrections
 separately. A new binary requires a new controller and fresh root; never replace
-the binary beneath live workers. Replay both approved cases on the final build.
+the binary beneath live workers. Repeat the chosen release cases on the final build if the binary changes.
 
 Send `{"action":"stop"}` after review, then `{"action":"exit"}` when changing
 builds or finishing. Stop waits/reaps owned children, verifies every owned
 listener is gone, removes connections and private controller data. Scan
 sanitized evidence for credentials, remove disposable worker HOME/cache, and
 retain only reports, audits, snapshots, reviews, tally, fingerprints and cleanup
-receipts. Attach the evidence bundle and closing table to LLL-402.
+receipts. Attach the evidence bundle and closing table to the run’s tracking issue.
 
 ## Wrapper modes
 
@@ -70,5 +82,6 @@ refused. Case 14 gets nothing from conn.txt: the CLI reads a seeded, broken
 config (wrong URL, expired token) in the worker's HOME, which the worker
 repairs. Cases 15 and 19 honour a worker-set `LLL_TOKEN` or `LLL_CONFIG_HOME`
 (inside the worker directory) so a worker can act as a second identity; the
-URL always comes from conn.txt. Case 15's worker is a person, not a bot,
-because a bot cannot own a bot.
+URL always comes from conn.txt. Cases 15 and 19 use a person identity: case15
+exercises human-owned token provisioning, and case19 invites a person. A bot must never provision a person
+account; that would evade its owner's access boundary.
