@@ -160,14 +160,15 @@ Hidden or deleted blockers are omitted from refs; their ids remain in
 | comment | `id`, `issue`, `author`, `author_name`, `author_kind`, `server_record`, `agent`, `body`, `created`, `updated` |
 | doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `author_name`, `last_editor_name`, `created`, `updated` |
 | team | `id`, `key`, `name`, `accent`, `emoji`, `archived` |
-| member | `id`, `name`, `email`, `kind`, `owner`, `scope`, `teams`, `mode`, `team_keys` |
+| member | `id`, `name`, `email`, `kind`, `owner`, `created_by`, `scope`, `teams`, `mode`, `team_keys` |
 | label | `id`, `name`, `color`, `team` |
 | project | `id`, `name`, `description`, `status`, `team` |
 | webhook | `id`, `url`, `secret_set`, `team`, `project` |
 | search hit | `group`, `kind`, `title`, `state`, `score`, `snippets` (each `label`, `lines`) |
 
-A member's `owner`, `scope`, `teams`, `mode` and `team_keys` are absent when
-empty. A comment's `author_kind` is `"system"` on a comment the server wrote on
+A member's `owner`, `created_by`, `scope`, `teams`, `mode` and `team_keys` are
+absent when empty. `created_by` is the member record id of the bot that
+created a bot, set by the server; such a bot's `owner` is that bot's owner. A comment's `author_kind` is `"system"` on a comment the server wrote on
 its own (today only the claim-expiry note, which has no `author`), and absent
 otherwise. A doc's `last_editor` is the member record id of the member who last
 changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
