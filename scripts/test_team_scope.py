@@ -164,9 +164,11 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert (plain['scope'], plain['mode']) == ('all', 'rw'), plain
         # A bot must not mint an ownerless person to escape its owner's cap.
         person_owner, person_owner_token = member('person-owner')
-        for actor_name, owner in [('bot-owned-actor', person_owner['id']), ('bot-ownerless-actor', '')]:
+        for actor_name, kind, owner in [('bot-owned-actor', 'bot', person_owner['id']),
+                                         ('bot-ownerless-actor', 'bot', ''),
+                                         ('owned-person-actor', 'person', person_owner['id'])]:
             code, actor, _ = call(api, '/api/collections/members/records', {
-                'name': actor_name, 'kind': 'bot', 'owner': owner,
+                'name': actor_name, 'kind': kind, 'owner': owner,
                 'email': actor_name + '@example.test', 'password': 'pw12345678',
                 'passwordConfirm': 'pw12345678', 'scope': 'all', 'mode': 'rw'}, su)
             assert code == 200, actor

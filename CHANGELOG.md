@@ -8,7 +8,7 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
-- Bots cannot create person identities that escape their owner's access and
+- Bots and owned identities cannot create person identities that escape their owner's access and
   survive its revocation (LLL-712). Human provisioning remains available.
 
 ### Added
