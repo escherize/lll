@@ -129,6 +129,21 @@ lll bot create bot-myrepo          # a member for an agent: prints a paste-ready
 surface the doc. `--paths` takes comma-separated paths; `lll finding near` matches
 by them in both directions.
 
+## Bots, owners and worker credentials
+
+A bot with a human owner may create a worker with `lll bot create bot-NAME`.
+The human remains the owner; `created_by` records the creating bot. A worker
+cannot exceed its creator or human owner's access. Narrowing the creator
+narrows its workers; losing the shared owner detaches them and strands tokens
+the creator minted. A bot without a human owner cannot provision this way.
+Bots and owned identities cannot create person accounts to escape that bound.
+
+Use `lll bot rotate NAME` to replace a leaked token, not another create call.
+Only the authorized owner, creator or administrator can rotate; a revoked or
+read-only creator cannot mint tokens. Treat token output as a credential, not
+a report artifact. Existing API names and covered fields are separate from
+these authorization rules: client/server version equality grants no access.
+
 ## What agents specifically need
 
 **Read a URL, not a scrape.** Any command taking `KEY-12` also takes a pasted
