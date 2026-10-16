@@ -170,12 +170,42 @@ value is in the pattern being recognisable:
 `--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
 read commands expose their supported filters in `--help`.
 
-**`lll watch` is live-only; reconcile on start.** It streams from the moment
-the subscription is accepted, and a reconnect does not replay what it missed,
-so a gap looks exactly like a quiet board. A long-running agent keeps the time
-of the last event it handled and, on every start and reconnect, runs
-`lll issue list --since <that time>` before trusting the stream. A fleet
-coordinator missed three cards reaching done by relying on watch alone.
+**Choose the events you need.** Plain `lll watch --json` reports issue
+changes. `lll watch --activity --json` also reports comment and claim changes
+for issues matching the selected team, project and filters. A comment or claim
+renewal need not change its parent issue. For a receiver, use
+`lll webhook add URL --activity`; existing registrations remain issue-only.
+Webhooks retain their shared-secret header and bounded retries, not a durable
+queue. Consumers should ignore unknown topics, actions and additional fields.
+
+**Read actor and holder separately.** Activity gives the issue `key` and
+`author`, `author_name`, `author_kind`, `agent`. A forced claim release credits
+the releaser; the raw claim's `member` is the holder. Expiry is system-authored.
+An older server or an indirect operation may have no actor: leave it unknown,
+never infer it from the holder. Hidden member names stay hidden.
+
+**Watch is live-only; reconcile on start and reconnect.** Subscription readiness
+is acknowledged on stderr; JSON events go to stdout. Reconnects do not replay
+missed events. Keep the last handled event time and reconcile issue changes
+with `lll issue list --since <time>`. That list misses comment/claim-only
+activity: a complete activity snapshot must also re-read comments and claims.
+Stream silence alone is not proof that the board has not changed.
+
+**Use covered JSON fields.** Issue view and next JSON provide
+`blocked_by_refs` (`id`, `key`, `title`, `state`) for visible expanded blockers;
+retain raw `blocked_by` ids because an inaccessible blocker may have no ref.
+Comments include `author_name`, `author_kind` and boolean `server_record`.
+Watch issue events add `key`, `priority_name`, `creator_name` beside `record`.
+Use those fields instead of joining names yourself or parsing display text.
+Do not assume a new covered field exists in an older client.
+
+**Capabilities are separate from versions.** `GET /.well-known/lll` may list
+`issues.idempotency`, `comments.idempotency` and `webhooks.activity`. When an
+explicit list omits a required capability, the CLI refuses before writing.
+Older servers without a list are checked through feature support endpoints.
+Equal version strings do not prove support, and skew warnings are advisory.
+An unsupported keyed write or activity webhook must not be retried as an
+unkeyed write or an issue-only registration: that changes the requested intent.
 
 **Make retried creates idempotent.** Use `lll issue create --idempotency-key KEY`
 when a run might lose the creation response. Derive the key once from the
