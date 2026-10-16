@@ -45,6 +45,30 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   separate comment. A keyed comment checks server support before writing, so a
   1.1.0 or older server refuses it with "upgrade the server" instead of
   ignoring the key; unkeyed comments keep their existing behavior (LLL-700).
+- A read-write bot with a human owner can run `lll bot create bot-NAME`, so a
+  coordinator bot mints its own worker bots (LLL-709). The new bot is owned by
+  the coordinator's owner, not by the coordinator, so ownership stays one hop
+  and every access rule is unchanged. It starts with the coordinator's teams
+  and mode and can never have more: the server refuses a wider one (code
+  `bot_exceeds_owner`), and narrowing the coordinator narrows the bots it
+  created. The server records the coordinator in the member's new
+  `created_by` field (members cannot set it), `lll member list` and
+  `lll member access` show it, and the coordinator may rotate those bots'
+  tokens while it can write. When the coordinator loses or changes its owner,
+  is deleted, or its owner is deleted, the bots it created are detached:
+  `created_by` is cleared, they
+  are narrowed, and every token minted for them stops working, so the owner
+  re-mints with `lll bot rotate`. A read-only bot is still refused, and a bot with no owner still gets
+  "a bot cannot own a bot". The board's "Add a bot" is unchanged.
+
+### Fixed
+
+- A member's own update (a bot may PATCH itself) no longer writes back a
+  stale copy of its record. A leaked bot token spamming self-updates could
+  survive its owner's `lll bot rotate`, and could undo a narrowing that
+  landed while the update was in flight. Member updates now run in one
+  transaction, and a save keeps the committed owner, creator, access, token
+  key and password it did not itself change (LLL-713).
 
 ## [1.1.0] - 2026-10-13
 

@@ -85,6 +85,10 @@ pub struct Member {
   pub kind_wire: string,
   #[json(omitempty)]
   pub owner: MemberId,
+  // The bot that created this bot (LLL-709); the server sets it, and only
+  // for a bot another bot created. Its owner is then that bot's owner.
+  #[json(omitempty)]
+  pub created_by: MemberId,
   // Access (LLL-542): "all" | "teams", the team ids, "rw" | "ro". Empty on a
   // server that predates scoped members. Read it through access().
   #[json("scope", omitempty)]
@@ -165,8 +169,8 @@ pub struct NewMember {
   #[json("emailVisibility")]
   pub email_visibility: bool,
   // Bot accounts (LLL-407). Selects have no schema-level default, so every
-  // create states its kind; owner is the creating human member's id, sent
-  // only for bots.
+  // create states its kind; owner is the creating human member's id, or the
+  // creating bot's owner's (LLL-709), sent only for bots.
   #[json(omitempty)]
   pub kind: string,
   #[json(omitempty)]

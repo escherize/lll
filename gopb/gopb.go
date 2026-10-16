@@ -86,6 +86,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	registerWebhookRecords(app)
 	registerMemberGuards(app)
 	registerMemberNameGuard(app)
+	registerMemberUpdateTx(app) // after the name guard: name lock, then transaction
 	registerMemberScopeDefault(app)
 	registerRosterScope(app)
 	registerScopedRefGuard(app)
