@@ -27,7 +27,9 @@ path, `--binary` pointing to the built binary, and its exact `--commit` and
 binary and wrapper/startup code and records their fingerprints before accepting
 JSON lines on stdin. Worktree edits cannot change code beneath live workers.
 
-Send `{"action":"provision","case":"01","run":1}` (`"workers"` defaults to 10).
+For a five-worker single-case release run, send
+`{"action":"provision","case":"01","run":1,"workers":5}`. Always name the
+worker count: the controller default of ten exists for historical research.
 Launch workers only after the controller reports them all ready. Give each
 worker only its case rules (`docs/agent-dx-fleet/rules/NN-<slug>.md`, named in
 the provision reply), number, directory and `lll` wrapper path. In the pair
