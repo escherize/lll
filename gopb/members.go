@@ -56,17 +56,6 @@ func registerMemberGuards(app core.App) {
 		}
 		return e.Next()
 	})
-	// A member update through the records API runs in one transaction
-	// (LLL-709 review F5, LLL-713). PocketBase saves outside one, and reads
-	// outside the write, so keepCommitted's re-read of the stored row could
-	// itself be stale by the time the row is written. In a transaction the
-	// read and the write hold the one write connection together.
-	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
-		return e.App.RunInTransaction(func(tx core.App) error {
-			e.App = tx
-			return e.Next()
-		})
-	})
 	app.OnRecordAuthWithPasswordRequest("members").BindFunc(func(e *core.RecordAuthWithPasswordRequestEvent) error {
 		// Fires after the identity lookup and before the password check, so
 		// the refusal names the account kind instead of grading a password a
@@ -78,6 +67,28 @@ func registerMemberGuards(app core.App) {
 			)
 		}
 		return e.Next()
+	})
+}
+
+// registerMemberUpdateTx runs a member update through the records API in
+// one transaction (LLL-709 review F5, LLL-713). PocketBase saves outside
+// one, and reads outside the write, so keepCommitted's re-read of the
+// stored row could itself be stale by the time the row is written. In a
+// transaction the read and the write hold the one write connection
+// together.
+//
+// Register it after registerMemberNameGuard (review F6): the name lock
+// (nameWrites) is always taken before the write connection, by a rename,
+// a bot create and a redemption alike. Holding the transaction while a
+// rename waited for the name lock, against a bot create holding the name
+// lock while it waited for the connection, stalled every write for the
+// lock's 5s timeout.
+func registerMemberUpdateTx(app core.App) {
+	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		return e.App.RunInTransaction(func(tx core.App) error {
+			e.App = tx
+			return e.Next()
+		})
 	})
 }
 
