@@ -6,12 +6,28 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
-### Fixed
+## [1.2.0] - 2026-10-16
 
-- Bots and owned identities cannot create person identities that escape their owner's access and
-  survive its revocation (LLL-712). Human provisioning remains available.
+### Upgrading from 1.1
+
+Upgrade the server before clients and keep a stopped pre-upgrade data backup;
+see `docs/upgrading.md` for the tested-pair rehearsal and restore procedure.
+Comment/claim activity is opt-in: use `watch --activity` or
+`webhook add URL --activity`. Existing watches and registrations stay issue-only.
+New keyed writes and activity webhook registrations check server capabilities
+before writing. Older clients can ignore the added JSON fields.
+
+This release also fixes two security issues: identities escaping their owner's
+access, and stale self-updates undoing token rotation or access narrowing.
+Human-owned bots may provision workers owned by the same human; no automatic
+ownership migration is performed for existing bots.
 
 ### Added
+
+- Shipped agent skills explain activity delivery and its reconciliation limits,
+  covered JSON fields, safe retries, capabilities, worker ownership and the full
+  release-to-installation workflow. Release fleet guidance distinguishes the
+  five-worker release check from historical research runs.
 
 - The server's `GET /.well-known/lll` lists its `capabilities`
   (`issues.idempotency`, `comments.idempotency`, `webhooks.activity`). Before
@@ -24,8 +40,7 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   is unchanged (LLL-710).
 
 - Query watch and webhook registrations with `--activity` deliver comment
-  and claim activity within the
-  selected team/project/filter, including renewals and releases without an
+  and claim activity within the selected team/project/filter, including renewals and releases without an
   issue update. Activity includes the issue key and authenticated actor;
   forced release preserves the holder separately and expiry identifies the
   system. Old-server attribution is explicitly unknown (LLL-642).
@@ -68,6 +83,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Bots and owned identities cannot create person identities that escape their
+  owner's access and survive its revocation (LLL-712). Ordinary human
+  provisioning remains available.
+- Fleet preflight clears inherited credentials before intentional overrides and
+  names the owned login URL, keeping fixture checks isolated (LLL-715).
 - A member's own update (a bot may PATCH itself) no longer writes back a
   stale copy of its record. A leaked bot token spamming self-updates could
   survive its owner's `lll bot rotate`, and could undo a narrowing that
