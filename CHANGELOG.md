@@ -6,6 +6,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bots and owned identities cannot create person identities that escape their owner's access and
+  survive its revocation (LLL-712). Human provisioning remains available.
+
 ### Added
 
 - The server's `GET /.well-known/lll` lists its `capabilities`
