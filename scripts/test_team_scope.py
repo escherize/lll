@@ -627,14 +627,25 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
                 if code != 200:
                     bad.append((kind, code))
 
+        mix_issue = call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'mix', 'state': 'todo'}, su)[1]
+
+        def mix_bot(n):
+            # Create a bot as its owner, then delete it (superuser only), so
+            # the member listings later in this script stay one page.
+            code, made_bot, _ = call(api, '/api/collections/members/records',
+                                     dict(bot_body, name=f'bot-mix-{n}', email=f'mix-{n}@example.test', owner=boss['id']),
+                                     boss_tok)
+            if code == 200:
+                call(api, f"/api/collections/members/records/{made_bot['id']}", token=su, method='DELETE')
+            return code
+
         actors = [
             ('rename', lambda n: call(api, f"/api/collections/members/records/{plain['id']}",
                                       {'name': f'plain{n % 2}'}, plain_tok, 'PATCH')[0]),
-            ('bot', lambda n: call(api, '/api/collections/members/records',
-                                   dict(bot_body, name=f'bot-mix-{n}', email=f'mix-{n}@example.test', owner=boss['id']),
-                                   boss_tok)[0]),
-            ('issue', lambda n: call(api, '/api/collections/issues/records',
-                                     {'team': alpha['id'], 'title': f'mix {n}', 'state': 'todo'}, boss_tok)[0]),
+            ('bot', mix_bot),
+            # The bystander edits one issue, so later listings see no new rows.
+            ('issue', lambda n: call(api, f"/api/collections/issues/records/{mix_issue['id']}",
+                                     {'title': f'mix {n}'}, boss_tok, 'PATCH')[0]),
         ]
         mix = [threading.Thread(target=timed, args=a) for a in actors]
         for th in mix:
