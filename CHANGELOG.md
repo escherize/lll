@@ -87,7 +87,8 @@ ownership migration is performed for existing bots.
   owner's access and survive its revocation (LLL-712). Ordinary human
   provisioning remains available.
 - Fleet preflight clears inherited credentials before intentional overrides and
-  names the owned login URL, keeping fixture checks isolated (LLL-715).
+  names the owned login URL, keeping fixture checks isolated. Invitation
+  fixtures use a person rather than relying on bot-created people (LLL-715).
 - A member's own update (a bot may PATCH itself) no longer writes back a
   stale copy of its record. A leaked bot token spamming self-updates could
   survive its owner's `lll bot rotate`, and could undo a narrowing that

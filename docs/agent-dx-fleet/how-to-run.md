@@ -82,5 +82,6 @@ refused. Case 14 gets nothing from conn.txt: the CLI reads a seeded, broken
 config (wrong URL, expired token) in the worker's HOME, which the worker
 repairs. Cases 15 and 19 honour a worker-set `LLL_TOKEN` or `LLL_CONFIG_HOME`
 (inside the worker directory) so a worker can act as a second identity; the
-URL always comes from conn.txt. Case 15's worker is a person, not a bot,
-because a bot cannot own a bot.
+URL always comes from conn.txt. Cases 15 and 19 use a person identity: case15
+exercises human-owned token provisioning, and case19 invites a person. A bot must never provision a person
+account; that would evade its owner's access boundary.
