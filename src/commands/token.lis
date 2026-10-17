@@ -363,6 +363,7 @@ pub fn bot_commands() -> Slice<flags.Command> {
       spec: bot_spec(),
       positional: "bot-NAME",
       missing: "bot-NAME is the agent's member name, e.g. bot-myrepo; bot names are reserved to the bot- prefix",
+      example: "lll bot create bot-myrepo",
       run: bot_create,
       ..,
     },

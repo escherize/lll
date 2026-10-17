@@ -1,3 +1,4 @@
+import "go:net/http/httptest"
 import "go:strings"
 
 #[test]
@@ -75,4 +76,46 @@ fn raw_search_distinguishes_document_and_issue_hits() {
   assert raw.contains(card_line(issue))
   assert raw.contains("- [matching-doc](/t/TST/doc/matching-doc) | Matching 文档 \\| notes | finding")
   assert !raw.contains("- [](/issue/)")
+}
+
+// LLL-720: Accept is a second way into the ?raw branch. The rule is small on
+// purpose; these cases are the whole of it.
+#[test]
+fn accept_markdown_is_chosen_only_when_it_outranks_html() {
+  // Markdown named and ranked above html: the raw form.
+  assert prefers_markdown("text/markdown")
+  assert prefers_markdown("text/markdown, */*;q=0.1")
+  assert prefers_markdown("text/html;q=0.5, text/markdown")
+  assert prefers_markdown("TEXT/Markdown; charset=utf-8")
+  // A browser never names markdown; a tie goes to HTML; so does q=0.
+  assert !prefers_markdown(
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  )
+  assert !prefers_markdown("text/markdown, text/html")
+  assert !prefers_markdown("text/markdown;q=0, text/plain")
+  assert !prefers_markdown("text/markdown;q=0.5, */*")
+  assert !prefers_markdown("text/markdown;q=0.5, text/*")
+  assert !prefers_markdown("text/markdown;q=nope")
+  assert !prefers_markdown("*/*")
+  assert !prefers_markdown("")
+}
+
+#[test]
+fn wants_raw_takes_accept_or_the_param_and_always_varies_on_accept() {
+  let cases = [
+    ("/", "text/markdown", true),
+    ("/?raw", "", true),
+    ("/?raw", "text/html", true),
+    ("/", "text/html,*/*;q=0.8", false),
+    ("/", "", false),
+  ]
+  for (target, accept, want) in cases {
+    let mut req = httptest.NewRequest("GET", target, None)
+    let assert Some(header) = req.Header
+    let mut h = header
+    if accept != "" { h.Set("Accept", accept) }
+    let mut w = httptest.NewRecorder()
+    assert wants_raw(w, req) == want
+    assert w.Header().Get("Vary") == "Accept"
+  }
 }

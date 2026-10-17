@@ -67,9 +67,18 @@ fn guesses() -> Slice<Guess> {
   ]
 }
 
-fn guess(path: string, word: string) -> Option<string> {
+/// The hint for `word` at `path`, with the key the user typed (`key`, when
+/// it is one) in place of the hint's KEY-123 (LLL-695: the final replay's
+/// workers retyped the placeholder).
+fn guess(path: string, word: string, key: string) -> Option<string> {
   if word == "" { return None }
-  guesses().find(|g| g.path == path && (g.words.is_empty() || matches(g.words, word))).map(|g| g.hint)
+  guesses().find(|g| g.path == path && (g.words.is_empty() || matches(g.words, word))).map(|g| with_key(g.hint, key))
+}
+
+/// `text` with its KEY-123 placeholder replaced by `key` when that is an
+/// issue key; otherwise unchanged.
+fn with_key(text: string, key: string) -> string {
+  if is_issue_key(key) { strings.ReplaceAll(text, "KEY-123", key) } else { text }
 }
 
 fn matches(patterns: Slice<string>, word: string) -> bool {
@@ -114,8 +123,8 @@ fn article(noun: string) -> string {
   if ["a", "e", "i", "o", "u"].any(|v| noun.starts_with(v)) { "an" } else { "a" }
 }
 
-/// `lll WORD NEXT`, where WORD is no noun.
-pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string) -> string {
+/// `lll WORD NEXT AFTER`, where WORD is no noun.
+pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string, after: string) -> string {
   // The verb rides along: seven of thirty fleet agents rated the bare "did
   // you mean 'lll issue'" the least helpful message, since it dropped the
   // half they had right.
@@ -139,10 +148,20 @@ pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string) -> string
     None => [],
   }
   if let Some(c) = resolve_command(issue, word) {
+    // A real sub-verb rides along with what follows it: 'lll comment edit
+    // KEY N' is 'lll issue comment edit KEY N'.
+    if let Some(sub) = resolve_command(c.verbs, next) {
+      let key = if is_issue_key(after) { f" {after}" } else { "" }
+      return f"unknown command: '{word}{rest}'; it is an issue verb: 'lll issue {c.name} {sub.name}{key} ...' (see 'lll issue {c.name} {sub.name} -h')"
+    }
+    // A guessed word between verb and key ('lll comment add KEY', LLL-695)
+    // is dropped and the key carried, like a key typed straight after.
+    let key = if is_issue_key(next) { next } else if guess(f"lll issue {c.name}", next, "").is_some() && is_issue_key(after) { after } else { "" }
+    let carry = if key == "" { " ..." } else { f" {key}" }
     // The rest of the form rides along, so the suggestion can be run as is
     // (six of ten final-replay agents typed `lll comment KEY "text"`).
-    let tail = if !is_issue_key(next) { "" } else if c.name == "comment" { " \"text\"" } else if c.name == "update" { " --state <name>" } else { "" }
-    return f"unknown command: '{word}{rest}'; it is an issue verb: 'lll issue {c.name}{carried}{tail}' (see 'lll issue {c.name} -h')"
+    let tail = if key == "" { "" } else if c.name == "comment" { " \"text\"" } else if c.name == "update" { " --state <name>" } else { "" }
+    return f"unknown command: '{word}{rest}'; it is an issue verb: 'lll issue {c.name}{carry}{tail}' (see 'lll issue {c.name} -h')"
   }
   // 'lll FLEET-4': a key where the noun goes (case 20). The word after the
   // key says what was meant (final 1.0 replay, case 20).
@@ -161,7 +180,7 @@ pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string) -> string
     return f"unknown command: '{word}' is an issue ID; to see it use 'lll issue view {word}'"
   }
   // 'lll send KEY', 'lll note KEY' (case 20, run 3).
-  if let Some(hint) = guess("lll issue", word) {
+  if let Some(hint) = guess("lll issue", word, next) {
     return f"unknown command: '{word}'; {see(hint, "lll issue")}"
   }
   // Any other noun's verb, the same mistake shape (fleet case 11 was 'lll
@@ -174,13 +193,13 @@ pub fn unknown_command(nouns: Slice<Noun>, word: string, next: string) -> string
   f"unknown command: '{word}' (see 'lll --help')"
 }
 
-/// `lll NOUN WORD`, where WORD is none of the noun's verbs.
-pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word: string) -> string {
+/// `lll NOUN WORD NEXT`, where WORD is none of the noun's verbs.
+pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word: string, next: string) -> string {
   let path = f"lll {noun}"
   // A field typed as a verb: 'lll issue priority' (1.0 fleet, case 18).
   if let Some(update) = resolve_command(cmds, "update") {
     if let Some(fl) = update.spec.find(|f| f.value && f.name == f"--{word}" && !["--team", "--agent", "--reason"].contains(f.name)) {
-      let target = strings.Trim(strings.Fields(update.positional).get(0).unwrap_or("KEY"), "[]<>")
+      let target = with_key(strings.Trim(strings.Fields(update.positional).get(0).unwrap_or("KEY"), "[]<>"), next)
       // The closed set too: two 1.0 fleet agents (case 20) followed the
       // 'issue state' hint with --state review.
       let values = if fl.values.is_empty() { "" } else { f" (one of: {strings.Join(fl.values, ", ")})" }
@@ -191,7 +210,7 @@ pub fn unknown_verb(nouns: Slice<Noun>, noun: string, cmds: Slice<Command>, word
   if noun == "issue" && is_issue_key(word) {
     return f"unknown issue command: '{word}' is an issue ID; put the verb first: 'lll issue view {word}' or 'lll issue update {word} --state in-review'"
   }
-  if let Some(hint) = guess(path, word) {
+  if let Some(hint) = guess(path, word, next) {
     return f"unknown {noun} command: '{word}'; {see(hint, path)}"
   }
   // 'lll member whoami' (1.0 fleet): a command typed as a verb.
@@ -220,9 +239,9 @@ fn unknown_noun_flag(noun: string, arg: string) -> string {
 }
 
 /// A word a command with sub-verbs refuses: 'lll issue comment list KEY'.
-fn sub_verb_guess(path: string, c: Command, word: string) -> Option<string> {
+fn sub_verb_guess(path: string, c: Command, word: string, next: string) -> Option<string> {
   if c.verbs.is_empty() { return None }
-  let Some(hint) = guess(path, word) else { return None }
+  let Some(hint) = guess(path, word, next) else { return None }
   let subs = strings.Join(c.verbs.map(|v| v.name), " and ")
   let at = strings.TrimPrefix(path, "lll ")
   Some(f"unknown {at} command: '{word}'; {hint}; the sub-verbs are {subs} (see '{path} -h')")

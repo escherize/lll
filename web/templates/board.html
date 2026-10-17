@@ -55,6 +55,7 @@ provenance.
     <header class="topbar">
       <div class="crumbs"><span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span></div>
       <div class="spacer"></div>
+      {{template "agent-copy" .Rail}}
       <div id="board-search" class="board-search">
         <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#ic-search"/></svg>
         <input id="board-search-input" type="text" placeholder="Search" autocomplete="off" aria-label="Search board" data-bind:search data-on:keydown="evt.key === 'Escape' && ($search = '')">

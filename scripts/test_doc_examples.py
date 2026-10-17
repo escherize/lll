@@ -27,6 +27,12 @@ Two deliberate departures from "as written": LLL_URL points the first
 on :8090; and `open`/`xdg-open` are stubs, so `lll board -w` opens nothing.
 docs/index.html shows `lll up` last but needs its board first, so that
 pane runs first.
+
+The third document is the binary's own help (LLL-702): every verb in
+`lll help contract` whose `--help` ends with an `Example:` block. Each
+example runs in the contract's order, after a setup block that starts a
+DEMO board and creates the issues the examples name (HELP_SETUP), so they
+read as real invocations. HELP_REQUIRED lists the verbs that must have one.
 """
 import html
 import os
@@ -91,6 +97,54 @@ def landing_blocks(text):
         blocks.append((f'docs/index.html:{line_no}', [l for c in cmds for l in logical_lines(c)],
                        reason.group(1) if reason else None))
     return sorted(blocks, key=lambda b: not any(UP_LINE.match(l) for l in b[1]))
+
+
+# The board every --help example runs against: DEMO-1 is the urgent one
+# 'issue next' takes, DEMO-2 already has the comment 'issue watch --until'
+# waits for. The examples' keys are these; a new example names one of them
+# or adds its own setup line here.
+HELP_SETUP = [
+    'mkdir help-board && cd help-board',
+    'LLL_TEAM=DEMO lll up',
+    'lll issue create -t "Fix the login redirect" --priority urgent',
+    'lll issue create -t "Retry failed webhooks"',
+    'lll issue create -t "Document the API"',
+    'lll issue create -t "Flaky e2e on CI"',
+    'lll issue comment DEMO-2 -b "LGTM"',
+]
+# The verbs agents use most (LLL-702): losing one of their examples fails here.
+HELP_REQUIRED = {
+    'lll issue next', 'lll issue claim', 'lll issue comment', 'lll issue close',
+    'lll issue update', 'lll issue watch', 'lll search', 'lll bot create',
+}
+EXAMPLE = re.compile(r'\n\nExample:\n((?:  \S.*(?:\n|$))+)$')
+
+
+def help_blocks():
+    """(name, lines, None) per verb whose --help ends with an example, setup first."""
+    with tempfile.TemporaryDirectory(prefix='lll-help-examples-') as home:
+        env = {'HOME': home, 'PATH': '/usr/bin:/bin', 'LANG': os.environ.get('LANG', 'en_US.UTF-8')}
+
+        def page(*args):
+            done = subprocess.run([binary, *args], env=env, cwd=home, capture_output=True, text=True, timeout=30)
+            assert done.returncode == 0, f'lll {" ".join(args)}: exit {done.returncode}\n{done.stderr}'
+            return done.stdout
+
+        paths = re.findall(r'^\| `(lll [^`]+)` \|', page('help', 'contract'), re.M)
+        assert paths, 'no verbs in lll help contract; did its table change?'
+        blocks, found = [('help examples setup', HELP_SETUP, None)], set()
+        for path in paths:
+            match = EXAMPLE.search(page(*path.split()[1:], '--help'))
+            if not match:
+                continue
+            lines = [l.strip() for l in match.group(1).splitlines()]
+            for line in lines:
+                assert line == path or line.startswith(path + ' '), f'{path} --help: its example runs another command: {line}'
+            blocks.append((f'{path} --help', lines, None))
+            found.add(path)
+    missing = sorted(HELP_REQUIRED - found)
+    assert not missing, f'these verbs lost their --help example: {", ".join(missing)}'
+    return blocks
 
 
 def free_port():
@@ -215,6 +269,7 @@ def main():
     assert readme and landing, 'no examples found; did the block markup change?'
     run_document('README.md', readme)
     run_document('docs/index.html', landing)
+    run_document('lll --help examples', help_blocks())
 
 
 main()

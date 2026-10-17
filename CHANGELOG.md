@@ -8,6 +8,29 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- `GET /llms.txt` on the board serves plain-text instructions for an agent:
+  install, sign in, the issue loop, the teams this login can see and the
+  `?raw` Markdown form of every page. It is gated like every board page and
+  carries no credential. The text shares one source with `lll up`'s agent
+  prompt (LLL-717).
+- Every board page's HTML carries one hidden line for agents: append `?raw`
+  for Markdown, see `/llms.txt`, the CLI is `lll`. It is invisible and
+  `aria-hidden`, and absent from `?raw` output (LLL-718).
+- The board and issue pages have a "Copy agent instructions" button in the
+  topbar. It copies the `/llms.txt` text scoped to the page's team and, on an
+  issue page, to that issue. It also works on a board served over plain HTTP
+  (LLL-719).
+- Board pages answer `Accept: text/markdown` with their `?raw` Markdown form
+  (LLL-720). Markdown wins only when the header names `text/markdown` with a
+  higher q than `text/html` gets (from `text/html`, `text/*` or `*/*`); a tie
+  and every browser get HTML. Same handler, auth and `no-store` as `?raw`, and
+  these routes now send `Vary: Accept`.
+- `--help` for `issue next`, `claim`, `comment`, `close`, `update` and
+  `watch`, `search` and `bot create` ends with one real example invocation
+  under `Example:`. The doc-example check runs every example in the binary's
+  help against a scratch board, so an example that stops working fails the
+  gate (LLL-702).
+- `lll issue update --help` names `lll issue block` for blockers (LLL-695).
 - An audit log: every create, update and delete of an issue, comment or
   claim appends an `audit_events` row in the same transaction, with the
   member, agent label, origin host and the changed fields before and after.
@@ -22,6 +45,24 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   (default 7) and counts, per member and agent label, the claims taken,
   issues closed, claims handed off (released without closing) and claims
   failed (expired, or force-released by someone else) (LLL-705).
+
+### Changed
+
+- `lll issue next --claim` hands back the caller's own held ready issue, exit
+  0 with the key on stdout and `Resuming KEY: already claimed by ...` on
+  stderr, when it has nothing new to offer, instead of exiting 5. A loop that
+  crashed after claiming now resumes its own work (LLL-693). Own means the same
+  member under the same `--agent` label, or an unlabelled hold; a sibling
+  session's labelled hold is never handed out, and an unlabelled caller does
+  not get a labelled hold. Unclaimed work is still offered first. Plain
+  `lll issue next` is unchanged.
+- Recovery hints echo the issue key you typed instead of `KEY-123`:
+  `lll issue assign DEMO-4` suggests `lll issue claim DEMO-4`. `lll comment
+  add DEMO-4` now suggests `lll issue comment DEMO-4 "text"` (LLL-695).
+- `lll issue update KEY --state done|cancelled` words the claim release as
+  `lll issue close` does, naming the holder: `released bryan (agent wt-a)'s
+  claim; assignee unchanged` replaces `released your claim (assignee kept)`
+  (LLL-695).
 
 ## [1.2.0] - 2026-10-16
 
