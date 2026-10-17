@@ -20,6 +20,7 @@ import "flags"
 /// `lll issue list`. Runs until interrupted (Ctrl-C).
 pub fn watch_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Watch).append([
+    flags.Flag { name: "--activity", help: "also stream comment and claim activity; default: issue events only", .. },
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag {
       name: "--ready",
@@ -51,14 +52,17 @@ fn watch(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
 fn watch_stream(ctx: pb.Client, p: flags.Parsed) -> Result<(), pb.CliError> {
   let filters = filters_from(p, p.one("--search"))?
   let json_mode = p.given("--json")
-  if p.given("--ready") { return watch_ready(ctx, filters, p.given("--json")) }
+  let with_activity = p.given("--activity")
+  if p.given("--ready") { return watch_ready(ctx, filters, json_mode, with_activity) }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
   let scope = configured_scope(ctx)?
 
-  let filter = resolve_filter_query(ctx, scope, filters)?
-  let topic = realtime.topic_with_options("issues", filter, "team,assignee")?
-  let ch = realtime.subscribe(ctx, [topic], realtime.DeadToken.Exit)?
+  let criteria = resolve_issue_filter(ctx, scope, filters)?
+  let topic = realtime.topic_with_options("issues", query.filter(criteria), "team,assignee,creator")?
+  let activity = if with_activity { activity_topics(criteria)? } else { [] }
+  let topics = [topic].append(activity...)
+  let ch = realtime.subscribe(ctx, topics, realtime.DeadToken.Exit)?
   fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
 
   // Last-seen records, keyed by record id, for rendering updates as field
@@ -70,6 +74,13 @@ fn watch_stream(ctx: pb.Client, p: flags.Parsed) -> Result<(), pb.CliError> {
       return Ok(())
     }
     let realtime.Event.Record(ev) = arrived else { continue }
+    if let Some(activity) = activity_record(ev)? {
+      fmt.Println(activity_line(ev, activity, json_mode)?)
+      continue
+    }
+    // An inaccessible/deleted activity parent is never treated as an issue.
+    if let realtime.Change.Comment(_) = ev.change { continue }
+    if let realtime.Change.Claim(_) = ev.change { continue }
     if json_mode {
       fmt.Println(ndjson_line(ev))
       continue
@@ -139,12 +150,24 @@ An update that changes none of those four fields prints only the key:
   10:42:11 ENG-12 changed
 
 That covers labels, project, description and emoji. Use --json for the record.
+JSON issue events also carry key, priority_name and creator_name beside the
+record. The record retains its fields; a hidden creator is named hidden member.
 
-The stream carries issue records only: no comment or claim events. A claim
-shows up only when it writes the issue. Claiming an issue assigned to someone
-else or to nobody assigns you, which is an update; a release that clears the
-assignee is another. Claiming an issue already assigned to you, claiming one
-you already hold, and 'lll issue claim --renew' print nothing.
+With --activity, the stream also carries comment and claim events for matching
+issues. Without it, the issue-only default is unchanged. For example:
+
+  lll watch --project Fleet --activity --json
+Claim acquisition, renewal (update) and release (delete) have their own events,
+even when no issue field changes. Re-claiming an existing hold without --renew
+makes no write and emits nothing. JSON topics distinguish issues, comments and
+claims; activity envelopes add key, author, author_name, author_kind and agent.
+The claim record still names its holder; author names the actor, including the
+releaser on a forced release. Older servers without claim actor metadata leave
+that actor unknown; the holder is never guessed to be the releaser.
+
+Activity is live-only too: comments and claims do not bump issue.updated,
+so issue list --since cannot recover missed comment or claim activity. Re-read
+comments and claims on reconnect if you need a complete current snapshot.
 
 Status lines go to stderr, never stdout, in text and --json mode alike:
 
@@ -253,7 +276,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
   let issue_topic = realtime.topic_with_options(
     f"issues/{issue.id}",
     "",
-    "team,assignee",
+    "team,assignee,creator",
   )?
   // Comments are a collection-level subscription filtered server-side to
   // this issue; record ids are alphanumeric, so inlining is quote-safe.
@@ -398,8 +421,29 @@ fn ndjson_line(ev: realtime.RecordEvent) -> string {
   // emoji in a record put the end bound past the last rune and panicked the
   // whole stream (LLL-417). The prefix is the single byte "{", already checked.
   // RFC3339 timestamps, like every --json output (LLL-645).
-  let data = contract_json(ev.data.bytes() as json.RawMessage, 0) as string
+  let normalized = contract_json(ev.data.bytes() as json.RawMessage, 0) as string
+  let data = match ev.change {
+    realtime.Change.Issue(issue) => issue_event_json(normalized, issue),
+    _ => normalized,
+  }
   "{\"topic\":\"" + ev.topic + "\"," + strings.TrimPrefix(data, "{")
+}
+
+/// Add covered display fields beside the raw record, never by replacing it.
+/// Incomplete records (e.g. a server projection without team) stay unchanged.
+fn issue_event_json(data: string, issue: models.Issue) -> string {
+  if issue.expand.team.key == "" { return data }
+  let mut fields = Map.new<string, json.RawMessage>()
+  if json.Unmarshal(data.bytes(), &fields).is_err() { return data }
+  for (name, value) in [
+    ("key", f"{issue.expand.team.key}-{issue.number}"),
+    ("priority_name", display.priority_name(issue.priority())),
+    ("creator_name", display.member_name(issue.creator, issue.expand.creator.name, "")),
+  ] {
+    let Ok(encoded) = json.Marshal(value) else { return data };
+    fields[name] = encoded as json.RawMessage
+  }
+  json.Marshal(fields).map_or(data, |encoded| encoded as string)
 }
 
 fn first_line(body: string) -> string {
@@ -421,14 +465,16 @@ fn comment_matches_until(text: string, action: string, body: string) -> bool {
 /// does NOT exit: the stream stays alive and announces the first issue that
 /// becomes ready. Events for issues that are ready keep streaming, as the
 /// plain query watch does.
-fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Result<(), pb.CliError> {
+fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool, with_activity: bool) -> Result<(), pb.CliError> {
   let scope = configured_scope(ctx)?
-  let filter = resolve_filter_query(ctx, scope, filters)?
+  let criteria = resolve_issue_filter(ctx, scope, filters)?
+  let filter = query.filter(criteria)
   // blocked_by expand, so each event record carries its blockers' states.
-  let topic = realtime.topic_with_options("issues", filter, "team,assignee,blocked_by")?
-  let ch = realtime.subscribe(ctx, [topic], realtime.DeadToken.Exit)?
+  let topic = realtime.topic_with_options("issues", filter, "team,assignee,creator,blocked_by")?
+  let activity = if with_activity { activity_topics(criteria)? } else { [] }
+  let ch = realtime.subscribe(ctx, [topic].append(activity...), realtime.DeadToken.Exit)?
   // blocked_by expanded on every page, so readiness can be decided locally.
-  let mut tail = "&expand=team,assignee,blocked_by,labels&sort=created,id"
+  let mut tail = "&expand=team,assignee,creator,blocked_by,labels&sort=created,id"
   if filter != "" { tail = f"{tail}&filter={url.QueryEscape(filter)}" }
   let mut issues = records.fetch_all_issues(ctx, tail)?
   let mut ready = ready_keys(issues)
@@ -436,6 +482,12 @@ fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Resu
   loop {
     let Some(arrived) = ch.receive() else { return Ok(()) }
     let realtime.Event.Record(ev) = arrived else { continue }
+    if let Some(activity) = activity_record(ev)? {
+      if records.is_ready(activity.expand.issue, issues) { fmt.Println(activity_line(ev, activity, json_mode)?) }
+      continue
+    }
+    if let realtime.Change.Comment(_) = ev.change { continue }
+    if let realtime.Change.Claim(_) = ev.change { continue }
     let rec = issue_change(ev)?
     let deleted = ev.action == realtime.Action.Delete
     let mut kept: Slice<models.Issue> = []
@@ -470,7 +522,7 @@ fn watch_ready(ctx: pb.Client, filters: query.Criteria, json_mode: bool) -> Resu
           Ok(data) => data as string,
           Err(e) => return Err(pb.failed(f"encoding ready event: {e}")),
         }
-        fmt.Println(contract_json(data.bytes() as json.RawMessage, 0) as string)
+        fmt.Println(issue_event_json(contract_json(data.bytes() as json.RawMessage, 0) as string, issue))
       } else {
         fmt.Println(f"{stamp} {key} ready: {issue.title}")
       }

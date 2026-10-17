@@ -148,3 +148,9 @@ fn a_longer_spelling_of_a_state_names_it_too() {
   let assert Err(e) = state("reviewing")
   assert e.message.contains("did you mean 'in-review'?")
 }
+
+#[test]
+fn related_filter_prefixes_fields_without_touching_quoted_values() {
+  let f = IssueFilter { states: [models.IssueState.Todo, models.IssueState.InProgress], search: "team='other'", ..team("t1") }
+  assert filter_at(f, "issue.") == "issue.team='t1' && (issue.state='todo' || issue.state='in-progress') && issue.title ~ 'team=\\'other\\''"
+}

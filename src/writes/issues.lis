@@ -414,9 +414,6 @@ pub fn create_issue(
   create(ctx, caller, collection_path("issues") + path_query, issue, "issue")
 }
 
-#[json]
-struct IdempotencySupport { supported: bool }
-
 /// create_issue with an idempotency key: a retry with the same key and body
 /// answers with the issue the first attempt created. Refused, with nothing
 /// sent, by a server that does not support keys.
@@ -433,20 +430,14 @@ pub fn create_issue_once(
 
 /// Refuse, before anything is written, unless the server says it honours
 /// Idempotency-Key on `collection`. An older server ignores the header, so a
-/// retry there would write a second record; it answers 404 for the check.
+/// retry there would write a second record.
 fn require_keyed_writes(ctx: pb.Client, collection: string, what: string) -> Result<(), pb.CliError> {
-  let unsupported = f"this server does not support --idempotency-key; upgrade the server before retrying this {what}"
-  let supported = ctx
-    .get(f"/api/lll/{collection}/idempotency")
-    .map_err(|e| {
-      if e.status == 404 { pb.failed(unsupported) } else { e }
-    })?
-  let mut support = IdempotencySupport { .. }
-  if let Err(e) = json.Unmarshal(supported.bytes(), &support) {
-    return Err(pb.failed(f"decoding {what} support: {e}"))
-  }
-  if !support.supported { return Err(pb.failed(unsupported)) }
-  Ok(())
+  require_capability(
+    ctx,
+    f"{collection}.idempotency",
+    f"/api/lll/{collection}/idempotency",
+    f"--idempotency-key; upgrade the server before retrying this {what}",
+  )
 }
 
 pub fn delete_issue(ctx: pb.Client, id: models.IssueId) -> Result<(), pb.CliError> {

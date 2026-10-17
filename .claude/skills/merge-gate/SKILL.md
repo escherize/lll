@@ -167,6 +167,29 @@ change combined with everyone else's.
 
 ## Release ordering, when there is a release
 
+A merge, a deployment and a release are different milestones. Main may deploy
+a server while the published CLI still lacks its flags. Report which artifact
+actually contains the change; a successful main run does not publish a CLI.
+
+When publication is authorized, complete the release through installation
+verification. Use the repository's release checklist: declare the feature cut,
+finish its compatibility and real-agent checks, merge version and changelog
+changes, then name the exact final tag commit. Later unrelated merges belong
+to the next release; do not keep moving the cut to clear the backlog.
+
+Use explicit baseline and candidate binaries for upgrade checks, retaining
+versions, hashes and actual tested pairs. Test old/new clients and servers,
+safe refusal of unsupported features before writes, and a stopped pre-upgrade
+backup restored with its matching old binary. A version warning is not a
+compatibility test, and migration success does not prove downgrade safety.
+
+After publishing, download outside the checkout, verify version and behavior,
+then exercise the package manager users install through. Check the actual
+installed executable and path: another binary earlier on PATH can mask a
+successful package upgrade. Keep release and installation evidence on the
+release issue; close only when the requested distribution checks pass.
+
+
 Order is load-bearing and each constraint below was discovered by violating it:
 
 1. **The version bump lands before the tag.** If the release workflow asserts

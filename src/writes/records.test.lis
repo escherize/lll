@@ -29,6 +29,7 @@ fn a_keyed_comment_is_refused_unsent_by_an_older_server() {
     panic("an older server must refuse a keyed comment")
   };
   assert e.message == "this server does not support --idempotency-key; upgrade the server before retrying this comment"
+  assert seen.receive() == Some("GET /.well-known/lll")
   assert seen.receive() == Some("GET /api/lll/comments/idempotency")
   seen.close()
   // Nothing after the check: no comment was posted.
@@ -49,6 +50,7 @@ fn a_keyed_comment_carries_its_key_to_the_comments_collection() {
   defer server.Close()
   let assert Ok(body) = create_comment_once(keyed_client(server.URL), keyed_comment(), "k1")
   assert body.contains("\"reused\":true")
+  assert seen.receive() == Some("GET /.well-known/lll key=")
   assert seen.receive() == Some("GET /api/lll/comments/idempotency key=")
   assert seen.receive() == Some("POST /api/collections/comments/records key=k1")
 }

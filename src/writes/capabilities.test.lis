@@ -1,0 +1,116 @@
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:time"
+
+import "config"
+import "models"
+import "pb"
+
+fn capability_client(url: string) -> pb.Client {
+  pb.Client.new(config.given(config.Config { url, token: "t", .. }, config.Sources { .. }, config.Env { .. }))
+}
+
+/// A server that answers /.well-known/lll with `discovery` and records every
+/// request; anything else answers like a successful write.
+fn advertising(discovery: string, seen: Channel<string>) -> http.HandlerFunc {
+  http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else { return };
+    let _ = seen.send(f"{r.Method} {u.Path}")
+    w.Header().Set("Content-Type", "application/json")
+    let body = if u.Path == "/.well-known/lll" { discovery } else { "{\"id\":\"x\"}" }
+    let _ = w.Write(body.bytes())
+  })
+}
+
+/// LLL-710: a server that lists its capabilities is trusted on the list
+/// alone; the per-feature support route is not asked.
+#[test]
+fn a_listed_capability_skips_the_support_route() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(advertising(
+    "{\"service\":\"lll\",\"version\":\"1.2.0\",\"capabilities\":[\"webhooks.activity\"]}",
+    seen,
+  ))
+  defer server.Close()
+  let assert Ok(_) = create_webhook(capability_client(server.URL), models.NewWebhook { activity: true, .. })
+  assert seen.receive() == Some("GET /.well-known/lll")
+  assert seen.receive() == Some("POST /api/collections/webhooks/records")
+  seen.close()
+  assert seen.receive() == None
+}
+
+/// A list that omits the capability refuses before anything is written, and
+/// names the server's version.
+#[test]
+fn a_capability_missing_from_the_list_refuses_unsent() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(advertising(
+    "{\"service\":\"lll\",\"version\":\"1.2.0\",\"capabilities\":[]}",
+    seen,
+  ))
+  defer server.Close()
+  let Err(e) = create_comment_once(
+    capability_client(server.URL),
+    models.NewComment { issue: models.IssueId("i1"), body: "b", .. },
+    "k1",
+  ) else {
+    panic("a server without the capability must refuse")
+  };
+  assert e.message == "this server (1.2.0) does not support --idempotency-key; upgrade the server before retrying this comment"
+  assert pb.exit_code(e.kind) == 1
+  assert seen.receive() == Some("GET /.well-known/lll")
+  seen.close()
+  assert seen.receive() == None
+}
+
+/// A discovery endpoint that never answers costs the 2s probe limit, not the
+/// request budget; the support route then decides.
+#[test]
+fn a_hanging_discovery_falls_back_quickly() {
+  let seen = Channel.buffered<string>(8)
+  let release = Channel.new<bool>()
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else { return };
+    let _ = seen.send(f"{r.Method} {u.Path}")
+    if u.Path == "/.well-known/lll" {
+      let _ = release.receive()
+      return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    let _ = w.Write("{\"supported\":true,\"id\":\"x\"}".bytes())
+  }))
+  defer server.Close()
+  defer release.close()
+  let started = time.Now()
+  let assert Ok(_) = create_webhook(capability_client(server.URL), models.NewWebhook { activity: true, .. })
+  assert time.Since(started) < 5 * time.Second
+  assert seen.receive() == Some("GET /.well-known/lll")
+  assert seen.receive() == Some("GET /api/lll/activity")
+  assert seen.receive() == Some("POST /api/collections/webhooks/records")
+}
+
+/// A 1.1.0 server names its version but has no list: the client asks the
+/// feature's own route, as before LLL-710, and its refusal names the version.
+#[test]
+fn a_server_without_the_list_falls_back_to_the_support_route() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else { return };
+    let _ = seen.send(f"{r.Method} {u.Path}")
+    if u.Path == "/.well-known/lll" {
+      let _ = w.Write("{\"service\":\"lll\",\"version\":\"1.1.0\"}".bytes())
+      return
+    }
+    w.WriteHeader(404)
+    let _ = w.Write("{\"status\":404,\"message\":\"The requested resource wasn't found.\",\"data\":{}}".bytes())
+  }))
+  defer server.Close()
+  let Err(e) = create_issue_once(capability_client(server.URL), models.NewIssue { .. }, "", "k1") else {
+    panic("a 1.1.0-shaped server without the route must refuse")
+  };
+  assert e.message == "this server (1.1.0) does not support --idempotency-key; upgrade the server before retrying this creation"
+  assert seen.receive() == Some("GET /.well-known/lll")
+  assert seen.receive() == Some("GET /api/lll/issues/idempotency")
+  seen.close()
+  assert seen.receive() == None
+}

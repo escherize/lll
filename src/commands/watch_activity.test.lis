@@ -1,0 +1,25 @@
+import "models"
+import "realtime"
+
+#[test]
+fn activity_actor_is_not_guessed_from_the_claim_holder() {
+  let record = ActivityRecord {
+    event_actor: "rescuer", event_agent: "recovery", event_source: "member",
+    expand: ActivityExpand {
+      issue: models.Issue { number: 7, expand: models.IssueExpand { team: models.Team { key: "ACT", .. }, .. }, .. },
+      member: models.Member { id: "holder", name: "Holder", .. },
+      event_actor: models.Member { id: "rescuer", name: "Rescuer", .. }, ..
+    }, ..
+  }
+  let ev = realtime.decode("claims", "{\"action\":\"delete\",\"record\":{\"member\":\"holder\",\"future\":9007199254740993}}")
+  let assert Ok(data) = activity_json(ev, record)
+  assert data.contains("\"author\":\"rescuer\"")
+  assert data.contains("\"key\":\"ACT-7\"")
+  assert data.contains("\"future\":9007199254740993")
+  let unknown = ActivityRecord { expand: record.expand, .. }
+  let (id, kind, agent, name) = activity_actor(ev, unknown)
+  assert id.string() == "" && kind == "" && agent == "" && name == ""
+  let expired = ActivityRecord { event_source: "system", .. }
+  let (_, source, _, who) = activity_actor(ev, expired)
+  assert source == "system" && who == "system"
+}

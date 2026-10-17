@@ -101,3 +101,24 @@ not ship. Anything specific to this repo goes on this page. The gate holds
 this: `sync_skills.py` refuses a relative link or any repo-only skill name,
 bare or backticked, and `--check` fails when a mirrored copy differs from its
 source.
+
+## Publishing this repo's CLI
+
+Use [the release checklist](../../../docs/release-checklist.md) for releases,
+not the merge gate alone. `mise run release-check CUT=<sha>` checks a precise
+main commit, hosted reads, scoped access and both version-skew directions.
+The server deploys on main; CLI assets and Homebrew publish on a version tag.
+
+Rehearse the published baseline and candidate with
+`scripts/rehearse_upgrade.py`; retain the JSON receipt with exact hashes on
+the release issue. The isolated rehearsal covers protocol/migration/restore,
+not the real-agent DX requirement. Run five fresh workers across touched cases
+for a release using [the fleet procedure](../../../docs/agent-dx-fleet/how-to-run.md).
+Read every report against controller audits and REST ground truth.
+
+Update `lisette.toml` and `src/buildinfo/version.lis` together. Finalize the
+changelog after the requested work, regenerate shipped skills with
+`python3 scripts/sync_skills.py`, and verify the final main commit before
+pushing its tag. Verify downloaded assets outside any checkout and the actual
+Homebrew executable after publication. Installation verification is part of
+finishing the release, not a follow-up suggestion.

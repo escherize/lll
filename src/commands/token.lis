@@ -350,8 +350,9 @@ On the receiving machine, save the API endpoint with 'lll config set url URL', o
 /// Rotation is only ever `lll bot rotate`. Bare `lll bot bot-NAME` is create.
 ///
 /// Creation rides the calling member's own token when there is one, so the
-/// bot is owned by whoever ran the command. Administrator credentials name
-/// no member, so a bot created with them has no owner.
+/// bot is owned by whoever ran the command, or, when a bot with an owner ran
+/// it, by that bot's owner (LLL-709). Administrator credentials name no
+/// member, so a bot created with them has no owner.
 pub fn bot_commands() -> Slice<flags.Command> {
   [
     flags.Command {
@@ -413,12 +414,23 @@ fn bot_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
 'lll bot rotate {name}' mints a new token (the previous one stops working)"),
     )
   }
-  let owner = caller.map(|me| me.id)
+  // A bot with an owner creates bots for that owner (LLL-709): ownership
+  // stays one hop, and the server records this bot as created_by. A bot
+  // with no owner sends itself and is refused: a bot cannot own a bot.
+  let for_owner = caller.filter(|me| me.is_bot() && !me.owner.is_empty())
+  let owner = match for_owner {
+    Some(me) => Some(me.owner),
+    None => caller.map(|me| me.id),
+  }
   let created = tokens.create_bot_member_as(ctx, tok, name, owner)?
-  let owned = caller.map_or(
-    "no owner (administrator credentials created it)",
-    |me| f"owned by {me.name}",
-  )
+  let owned = match (caller, for_owner) {
+    (_, Some(me)) => {
+      let human = records.member_by_id(ctx, me.owner).map_or("a member hidden from you", |o| o.name)
+      f"owned by {human}, created by {me.name}"
+    },
+    (Some(me), None) => f"owned by {me.name}",
+    (None, None) => "no owner (administrator credentials created it)",
+  }
   let made = bot_status(
     env_only,
     f"created bot member {created.name} (kind=bot, {owned})",
@@ -557,7 +569,9 @@ fn bot_page(rotating: bool) -> string {
 
 Who may rotate: a superuser, or the bot's owner while the owner's access
 covers the bot's. The owner is the member whose token ran 'lll bot create'
-to create it; a bot created with administrator credentials has none. Other
+to create it; a bot created with administrator credentials has none. A bot
+that another bot created is owned by that bot's owner, and the creating bot
+may rotate it too while its access covers the bot's. Other
 members and the bot itself are refused, unless they first make themselves the
 owner, which the server does not yet prevent.
 
@@ -573,6 +587,12 @@ and can never do more than you can: narrowing you narrows it at once, and a
 read-only owner makes its bots read-only. 'lll whoami' with the bot's token
 shows what it can do. A bot created with administrator credentials has no
 owner and keeps its own access.
+
+A bot may create bots when it has a human owner and can write: the new bot
+is owned by that person, starts with the creating bot's teams and mode, and
+can never do more than the creating bot. Narrowing the creating bot narrows
+it too. 'lll member list' shows which bot created it. A read-only bot, and a
+bot with no owner, cannot create bots.
 
 See 'lll bot rotate --help' for token rotation."
   }

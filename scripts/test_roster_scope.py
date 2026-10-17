@@ -236,6 +236,11 @@ with tempfile.TemporaryDirectory(prefix='lll-551-') as directory:
             code, out = lll('alpha-guest', *args)
             assert code == 0, (args, out)
             clean(out, f'cli {args}')
+        code, out = lll('alpha-guest', 'issue', 'view', 'ALPHA-1', '--json')
+        assert code == 0, out
+        comments = json.loads(out)['comments']
+        assert any(c['author_name'] == 'hidden member' for c in comments), comments
+        assert all(isinstance(c['server_record'], bool) for c in comments), comments
         code, out = lll('alpha-guest', 'member', 'access', 'bot-garden')
         assert code != 0 and "no member named 'bot-garden'" in out, out
         code, out = lll('full-person', 'issue', 'view', 'ALPHA-1')

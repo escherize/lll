@@ -85,6 +85,10 @@ pub struct Member {
   pub kind_wire: string,
   #[json(omitempty)]
   pub owner: MemberId,
+  // The bot that created this bot (LLL-709); the server sets it, and only
+  // for a bot another bot created. Its owner is then that bot's owner.
+  #[json(omitempty)]
+  pub created_by: MemberId,
   // Access (LLL-542): "all" | "teams", the team ids, "rw" | "ro". Empty on a
   // server that predates scoped members. Read it through access().
   #[json("scope", omitempty)]
@@ -165,8 +169,8 @@ pub struct NewMember {
   #[json("emailVisibility")]
   pub email_visibility: bool,
   // Bot accounts (LLL-407). Selects have no schema-level default, so every
-  // create states its kind; owner is the creating human member's id, sent
-  // only for bots.
+  // create states its kind; owner is the creating human member's id, or the
+  // creating bot's owner's (LLL-709), sent only for bots.
   #[json(omitempty)]
   pub kind: string,
   #[json(omitempty)]
@@ -360,6 +364,7 @@ pub struct Comment {
   // note; LLL-654), "" (omitted from JSON) for a person's or an agent's.
   #[json(omitempty)]
   pub author_kind: string,
+  pub server_record: bool,
   pub body: string,
   pub created: string,
   pub updated: string,
@@ -583,6 +588,7 @@ pub struct Webhook {
   pub id: string,
   pub url: string,
   pub secret_set: bool,
+  pub activity: bool,
   pub team: TeamId,
   pub project: ProjectId,
   pub expand: WebhookExpand,
@@ -601,6 +607,8 @@ pub struct NewWebhook {
   pub url: string,
   #[json(omitempty)]
   pub secret: string,
+  #[json(omitempty)]
+  pub activity: bool,
 }
 
 /// POST body for /api/lll/bots/rotate (LLL-407): re-mint the named bot's
