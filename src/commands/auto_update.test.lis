@@ -64,6 +64,24 @@ fn resolve_fixture(argv0: string) -> Option<string> {
   None
 }
 
+// A running server whose binary was deleted is judged by its path: a
+// cleaned-up keg is still Homebrew's, a removed checkout is not. Real
+// resolution, against paths that do not exist.
+#[test]
+fn a_deleted_binary_is_judged_by_its_path() {
+  let quiet = [
+    "/nonexistent-lll-721/wt/target/.lisette/bin/lll up --pb-dir /tmp/x",
+  ]
+  assert !homebrew_server_running(quiet, resolve_exe)
+  for line in [
+    "/nonexistent-lll-721/homebrew/Cellar/lll/1.1.0/bin/lll up",
+    "/nonexistent-lll-721/homebrew/bin/lll up",
+    "./lll up",
+  ] {
+    assert homebrew_server_running(quiet.append(line), resolve_exe)
+  }
+}
+
 // LLL-655: a running `lll up` from Homebrew is a server the upgrade would
 // replace; one from a checkout is not; one that cannot be placed counts.
 #[test]

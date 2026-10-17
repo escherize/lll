@@ -105,9 +105,16 @@ fn homebrew_server_running(
     let Some(path) = resolve(fields[0]) else {
       return true
     }
-    if let Install.Homebrew = install_of(path) { return true }
+    if homebrew_path(path) { return true }
   }
   false
+}
+
+/// Whether `path` is Homebrew's: in a Cellar, or under a Homebrew prefix
+/// (a bin/ link left dangling once its keg was removed).
+fn homebrew_path(path: string) -> bool {
+  if let Install.Homebrew = install_of(path) { return true }
+  strings.Contains(path, "/homebrew/") || strings.Contains(path, "/linuxbrew/")
 }
 
 /// The noun in an lll argv: the first argument that is not a flag, skipping
@@ -130,7 +137,9 @@ fn first_word(args: Slice<string>) -> string {
 
 /// The resolved executable a process's argv[0] names: absolute as given,
 /// a bare name through PATH. A relative path depends on that process's
-/// working directory, so it is not placed.
+/// working directory, so it is not placed. A path that no longer resolves
+/// (its checkout deleted, or its keg cleaned up while it runs) is judged
+/// as spelled: a deleted Cellar path still names Homebrew.
 fn resolve_exe(argv0: string) -> Option<string> {
   let path = if !strings.Contains(argv0, "/") {
     match exec.LookPath(argv0) {
@@ -138,7 +147,7 @@ fn resolve_exe(argv0: string) -> Option<string> {
       Partial.Err(_) | Partial.Both(_, _) => return None,
     }
   } else if filepath.IsAbs(argv0) { argv0 } else { return None }
-  filepath.EvalSymlinks(path).ok()
+  Some(filepath.EvalSymlinks(path).unwrap_or(path))
 }
 
 /// Take the lock at `path`, or false when another upgrade holds it. The
