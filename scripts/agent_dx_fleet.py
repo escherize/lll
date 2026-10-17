@@ -247,8 +247,8 @@ def free_port():
 class Seat:
     """One worker on a board: its directory, number, identity and wrapper.
 
-    A worker acts as a bot, except where a case needs a person: a bot cannot
-    own a bot, so case 15's worker is the person who creates one."""
+    A worker acts as a bot except for human credential/invitation cases:
+    case 15 provisions a human-owned bot; case 19 invites a person."""
 
     def __init__(self, worker, number, person=False):
         self.worker, self.number, self.person = worker, number, person
@@ -1068,7 +1068,7 @@ CASES = {
     '16': case('claim-handoff', seed_16, judge_16, pair=True),
     '17': case('concurrent-edit', seed_17, judge_17, pair=True),
     '18': case('watch-partner', seed_18, judge_18, pair=True),
-    '19': case('scoped-invite', seed_19, judge_19, mode='override'),
+    '19': case('scoped-invite', seed_19, judge_19, mode='override', person=True),
     '20': case('recover-wrong-command', seed_20, judge_20),
 }
 

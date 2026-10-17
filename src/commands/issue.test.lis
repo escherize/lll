@@ -1,3 +1,4 @@
+import "go:encoding/json"
 import "flags"
 import "query"
 import "models"
@@ -750,4 +751,32 @@ fn next_claim_resumes_only_my_own_session_hold() {
   assert resumed([held_as("i2", "me", "")], "") == 2
   // A superuser holds nothing.
   assert resumable_claim(ordered, [held_as("i1", "me", "")], None, "").is_none()
+}
+
+#[test]
+fn issue_view_names_visible_blockers_and_marks_server_comments() {
+  let issue = models.Issue {
+    blocked_by: ["hidden", "visible"],
+    expand: models.IssueExpand { blocked_by: [models.Issue {
+      id: "visible", number: 7, title: "Other team blocker", state_wire: "todo",
+      expand: models.IssueExpand { team: models.Team { key: "OTHER", .. }, .. }, ..
+    }], .. }, ..
+  }
+  let assert Ok(raw) = json.Marshal(issue)
+  let comments = [
+    models.Comment { author: "shown", expand: models.CommentExpand { author: models.Member { name: "Alice", .. } }, .. },
+    models.Comment { author: "hidden", server_record: true, .. },
+    models.Comment { author_kind: "system", server_record: true, .. },
+  ]
+  let assert Ok(out) = issue_view_json(raw as string, comments, None, [], [])
+  assert out.contains("\"key\":\"OTHER-7\"")
+  assert out.contains("\"title\":\"Other team blocker\"")
+  assert out.contains("\"author_name\":\"Alice\"")
+  assert out.contains("\"author_name\":\"hidden member\"")
+  assert out.contains("\"server_record\":true")
+  assert out.contains("\"server_record\":false")
+  assert out.contains("\"author_kind\":\"system\"")
+  assert out.contains("\"blocked_by\":[\"hidden\",\"visible\"]")
+  let assert Ok(empty) = issue_view_json("{}", [], None, [], [])
+  assert empty.contains("\"blocked_by_refs\":[]")
 }

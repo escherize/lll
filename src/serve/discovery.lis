@@ -1,14 +1,28 @@
+import "go:encoding/json"
 import "go:net/http"
 
 import "buildinfo"
 
+#[json]
+struct Discovery {
+  service: string,
+  web_url: string,
+  version: string,
+  #[json(omitempty)]
+  capabilities: Option<Slice<string>>,
+}
+
 /// Public metadata carries no credential and is useful before board login.
-/// `version` lets an older CLI notice it is behind (LLL-607).
-fn board_discovery(w: http.ResponseWriter, _r: Ref<http.Request>) {
+/// `version` lets an older CLI notice it is behind (LLL-607); `capabilities`
+/// lets a newer CLI refuse a command this server cannot honour (LLL-710).
+/// None when the board proxies an API it did not start: that API's own
+/// support routes answer for it instead.
+fn board_discovery(w: http.ResponseWriter, capabilities: Option<Slice<string>>) {
   w.Header().Set("Content-Type", "application/json")
-  let _ = w.Write(
-    ("{\"service\":\"lll\",\"web_url\":\".\",\"version\":\"" +
-    buildinfo.version() +
-    "\"}").bytes(),
-  )
+  let doc = Discovery { service: "lll", web_url: ".", version: buildinfo.version(), capabilities }
+  let Ok(body) = json.Marshal(doc) else {
+    http.Error(w, "encoding discovery", 500)
+    return
+  }
+  let _ = w.Write(body)
 }

@@ -1,0 +1,85 @@
+import "go:encoding/json"
+import "go:time"
+import "display"
+import "models"
+import "pb"
+import "query"
+import "realtime"
+
+#[json]
+struct ActivityExpand {
+  issue: models.Issue,
+  author: models.Member,
+  member: models.Member,
+  event_actor: models.Member,
+}
+
+#[json]
+struct ActivityRecord {
+  author: models.MemberId,
+  author_kind: string,
+  agent: string,
+  body: string,
+  event_actor: models.MemberId,
+  event_agent: string,
+  event_source: string,
+  expand: ActivityExpand,
+}
+
+#[json]
+struct ActivityEnvelope { record: ActivityRecord }
+
+fn activity_topics(filter: query.IssueFilter) -> Result<Slice<string>, pb.CliError> {
+  let related = query.filter_at(filter, "issue.")
+  let parent = "issue.team,issue.creator,issue.assignee,issue.blocked_by,issue.blocked_by.team"
+  Ok([
+    realtime.topic_with_options("comments", related, parent + ",author.owner")?,
+    realtime.topic_with_options("claims", related, parent + ",member,event_actor")?,
+  ])
+}
+
+fn activity_record(ev: realtime.RecordEvent) -> Result<Option<ActivityRecord>, pb.CliError> {
+  match ev.change {
+    realtime.Change.Comment(_) | realtime.Change.Claim(_) => (),
+    _ => return Ok(None),
+  }
+  let mut data = ActivityEnvelope { .. }
+  json.Unmarshal(ev.data.bytes(), &data).map_err(|e| pb.failed(f"decoding activity event: {e}"))?
+  // A deleted parent cannot be resolved or presented safely. Its issue
+  // deletion is the authoritative event; never invent a key from an id.
+  if data.record.expand.issue.expand.team.key == "" { return Ok(None) }
+  Ok(Some(data.record))
+}
+
+fn activity_actor(ev: realtime.RecordEvent, record: ActivityRecord) -> (models.MemberId, string, string, string) {
+  let comment = match ev.change { realtime.Change.Comment(_) => true, _ => false }
+  let id = if comment { record.author } else { record.event_actor }
+  let member = if comment { record.expand.author } else { record.expand.event_actor }
+  let agent = if comment { record.agent } else { record.event_agent }
+  let source = if comment { record.author_kind } else { record.event_source }
+  let kind = if source == "system" || source == "superuser" { source } else if id.string() == "" { "" } else { member.kind().map_or("", |kind| kind.wire()) }
+  let name = if source == "system" { "system" } else if source == "superuser" { "administrator" } else if id.string() == "" { "" } else { display.member_name(id, member.name, "") }
+  (id, kind, agent, name)
+}
+
+fn activity_json(ev: realtime.RecordEvent, record: ActivityRecord) -> Result<string, pb.CliError> {
+  let enriched = issue_event_json(ev.data, record.expand.issue)
+  let mut fields = Map.new<string, json.RawMessage>()
+  json.Unmarshal(enriched.bytes(), &fields).map_err(|e| pb.failed(f"decoding activity: {e}"))?
+  let (actor, kind, agent, name) = activity_actor(ev, record)
+  for (key, value) in [("topic", ev.topic), ("author", actor.string()), ("author_name", name), ("author_kind", kind), ("agent", agent)] {
+    fields[key] = encode_json(value, key)?
+  }
+  Ok(contract_json(encode_json(fields, "activity event")?, 0) as string)
+}
+
+fn activity_line(ev: realtime.RecordEvent, record: ActivityRecord, json_mode: bool) -> Result<string, pb.CliError> {
+  if json_mode { return activity_json(ev, record) }
+  let issue = record.expand.issue
+  let key = f"{issue.expand.team.key}-{issue.number}"
+  let (_, _, agent, name) = activity_actor(ev, record)
+  let shown = if name == "" { "unknown actor" } else { display.byline(name, agent) }
+  let kind = match ev.change { realtime.Change.Comment(_) => "comment", _ => "claim" }
+  let action = if kind == "claim" && ev.action == realtime.Action.Create { "acquired" } else if kind == "claim" && ev.action == realtime.Action.Delete { "released" } else { ev.action.wire() }
+  Ok(f"{time.Now().Format("15:04:05")} {key} {kind} {action} by {shown}")
+}

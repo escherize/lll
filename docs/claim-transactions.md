@@ -110,11 +110,20 @@ do not update the issue record. New streams receive current snapshots on
 connection; metadata refreshes preserve title/comment drafts and the separate
 description boundary.
 
-`lll watch` streams issue records only, so it sees a claim operation only
-when the operation writes the issue. A claim that assigns its holder and a
-release that clears the assignee each produce one issue update event. Claiming
-an issue already assigned to you, claiming one you already hold, and renewing
-produce none. `scripts/test_watch_contracts.py` pins this.
+`lll watch --activity` streams issues, comments and claims for matching issues.
+The default watch and existing webhook registrations stay issue-only. Register
+with `lll webhook add URL --activity` for activity deliveries. Claim
+acquisition, renewal and release produce their own create/update/delete events,
+even without an issue update. A plain re-claim of your hold makes no write.
+A claim's holder stays in `record.member`; activity `author` names the actual
+actor, which can differ on forced release. Expiry is system activity. An old
+server without actor metadata leaves claim attribution unknown rather than
+assuming the holder released it. `scripts/test_watch_activity.py` checks live
+watch and webhook delivery, attribution and project scope.
+
+Watch remains live-only. Comments and claims do not bump `issue.updated`, so
+`issue list --since` does not reconcile their missed events. Re-read comments
+and claims after reconnect when a complete current snapshot is required.
 
 Claiming an issue already held by the same member succeeds, retains the claim
 ID and creation time, and restores assignment to that member. Another member's

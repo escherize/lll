@@ -6,7 +6,65 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Changed
+
+- `lll issue next --claim` hands back the caller's own held ready issue, exit
+  0 with the key on stdout and `Resuming KEY: already claimed by ...` on
+  stderr, when it has nothing new to offer, instead of exiting 5. A loop that
+  crashed after claiming now resumes its own work (LLL-693). Own means the same
+  member under the same `--agent` label, or an unlabelled hold; a sibling
+  session's labelled hold is never handed out, and an unlabelled caller does
+  not get a labelled hold. Unclaimed work is still offered first. Plain
+  `lll issue next` is unchanged.
+
+## [1.2.0] - 2026-10-16
+
+### Upgrading from 1.1
+
+Upgrade the server before clients and keep a stopped pre-upgrade data backup;
+see `docs/upgrading.md` for the tested-pair rehearsal and restore procedure.
+Comment/claim activity is opt-in: use `watch --activity` or
+`webhook add URL --activity`. Existing watches and registrations stay issue-only.
+New keyed writes and activity webhook registrations check server capabilities
+before writing. Older clients can ignore the added JSON fields.
+
+This release also fixes two security issues: identities escaping their owner's
+access, and stale self-updates undoing token rotation or access narrowing.
+Human-owned bots may provision workers owned by the same human; no automatic
+ownership migration is performed for existing bots.
+
 ### Added
+
+- Shipped agent skills explain activity delivery and its reconciliation limits,
+  covered JSON fields, safe retries, capabilities, worker ownership and the full
+  release-to-installation workflow. Release fleet guidance distinguishes the
+  five-worker release check from historical research runs.
+
+- The server's `GET /.well-known/lll` lists its `capabilities`
+  (`issues.idempotency`, `comments.idempotency`, `webhooks.activity`). Before
+  `issue create --idempotency-key`, `issue comment --idempotency-key` or
+  `webhook add --activity` writes anything, the CLI checks the list and
+  refuses a missing capability with exit 1: "this server (VERSION) does not
+  support ...; upgrade the server". A server without the list (1.1.0 and
+  older, or a board `lll up` started over an API it adopted) is still asked
+  through each feature's support route, as before. The version-skew warning
+  is unchanged (LLL-710).
+
+- Query watch and webhook registrations with `--activity` deliver comment
+  and claim activity within the selected team/project/filter, including renewals and releases without an
+  issue update. Activity includes the issue key and authenticated actor;
+  forced release preserves the holder separately and expiry identifies the
+  system. Old-server attribution is explicitly unknown (LLL-642).
+
+- Issue view and next JSON include covered blocker refs (using each visible
+  blocker's own team key), comment author names and explicit server-written
+  comment markers. Hidden identities remain hidden (LLL-691).
+
+- Predictable upgrade guidance and a loopback-only binary-to-binary migration
+  and stopped-backup restore rehearsal, with exact tested-pair hashes (LLL-706).
+
+- JSON watch issue events carry covered key, priority name and creator name
+  beside the raw record, including ready transitions (LLL-694).
 
 - The board answers a short issue address: `/t/KEY/7` redirects (303, query
   kept) to `/t/KEY/issue/KEY-7`, so an issue number is a URL you can type
@@ -18,17 +76,36 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   separate comment. A keyed comment checks server support before writing, so a
   1.1.0 or older server refuses it with "upgrade the server" instead of
   ignoring the key; unkeyed comments keep their existing behavior (LLL-700).
+- A read-write bot with a human owner can run `lll bot create bot-NAME`, so a
+  coordinator bot mints its own worker bots (LLL-709). The new bot is owned by
+  the coordinator's owner, not by the coordinator, so ownership stays one hop
+  and every access rule is unchanged. It starts with the coordinator's teams
+  and mode and can never have more: the server refuses a wider one (code
+  `bot_exceeds_owner`), and narrowing the coordinator narrows the bots it
+  created. The server records the coordinator in the member's new
+  `created_by` field (members cannot set it), `lll member list` and
+  `lll member access` show it, and the coordinator may rotate those bots'
+  tokens while it can write. When the coordinator loses or changes its owner,
+  is deleted, or its owner is deleted, the bots it created are detached:
+  `created_by` is cleared, they
+  are narrowed, and every token minted for them stops working, so the owner
+  re-mints with `lll bot rotate`. A read-only bot is still refused, and a bot with no owner still gets
+  "a bot cannot own a bot". The board's "Add a bot" is unchanged.
 
-### Changed
+### Fixed
 
-- `lll issue next --claim` hands back the caller's own held ready issue, exit
-  0 with the key on stdout and `Resuming KEY: already claimed by ...` on
-  stderr, when it has nothing new to offer, instead of exiting 5. A loop that
-  crashed after claiming now resumes its own work (LLL-693). Own means the same
-  member under the same `--agent` label, or an unlabelled hold; a sibling
-  session's labelled hold is never handed out, and an unlabelled caller does
-  not get a labelled hold. Unclaimed work is still offered first. Plain
-  `lll issue next` is unchanged.
+- Bots and owned identities cannot create person identities that escape their
+  owner's access and survive its revocation (LLL-712). Ordinary human
+  provisioning remains available.
+- Fleet preflight clears inherited credentials before intentional overrides and
+  names the owned login URL, keeping fixture checks isolated. Invitation
+  fixtures use a person rather than relying on bot-created people (LLL-715).
+- A member's own update (a bot may PATCH itself) no longer writes back a
+  stale copy of its record. A leaked bot token spamming self-updates could
+  survive its owner's `lll bot rotate`, and could undo a narrowing that
+  landed while the update was in flight. Member updates now run in one
+  transaction, and a save keeps the committed owner, creator, access, token
+  key and password it did not itself change (LLL-713).
 
 ## [1.1.0] - 2026-10-13
 

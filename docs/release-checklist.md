@@ -11,17 +11,31 @@ printed at the end of every run. Do the manual steps below in order.
 
 ## 1. Declare the cut line
 
-Pick the commit on main that the release ships. Name it out loud (on the
-release issue and in chat): "the cut is `<sha>`; anything that merges after it
-is the next version". Without a declared cut the loop does not end, because
-agents keep opening PRs.
+Declare the feature baseline on the release issue and in chat. Add only the
+requested release preparation (skills, version, changelog) and explicitly
+recorded release-blocking fixes. Later unrelated merges belong to the next
+version; a moving backlog must not keep moving the release scope.
 
-Then run `mise run release-check CUT=<sha>` and fix every FAIL before you go on.
+The final `CUT` is the exact main commit **after** those preparation changes
+have merged, with a green gate and deployment. Record that SHA before tagging.
+An early `release-check` of the baseline is useful preparation, but does not
+replace the final `mise run release-check CUT=<sha>` before publication.
+Never tag the pre-bump baseline with the new version.
 
 ## 2-4. Automated
 
 Main is green and deployed at the cut, no security work is half-landed, and
 version skew works in both directions. See the table above.
+
+## Client/server compatibility and migration rehearsal
+
+Before tagging, follow [the upgrade procedure](upgrading.md). Run
+`scripts/rehearse_upgrade.py` with the published baseline and the candidate
+binary, and retain its JSON report with both hashes on the release issue.
+Publish which pairs and capabilities were actually checked, including safe
+unsupported-feature refusal. Confirm a pre-upgrade backup can be started with
+its matching old binary; a version-skew warning is not a compatibility test.
+This synthetic rehearsal is separate from the agent DX fleet below.
 
 ## 5. Agent DX fleet
 
@@ -61,5 +75,6 @@ A green release workflow is not proof that people can install the release.
 
 - CLI: never rewrite or move a published tag. Ship a patch release
   (`v<version+patch>`) through steps 6 and 7.
-- Server: redeploy Fly's previous image. If data is damaged, restore from a
-  `pb_data` volume snapshot as in `docs/hosted-recovery.md`.
+- Server: stop the new server and restore a pre-upgrade backup with its
+  matching old image. Do not assume the previous image can read migrated data.
+  See `docs/upgrading.md` and `docs/hosted-recovery.md`.

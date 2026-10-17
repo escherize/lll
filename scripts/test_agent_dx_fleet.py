@@ -160,7 +160,7 @@ class Worker:
 
     def run(self, *args, stdin=None, env=None, check=True):
         result = subprocess.run([self.wrapper, *args], cwd=self.dir, input=stdin, text=True,
-                                capture_output=True, timeout=60, env=dict(os.environ, **(env or {})))
+                                capture_output=True, timeout=60, env={**{k: v for k, v in os.environ.items() if not k.startswith('LLL_')}, **(env or {})})
         if check and result.returncode != 0:
             raise AssertionError(f'worker {self.number}: lll {" ".join(args)} exited {result.returncode}: {result.stderr}')
         return result
@@ -396,7 +396,7 @@ def w19(w, right):
     printed = w.run('member', 'invite', name, '--email', email, *(['--team', 'FLEET'] if right else [])).stdout
     password = re.search(r'temporary password: (\S+)', printed).group(1)
     home = {'LLL_CONFIG_HOME': str(w.dir / 'colleague')}
-    w.run('login', '--email', email, '--password', password, env=home)
+    w.run('login', '--url', connection(conn_file(w.dir))[0], '--email', email, '--password', password, env=home)
     teams = [t['key'] for t in w.json('team', 'list', '--json', env=home)['items']]
     w.report({'colleague_teams': teams})
 

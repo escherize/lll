@@ -31,7 +31,7 @@ code, not on the error text.
 | Code | Meaning | Examples |
 |---|---|---|
 | 0 | Success | |
-| 1 | Error | server failure (5xx), server unreachable, a rejected value |
+| 1 | Error | server failure (5xx), server unreachable, a rejected value; a server that lacks a capability the command needs (below) |
 | 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`, `LLL_TEAM`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`); no team configured for a command that needs one (fix: `--team KEY` or `lll attach`) |
 | 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams |
 | 4 | Refused or conflict | the claim is held by someone else; release or renew without the claim; closing or deleting a claimed issue without `--force`; creating a bot that exists; a read-only member writing; an `--if-unchanged-since` mismatch; a declined delete confirmation |
@@ -148,22 +148,27 @@ Every issue `--json` prints the same object: `issue list` per item,
 
 `issue view --json` and `issue next --json` add `comments` (each a comment
 record, below), `docs` and `findings` (each a doc record, below).
+They also add `blocked_by_refs`: an array of `{id, key, title, state}` for
+visible blockers, in `blocked_by` order. Keys use each blocker's own team.
+Hidden or deleted blockers are omitted from refs; their ids remain in
+`blocked_by`, so missing refs do not mean the issue is ready.
 
 ### Other records
 
 | Record | Covered fields |
 |---|---|
-| comment | `id`, `issue`, `author`, `author_kind`, `agent`, `body`, `created`, `updated` |
+| comment | `id`, `issue`, `author`, `author_name`, `author_kind`, `server_record`, `agent`, `body`, `created`, `updated` |
 | doc, finding | `id`, `team`, `slug`, `title`, `kind`, `body`, `area`, `paths`, `issues`, `confidence`, `last_editor`, `author_name`, `last_editor_name`, `created`, `updated` |
 | team | `id`, `key`, `name`, `accent`, `emoji`, `archived` |
-| member | `id`, `name`, `email`, `kind`, `owner`, `scope`, `teams`, `mode`, `team_keys` |
+| member | `id`, `name`, `email`, `kind`, `owner`, `created_by`, `scope`, `teams`, `mode`, `team_keys` |
 | label | `id`, `name`, `color`, `team` |
 | project | `id`, `name`, `description`, `status`, `team` |
 | webhook | `id`, `url`, `secret_set`, `team`, `project` |
 | search hit | `group`, `kind`, `title`, `state`, `score`, `snippets` (each `label`, `lines`) |
 
-A member's `owner`, `scope`, `teams`, `mode` and `team_keys` are absent when
-empty. A comment's `author_kind` is `"system"` on a comment the server wrote on
+A member's `owner`, `created_by`, `scope`, `teams`, `mode` and `team_keys` are
+absent when empty. `created_by` is the member record id of the bot that
+created a bot, set by the server; such a bot's `owner` is that bot's owner. A comment's `author_kind` is `"system"` on a comment the server wrote on
 its own (today only the claim-expiry note, which has no `author`), and absent
 otherwise. A doc's `last_editor` is the member record id of the member who last
 changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
@@ -178,7 +183,9 @@ them.
 `claim`; use `issue list --project NAME --json` for the issue object.
 
 `lll watch --json` prints one event per line. Its timestamps are RFC3339;
-the event shape (`topic`, `action`, `record`) is not covered yet.
+the covered envelope has `topic`, `action` and `record`. Consumers must ignore
+unknown topics/actions and additional fields. Issue record fields follow the
+issue contract above; the activity metadata is described below.
 
 ## Empty lists
 
@@ -215,3 +222,64 @@ minor release. `lll api --schema` prints the current reference. For a bulk
 read the CLI covers, prefer its `--json`: `lll issue list --json` carries
 each issue's claim, so reading claims through
 `lll api GET /api/collections/claims/records` is no longer needed for that.
+
+In `issue view --json` and `issue next --json`, comment `author_name` is
+`"hidden member"` for an inaccessible author and `""` for an empty relation.
+`server_record` is always a boolean: true for server-written comments,
+including forced-release notes attributed to a member and expiry notes
+with `author_kind: "system"`. These fields need no extra member lookup.
+
+### Display fields on watch events
+
+Issue events from `watch --json` (including `--ready`) and `issue watch --json`
+carry `key`, `priority_name` and `creator_name` beside `topic`, `action` and
+`record`. The raw `record` keeps its fields. `creator_name` is an empty string
+when there is no creator and `"hidden member"` when the creator is inaccessible.
+These are additive covered fields; readers should tolerate new envelope fields.
+
+### Comment and claim activity
+
+`watch --activity --json` also emits `comments` and `claims` topics for issues matching
+its filters (`--ready` includes only ready parents). These keep the raw
+`record` and add `key`, `author` (actor member id), `author_name`, `author_kind`
+(`person`, `bot`, `system`, `superuser`, or empty when unknown) and `agent`.
+Claim create/update/delete mean acquired/updated (including renewal)/released;
+a repeated claim with no write emits nothing. A claim's holder remains
+`record.member`; the releaser is not assumed to be the holder. Names and kinds
+of inaccessible actors remain hidden. Old servers lacking claim attribution
+leave the actor unknown. Webhooks use the same activity envelope, with names
+limited to the team's shared roster.
+
+This is live notification, not an audit or replay log. Reconnect does not
+replay gaps, and `issue list --since` misses comment/claim-only activity.
+
+Activity delivery is opt-in. Plain watch and webhook registrations without
+`--activity` keep issue-only delivery. Activity webhook creation checks that
+the server supports it (see Server capabilities) before sending any POST;
+an unsupported server is an error, never a silent issue-only registration.
+
+## Server capabilities
+
+A server's unauthenticated `GET /.well-known/lll` names its `version` and
+lists its `capabilities`, for example
+`{"service":"lll","version":"1.2.0","capabilities":["issues.idempotency","comments.idempotency","webhooks.activity"]}`.
+A name, once listed, is never removed or renamed.
+
+| Capability | Commands that need it |
+|---|---|
+| `issues.idempotency` | `issue create --idempotency-key` |
+| `comments.idempotency` | `issue comment --idempotency-key` |
+| `webhooks.activity` | `webhook add --activity` |
+
+Before such a command writes anything, the CLI reads the list. A capability
+missing from it is refused with exit 1 and a message naming the server's
+version: `this server (1.2.0) does not support --idempotency-key; upgrade the
+server before retrying this comment`. Nothing is sent. The list is absent
+when the server predates it (1.1.0 and older), and from a board that `lll up`
+started over an API it did not start, since that API may be older than the
+board. Without the list, for these three, the CLI asks the feature's own authenticated support route
+(`/api/lll/issues/idempotency`, `/api/lll/comments/idempotency`,
+`/api/lll/activity`), as it did before the list existed, and refuses the same
+way when that route answers 404. Discovery is read without credentials, gives
+up after 2 seconds, and any failure reads as an absent list. Commands that need no capability never read
+the list. The version-skew warning is separate and unchanged.

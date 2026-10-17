@@ -10,6 +10,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,6 +51,10 @@ def call(base, path, body=None, token='', method=None, headers=None):
     except ValueError:
         pass
     return resp.status, text, resp.headers
+
+
+def member_names_su(api, su):
+    return {m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']}
 
 
 with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
@@ -162,6 +168,32 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         # Created with no scope or mode: the creator's, never blank.
         plain, _ = member('plain')
         assert (plain['scope'], plain['mode']) == ('all', 'rw'), plain
+        # A bot must not mint an ownerless person to escape its owner's cap.
+        person_owner, person_owner_token = member('person-owner')
+        for actor_name, kind, owner in [('bot-owned-actor', 'bot', person_owner['id']),
+                                         ('bot-ownerless-actor', 'bot', ''),
+                                         ('owned-person-actor', 'person', person_owner['id'])]:
+            code, actor, _ = call(api, '/api/collections/members/records', {
+                'name': actor_name, 'kind': kind, 'owner': owner,
+                'email': actor_name + '@example.test', 'password': 'pw12345678',
+                'passwordConfirm': 'pw12345678', 'scope': 'all', 'mode': 'rw'}, su)
+            assert code == 200, actor
+            code, minted, _ = call(api, '/api/collections/members/impersonate/' + actor['id'], {'duration': 3600}, su)
+            assert code == 200, minted
+            actor_token = minted['token']
+            for index, new_owner in enumerate(('', person_owner['id'])):
+                escaped = call(api, '/api/collections/members/records', {
+                    'name': f'escape-{actor_name}-{index}', 'kind': 'person',
+                    'email': f'escape-{actor_name}-{index}@example.test',
+                    'password': 'pw12345678', 'passwordConfirm': 'pw12345678',
+                    'owner': new_owner, 'scope': 'all', 'mode': 'rw'}, actor_token)
+                assert escaped[0] == 400, ('bot created a person outside its lifetime', escaped[:2])
+        # A person retains the ordinary person-provisioning path.
+        allowed = call(api, '/api/collections/members/records', {
+            'name': 'human-created-person', 'kind': 'person',
+            'email': 'human-created-person@example.test',
+            'password': 'pw12345678', 'passwordConfirm': 'pw12345678'}, person_owner_token)
+        assert allowed[0] == 200, allowed[:2]
         # Read-only: sees ALPHA, writes nothing, custom routes included.
         ro_rec, ro = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
         assert {i['title'] for i in call(api, '/api/collections/issues/records', token=ro)[1]['items']} == \
@@ -477,6 +509,181 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert call(api, '/api/collections/members/records', dict(bot_body, name='bot-theirs', owner=plain['id']), boss_tok)[0] == 400
         sub = call(api, '/api/collections/members/records', dict(bot_body, name='bot-sub', owner=made['id']), su)
         assert sub[0] == 400 and 'bot cannot own a bot' in sub[1]['message'], sub[:2]
+        # LLL-709: a read-write bot with a human owner creates a bot for that
+        # owner. Ownership stays one hop; the server records the creating bot.
+        bot_env = dict(cli_ro, LLL_TOKEN=bot_tok)
+        out = lll('bot', 'bot-boss-w1', '--team', 'ALPHA', env=bot_env)
+        assert out.returncode == 0 and 'owned by boss, created by bot-boss' in out.stdout, out.stdout + out.stderr
+        w1_tok = next(l for l in out.stdout.splitlines() if l.startswith('export LLL_TOKEN='))[len('export LLL_TOKEN='):]
+
+        def record(name):
+            return next(m for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+                        if m['name'] == name)
+
+        w1 = record('bot-boss-w1')
+        assert (w1['owner'], w1['created_by'], w1['scope'], sorted(w1['teams']), w1['mode']) == \
+            (boss['id'], made['id'], 'teams', sorted([alpha['id'], beta['id']]), 'rw'), w1
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w1_tok)[0] == 200, 'the worker token works'
+        out = lll('member', 'list', env=boss_env)
+        assert 'bot-boss-w1' in out.stdout and '(created by bot-boss)' in out.stdout, out.stdout + out.stderr
+        out = lll('member', 'access', 'bot-boss-w1', env=boss_env)
+        assert 'created by: bot-boss' in out.stdout, out.stdout + out.stderr
+        # Never wider than the creator, never another person's, never a
+        # forged creator, never a person.
+        by_bot = call(api, '/api/collections/members/records',
+                      dict(bot_body, name='bot-w-wide', owner=boss['id'], scope='all'), bot_tok)
+        assert by_bot[0] == 400 and by_bot[1]['data'].get('code') == 'bot_exceeds_owner', by_bot[:2]
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='bot-w-theirs', owner=plain['id']), bot_tok)[0] == 400
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='bot-w-forged', owner=boss['id'], created_by=plain['id']), bot_tok)[0] == 400
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='w-person', kind='person', owner=''), bot_tok)[0] == 400
+        assert call(api, '/api/collections/members/records',
+                    dict(bot_body, name='bot-human-forged', owner=boss['id'], created_by=made['id']), boss_tok)[0] == 400, \
+            'a person named a bot as the creator of its own bot'
+        assert call(api, f"/api/collections/members/records/{w1['id']}", {'created_by': ''}, boss_tok, 'PATCH')[0] in (400, 404)
+        assert call(api, f"/api/collections/members/records/{w1['id']}", {'teams': [alpha['id']]}, bot_tok, 'PATCH')[0] in (400, 404)
+        assert not {'bot-w-wide', 'bot-w-theirs', 'bot-w-forged', 'w-person', 'bot-human-forged'} & {
+            m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']}
+        # The creating bot rotates what it created, and nothing else of its owner's.
+        rotated_w1 = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w1'}, bot_tok)
+        assert rotated_w1[0] == 200, rotated_w1[:2]
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w1_tok)[0] == 401, 'rotation kept the old token'
+        w1_tok = rotated_w1[1]['token']
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss'}, w1_tok)[0] == 403, 'a worker rotated its creator'
+        sibling = call(api, '/api/collections/members/records', dict(bot_body, name='bot-boss-sib', email='sib@example.test', owner=boss['id']), boss_tok)
+        assert sibling[0] == 200, sibling[:2]
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-sib'}, bot_tok)[0] == 403, 'a bot rotated its owner\'s other bot'
+        # A read-only bot, and a bot with no owner, are refused.
+        ro_bot = call(api, '/api/collections/members/records',
+                      dict(bot_body, name='bot-boss-ro', email='ro@example.test', owner=boss['id'], mode='ro'), boss_tok)
+        assert ro_bot[0] == 200, ro_bot[:2]
+        ro_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-ro'}, boss_tok)[1]['token']
+        out = lll('bot', 'bot-ro-w', '--team', 'ALPHA', env=dict(cli_ro, LLL_TOKEN=ro_tok))
+        assert out.returncode != 0 and 'bot-ro-w' not in member_names_su(api, su), out.stdout + out.stderr
+        ro_raw = call(api, '/api/collections/members/records',
+                      dict(bot_body, name='bot-ro-raw', email='ro-raw@example.test', owner=boss['id']), ro_tok)
+        assert ro_raw[0] == 403 and 'Read-only access' in ro_raw[1]['message'] and 'bot-ro-raw' not in member_names_su(api, su), \
+            ('the server let a read-only bot create a bot', ro_raw[:2])
+        orphan = call(api, '/api/collections/members/records', dict(bot_body, name='bot-orphan', email='orphan@example.test'), su)
+        assert orphan[0] == 200 and orphan[1]['owner'] == '', orphan[:2]
+        orphan_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-orphan'}, su)[1]['token']
+        out = lll('bot', 'bot-orphan-w', '--team', 'ALPHA', env=dict(cli_ro, LLL_TOKEN=orphan_tok))
+        assert out.returncode != 0 and "bot cannot own a bot: bot-orphan is a bot. Create bot-orphan-w with its human " \
+            "owner's token, or with administrator credentials for a bot with no owner" in out.stderr, out.stdout + out.stderr
+        # Narrowing a creator narrows what it created, down the chain: the
+        # coordinator holds those tokens.
+        w2 = call(api, '/api/collections/members/records', dict(bot_body, name='bot-boss-w2', email='w2@example.test', owner=boss['id']), w1_tok)
+        assert w2[0] == 200 and w2[1]['created_by'] == w1['id'], w2[:2]
+        w2_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[1]['token']
+        assert 'beta bot work' in {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=w2_tok)[1]['items']}
+        call(api, f"/api/collections/members/records/{w1['id']}", {'teams': [alpha['id']]}, su, 'PATCH')
+        assert record('bot-boss-w2')['teams'] == [alpha['id']], record('bot-boss-w2')
+        w2_titles = {i['title'] for i in call(api, '/api/collections/issues/records?perPage=200', token=w2_tok)[1]['items']}
+        assert 'alpha bot work' in w2_titles and 'beta bot work' not in w2_titles, w2_titles
+        assert record('bot-boss')['teams'] == made['teams'], 'narrowing a worker narrowed its creator'
+        # Revoking the creator (its owner cleared) succeeds, detaches and
+        # narrows what it created, and its old token rotates none of them.
+        w2_tok = call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[1]['token']
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w2_tok)[0] == 200, 'control: the minted token works'
+        revoke = call(api, f"/api/collections/members/records/{w1['id']}", {'owner': ''}, su, 'PATCH')
+        assert revoke[0] == 200, revoke[:2]
+        assert record('bot-boss-w2')['created_by'] == '' and record('bot-boss-w2')['teams'] == [alpha['id']], record('bot-boss-w2')
+        # bot-boss-w1 was itself created by bot-boss, so losing its owner
+        # detaches it too and strands its own token: 401 rather than 403.
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, w1_tok)[0] == 401, \
+            'a creator with no owner rotated its old worker'
+        assert call(api, '/api/collections/issues/records?perPage=1', token=w2_tok)[0] == 401, \
+            'the revoked creator still acts as its worker with the token it minted'
+        assert call(api, '/api/lll/bots/rotate', {'name': 'bot-boss-w2'}, boss_tok)[0] == 200, 'the owner re-mints it'
+        # LLL-713 / review F5: a bot's own PATCH loads its row before the write;
+        # racing self-PATCHes must not write back a narrowing or a rotation
+        # they never saw. Both sides are counted so a pass is not vacuous.
+        def spam_self(tok, member_id, ok, stop):
+            while not stop.is_set():
+                if call(api, f'/api/collections/members/records/{member_id}', {'emailVisibility': False}, tok, 'PATCH')[0] == 200:
+                    ok.append(1)
+
+        def racing(tok, member_id, act):
+            ok, stop = [], threading.Event()
+            threads = [threading.Thread(target=spam_self, args=(tok, member_id, ok, stop)) for _ in range(8)]
+            for th in threads:
+                th.start()
+            result = act()
+            stop.set()
+            for th in threads:
+                th.join()
+            return result, len(ok)
+
+        lost = survived = patched = 0
+        for n in range(6):
+            c = call(api, '/api/collections/members/records',
+                     dict(bot_body, name=f'bot-race-c{n}', email=f'race-c{n}@example.test', owner=boss['id']), boss_tok)[1]
+            c_tok = call(api, '/api/lll/bots/rotate', {'name': c['name']}, boss_tok)[1]['token']
+            w = call(api, '/api/collections/members/records',
+                     dict(bot_body, name=f'bot-race-w{n}', email=f'race-w{n}@example.test', owner=boss['id']), c_tok)[1]
+            w_tok = call(api, '/api/lll/bots/rotate', {'name': w['name']}, c_tok)[1]['token']
+            code, count = racing(w_tok, w['id'], lambda: call(
+                api, f"/api/collections/members/records/{c['id']}", {'teams': [alpha['id']]}, su, 'PATCH')[0])
+            assert code == 200
+            patched += count
+            lost += len(record(w['name'])['teams']) != 1
+            rotated, count = racing(w_tok, w['id'], lambda: call(api, '/api/lll/bots/rotate', {'name': w['name']}, boss_tok)[0])
+            assert rotated == 200
+            patched += count
+            survived += call(api, '/api/collections/issues/records?perPage=1', token=w_tok)[0] == 200
+        assert patched > 0, 'control: no racing self-PATCH succeeded'
+        assert (lost, survived) == (0, 0), f'{lost} narrowings lost and {survived} rotated tokens survived over {patched} self-PATCHes'
+        # Review F6: renames, bot creates and other writes share one lock
+        # order (the name lock, then the write transaction), so a mix of them
+        # never waits out the name lock's 5s timeout.
+        _, plain_tok = member_login('plain')
+        stats = {'rename': [], 'bot': [], 'issue': []}
+        bad = []
+        mix_stop = threading.Event()
+
+        def timed(kind, fn):
+            n = 0
+            while not mix_stop.is_set():
+                n += 1
+                started = time.monotonic()
+                code = fn(n)
+                stats[kind].append(time.monotonic() - started)
+                if code != 200:
+                    bad.append((kind, code))
+
+        mix_issue = call(api, '/api/collections/issues/records', {'team': alpha['id'], 'title': 'mix', 'state': 'todo'}, su)[1]
+
+        def mix_bot(n):
+            # Create a bot as its owner, then delete it (superuser only), so
+            # the member listings later in this script stay one page.
+            code, made_bot, _ = call(api, '/api/collections/members/records',
+                                     dict(bot_body, name=f'bot-mix-{n}', email=f'mix-{n}@example.test', owner=boss['id']),
+                                     boss_tok)
+            if code == 200:
+                call(api, f"/api/collections/members/records/{made_bot['id']}", token=su, method='DELETE')
+            return code
+
+        actors = [
+            ('rename', lambda n: call(api, f"/api/collections/members/records/{plain['id']}",
+                                      {'name': f'plain{n % 2}'}, plain_tok, 'PATCH')[0]),
+            ('bot', mix_bot),
+            # The bystander edits one issue, so later listings see no new rows.
+            ('issue', lambda n: call(api, f"/api/collections/issues/records/{mix_issue['id']}",
+                                     {'title': f'mix {n}'}, boss_tok, 'PATCH')[0]),
+        ]
+        mix = [threading.Thread(target=timed, args=a) for a in actors]
+        for th in mix:
+            th.start()
+        time.sleep(6)
+        mix_stop.set()
+        for th in mix:
+            th.join()
+        call(api, f"/api/collections/members/records/{plain['id']}", {'name': 'plain'}, plain_tok, 'PATCH')
+        slowest = {k: round(max(v), 2) for k, v in stats.items()}
+        assert all(stats.values()) and not bad and max(slowest.values()) < 1, \
+            ('writes waited on each other', {k: len(v) for k, v in stats.items()}, slowest, bad[:5])
         out = lll('member', 'access', 'bot-boss', '--all-teams', *admin_args, env=admin_env)
         assert out.returncode != 0 and "lll member access boss" in out.stderr, out.stdout + out.stderr
         # Narrowing the owner narrows the bot at once; the bot record is untouched.

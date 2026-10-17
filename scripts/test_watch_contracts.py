@@ -151,8 +151,12 @@ try:
                      f'{free} update assignee: {me["name"]} -> none'] + [f'{tagged} changed'] * 3, lines
     time.sleep(0.5)
     events = [json.loads(l) for l in open(json_out).read().splitlines()]
-    # The stream carries issue records only - never a claims or comments topic.
     assert {e['topic'] for e in events} == {'issues'}, events
+    for event in events:
+        assert event['key'] == 'WCTR-' + str(event['record']['number']), event
+        assert event['priority_name'] == 'none', event
+        assert event['creator_name'] == me['name'], event
+
     assert [e['action'] for e in events] == ['update'] * 6, events
 finally:
     for process in watchers:
@@ -413,8 +417,8 @@ for text in observed + [
     'Status lines go to stderr, never stdout',
     '10:42:11 ENG-12 changed',
     'That covers labels, project, description and emoji.',
-    'The stream carries issue records only: no comment or claim events.',
-    "and 'lll issue claim --renew' print nothing.",
+    'With --activity, the stream also carries comment and claim events for matching',
+    'makes no write and emits nothing.',
     'Every connect and reconnect checks the token with one read.',
     'watch prints one line naming the fix and exits 1:',
     dead_line.split(': it was')[0] + ': ...',

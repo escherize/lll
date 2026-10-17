@@ -124,16 +124,21 @@ impl IssueFilter {
 }
 
 /// The PocketBase filter expression for `f`; "" when nothing narrows it.
-pub fn filter(f: IssueFilter) -> string {
+pub fn filter(f: IssueFilter) -> string { filter_at(f, "") }
+
+/// Render the same typed criteria through a trusted relation path, e.g.
+/// "issue." for comments and claims. Values are quoted independently;
+/// prefixing rendered text would corrupt quoted titles and operators.
+pub fn filter_at(f: IssueFilter, prefix: string) -> string {
   let mut clauses: Slice<string> = []
-  if let TeamScope.Only(team) = f.scope { clauses = clauses.append(f"team={quote(team.string())}") }
-  if let Some(c) = any_of("state=", f.states.map(|s| s.wire())) { clauses = clauses.append(c) }
+  if let TeamScope.Only(team) = f.scope { clauses = clauses.append(f"{prefix}team={quote(team.string())}") }
+  if let Some(c) = any_of(prefix + "state=", f.states.map(|s| s.wire())) { clauses = clauses.append(c) }
   if let Some(assignee) = f.assignee {
-    clauses = clauses.append(f"assignee={quote(assignee.string())}")
+    clauses = clauses.append(f"{prefix}assignee={quote(assignee.string())}")
   }
-  if let Some(c) = any_of("project=", f.projects.map(|p| p.string())) { clauses = clauses.append(c) }
-  if let Some(c) = any_of("labels.id ?= ", f.labels.map(|l| l.string())) { clauses = clauses.append(c) }
-  if f.search != "" { clauses = clauses.append(f"title ~ {quote(f.search)}") }
+  if let Some(c) = any_of(prefix + "project=", f.projects.map(|p| p.string())) { clauses = clauses.append(c) }
+  if let Some(c) = any_of(prefix + "labels.id ?= ", f.labels.map(|l| l.string())) { clauses = clauses.append(c) }
+  if f.search != "" { clauses = clauses.append(f"{prefix}title ~ {quote(f.search)}") }
   strings.Join(clauses, " && ")
 }
 
