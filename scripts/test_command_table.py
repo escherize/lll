@@ -52,6 +52,7 @@ HINT_ALLOW = {
 # The only places that may read argv or call the parser directly.
 PARSER_ALLOW = {
     'src/commands/scope.lis': 'takes --team off the command line before the settings are built (flags.extract_team)',
+    'src/commands/new.lis': "builds lll up's input from lll new's own parsed flags (never argv), so new runs up's code path (LLL-722)",
 }
 
 
