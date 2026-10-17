@@ -89,6 +89,11 @@ pub fn up_command() -> flags.Command {
 }
 
 fn up(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  up_run(input, None)
+}
+
+/// `lll up`, and `lll new` with its NamedBoard (LLL-722).
+fn up_run(input: flags.CommandInput, named: Option<NamedBoard>) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let scratch = p.given("--scratch")
@@ -146,6 +151,10 @@ fn up(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // fresh local port; the public board port proxies /api/ for teammates.
   let mut db_url = if share_bind != "" {
     f"http://127.0.0.1:{available_port()?}"
+  } else if named.is_some() {
+    // LLL-722: a named board owns its data directory, so it starts its own
+    // API rather than adopting whatever answers at the configured url.
+    f"http://127.0.0.1:{free_port(port_of(cfg.url, 8090))}"
   } else {
     cfg.url
   }
@@ -343,7 +352,7 @@ password in its own data directory's .lll-admin.json."),
   // a fact about that database, not about this checkout - so it is not
   // persisted. Persisting it would put a .lll.toml into whatever directory the
   // scratch board ran in, which is the TASK-143 stray exactly.
-  let throwaway = p.one("--pb-dir") != "" || scratch
+  let throwaway = (p.one("--pb-dir") != "" && named.is_none()) || scratch
   // A demo boot must not stop to ask for a team key: "show me the tool" is the
   // whole request. DEMO unless the caller already chose something.
   let demo = p.given("--demo")
@@ -496,7 +505,11 @@ password in its own data directory's .lll-admin.json."),
   // serves its own API. An adopted API may be older, so the board's discovery
   // then omits the list and clients ask that API's support routes instead.
   let capabilities = if starting { Some(gopb.Capabilities()) } else { None }
-  streamed(serve.run_server(ctx, chosen, refresh, p.given("--admin-ui"), capabilities, agent))
+  let (shared, also) = match named {
+    Some(n) => (share_lines(n.links, chosen, ctx.settings.board_token()), n.also_listen),
+    None => ([], []),
+  }
+  streamed(serve.run_server(ctx, chosen, also, refresh, p.given("--admin-ui"), capabilities, shared.append(agent...)))
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no

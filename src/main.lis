@@ -130,6 +130,9 @@ A team is one tracker on the server: its key (ENG) prefixes every issue id
 (ENG-12), and each repo or directory attaches to one team.
 
 Start here, with no server yet:
+  lll new \"My project\"    start a board for it on this machine and attach this
+                          directory; run it again to reopen it (--share: LAN
+                          and Tailscale links for teammates)
   lll up                  start a server and web board on this machine; keep it
                           running (on this machine it also logs the CLI in)
   lll login --url URL     from another machine, or for a hosted server: log the
@@ -183,6 +186,7 @@ Usage:
                           ready agenda (see 'lll watch --help')
   lll webhook <command>   outbound webhooks: add/list/remove URLs that the
                           server POSTs issue events to (see 'lll webhook --help')
+  lll new \"TITLE\"         a named board in one command (see 'lll new --help')
   lll up [--port 8100]    start the lll server and web board together (see 'lll up --help')
   lll board [-w]          print the web board URL; -w opens it (see 'lll board --help')
   lll board --team KEY    a view-only link to one team's board, no account needed

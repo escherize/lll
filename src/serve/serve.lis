@@ -91,9 +91,13 @@ fn api_proxy(
   Ok(())
 }
 
+/// `also_listen` are more addresses to serve the same board on, besides the
+/// settings' bind: `lll new --share` listens on the LAN and Tailscale
+/// addresses rather than on every interface (LLL-722).
 pub fn run_server(
   ctx: pb.Client,
   port: int,
+  also_listen: Slice<string>,
   refresh: Option<fn() -> Result<string, pb.CliError>>,
   admin_ui: bool,
   capabilities: Option<Slice<string>>,
@@ -185,6 +189,13 @@ pub fn run_server(
     Ok(l) => l,
     Err(e) => return Err(pb.failed(f"server: {e}")),
   }
+  let mut also: Slice<net.Listener> = []
+  for addr in also_listen {
+    match net.Listen("tcp", net.JoinHostPort(addr, strconv.Itoa(port))) {
+      Ok(l) => also = also.append(l),
+      Err(e) => return Err(pb.failed(f"server: {e}")),
+    }
+  }
   let board_url = advertised_board_url(ctx.settings, port)
   fmt.Println(f"board  {board_url}")
   if admin_ui { fmt.Println(f"admin  {board_url}/_/ (enabled by --admin-ui)") }
@@ -197,7 +208,13 @@ pub fn run_server(
   }
   // LLL-676: a loopback board answers only loopback Host names, which
   // refuses DNS-rebinding pages (the API listener checks the same).
-  match http.Serve(listener, gopb.LoopbackHostGuard(bind, mux)) {
+  let handler = gopb.LoopbackHostGuard(bind, mux)
+  for l in also {
+    task {
+      if let Err(e) = http.Serve(l, handler) { fmt.Println(f"server: {e}") }
+    }
+  }
+  match http.Serve(listener, handler) {
     Ok(_) => Ok(()),
     Err(e) => Err(pb.failed(f"server: {e}")),
   }
