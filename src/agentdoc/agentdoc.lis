@@ -1,0 +1,117 @@
+import "go:strings"
+
+// What an agent handed an lll board needs to know: the CLI, the loop, and
+// that every board page has a ?raw Markdown form (LLL-717).
+//
+// ONE source for every door an agent comes through: `lll up`'s "paste this
+// into your agent" lines are brief(), GET /llms.txt and the board's "Copy
+// agent instructions" button are instructions() (which opens with brief()),
+// and the hidden line every page shell carries is hint(). Change the words
+// here and all of them follow. Nothing here ever carries a credential.
+
+/// A team the reader may see, as the instructions list it.
+pub struct Team {
+  pub key: string,
+  pub name: string,
+}
+
+/// The one line every HTML page shell carries, hidden from people and
+/// screen readers alike (LLL-718). Never in ?raw output: an agent reading
+/// Markdown has already found what this line points at.
+pub fn hint() -> string {
+  "Agents: append ?raw to any page URL for Markdown; see /llms.txt; the CLI is lll."
+}
+
+/// The short prompt: which team, where, and the first three moves. `lll up`
+/// prints these lines as its paste-ready agent prompt.
+pub fn brief(team: string, url: string) -> Slice<string> {
+  [
+    f"You're on lll team {team} at {url}.",
+    f"Run `lll attach --key {team}` in your working directory first.",
+    "Run `lll skill get software-factory` and follow it.",
+    "Claim before you edit: `lll issue next --claim`.",
+  ]
+}
+
+/// The full instructions. `url` is the board's own address as the reader
+/// reached it ("" when unknown); `teams` the teams the reader may see;
+/// `team` the team the examples use ("" picks the first); `issue` the issue
+/// key the reader was handed, or "".
+pub fn instructions(
+  url: string,
+  teams: Slice<Team>,
+  team: string,
+  issue: string,
+) -> string {
+  let board = if url == "" { "BOARD_URL" } else { url }
+  let key = if team != "" {
+    team
+  } else {
+    teams.get(0).map_or("KEY", |t| t.key)
+  }
+  let mut lines: Slice<string> = [
+    f"# lll board at {board}",
+    "",
+    "lll is an issue tracker: a CLI and this web board, served by one HTTP server.",
+    "Work it with the `lll` CLI; read any board page over plain HTTP.",
+    "",
+    "## Start here",
+    "",
+  ]
+  lines = lines.append(brief(key, board)...)
+  if issue != "" {
+    lines = lines.append(
+      "",
+      f"## Your issue: {issue}",
+      "",
+      f"{board}/t/{key}/issue/{issue}",
+      "",
+      f"    lll issue view {issue} --raw    # read it fully first",
+      f"    lll issue claim {issue}         # before you edit anything",
+    )
+  }
+  lines = lines.append(
+    "",
+    "## Install the CLI",
+    "",
+    "    brew install escherize/lll/lll",
+    "",
+    "Without Homebrew, download a binary from https://github.com/escherize/lll/releases/latest",
+    "",
+    "## Sign in",
+    "",
+    f"    lll login --url {board} --token -   # paste a member token; the board's /me page shows yours",
+    "",
+    "## Teams on this board",
+    "",
+  )
+  if teams.is_empty() { lines = lines.append("- none visible to this login") }
+  for t in teams {
+    lines = lines.append(f"- {t.key}: {one_line(t.name)}")
+  }
+  lines = lines.append(
+    "",
+    "## The loop",
+    "",
+    "    lll issue next --claim                 # take the next ready, unclaimed issue",
+    "    lll issue view KEY-N --raw             # read it fully before you touch anything",
+    "    lll issue comment KEY-N -b \"what changed and why\"",
+    "    lll issue close KEY-N                  # when the change is on main",
+    "",
+    "## Every page has a Markdown form",
+    "",
+    "Append `?raw` to any board page URL (`&raw` after other parameters) for Markdown instead of HTML:",
+    "",
+    f"    {board}/t/{key}/?raw              the board",
+    f"    {board}/t/{key}/issues?raw        every issue, as a table",
+    f"    {board}/t/{key}/issue/{key}-1?raw one issue, with its comments",
+    "",
+    "Board pages answer only a signed-in browser or a request carrying the board login cookie (`lll_board`); the CLI uses its own token.",
+  )
+  strings.Join(lines, "\n") + "\n"
+}
+
+/// A team name on one line: names are free text.
+fn one_line(s: string) -> string {
+  strings.Join(strings.Fields(s), " ")
+}
