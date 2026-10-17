@@ -28,7 +28,7 @@ fn scoped_viewer_allowlist() {
   for path in ["/t/AAA", "/t/AAA/", "/t/AAA/issues", "/t/AAA/projects", "/t/AAA/docs", "/t/AAA/search",
                "/t/AAA/issue/AAA-3", "/t/AAA/issue/aaa-3", "/t/AAA/doc/index", "/t/aaa/", "/static/app.js",
                "/issue/AAA-3", "/issue/aaa-3", "/t/BBB/", "/t/BBB/issue/BBB-1", "/events", "/attachments/file",
-               "/t/AAA/7", "/t/BBB/7"] {
+               "/t/AAA/7", "/t/BBB/7", "/llms.txt"] {
     assert get(path) == "open"
   }
   for path in ["/t/AAA/7x", "/t/AAA/-7", "/t/AAA/7/x"] {

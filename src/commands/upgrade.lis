@@ -33,8 +33,18 @@ fn install_of(exe: string) -> Install {
   }
 }
 
+/// How the running binary was installed. Resolved first: Homebrew's bin/lll
+/// is a symlink, and os.Executable returns it unresolved on macOS.
+fn running_install() -> Result<Install, error> {
+  let exe = os.Executable()?
+  Ok(install_of(filepath.EvalSymlinks(exe).unwrap_or(exe)))
+}
+
 /// The argv `lll upgrade` runs, if any. Only Homebrew gets one: lll never
-/// replaces or rebuilds its own binary, it names the command instead.
+/// replaces or rebuilds its own binary, it names the command instead. The
+/// daily version probe starts the same argv in the background when the
+/// server is newer (LLL-721, auto_update.lis), so Homebrew is the only
+/// install lll updates by itself, and Homebrew still does the replacing.
 fn upgrade_argv(install: Install) -> Option<Slice<string>> {
   match install {
     Install.Homebrew => Some(["brew", "upgrade", "lll"]),
@@ -109,14 +119,17 @@ running lll processes keep working until they exit.
 
 A server ('lll up') migrates its database on the first start of a new
 version: stop it and back up its data directory before upgrading, so the
-backup is the way back. Upgrade the server and its clients together."
+backup is the way back. Upgrade the server and its clients together.
+
+A Homebrew install also runs 'brew upgrade lll' by itself, in the
+background, when its server is newer, except on a machine that runs the
+server. To switch that off: LLL_AUTO_UPDATE=0, or auto_update = false in
+the config."
 }
 
 fn upgrade(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let p = input.parsed
-  let exe = os.Executable().map_err(|e| f"cannot locate this lll binary: {e}").map_err(pb.failed)?
-  let resolved = filepath.EvalSymlinks(exe).unwrap_or(exe)
-  let install = install_of(resolved)
+  let install = running_install().map_err(|e| f"cannot locate this lll binary: {e}").map_err(pb.failed)?
   let dry_run = p.given("--dry-run")
   // Notes first: Homebrew runs straight after the plan, so advice printed
   // after it could not be followed in time.

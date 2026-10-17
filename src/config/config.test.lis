@@ -703,3 +703,41 @@ fn a_broken_logins_toml_names_itself() {
   let Err(e) = traced_from(root, home) else { panic("expected a parse error") };
   assert e.contains("logins.toml")
 }
+
+// ------------------------------------------------------------- auto_update
+
+/// `auto_update` as settings resolved in `dir` read it. The repo file is
+/// found from the working directory when it is read, so the read happens
+/// there too.
+fn auto_update_in(dir: string, home: string) -> Result<Option<bool>, string> {
+  let Ok(prev_dir) = os.Getwd() else {
+    return Err("reading the working directory")
+  }
+  defer { let _ = os.Chdir(prev_dir) }
+  if let Err(e) = os.Chdir(dir) {
+    return Err(f"entering {dir}: {e}")
+  }
+  Ok(resolve(env_at(home), no_overrides()).auto_update())
+}
+
+// LLL-721: the config files' auto_update layers like every key, a value that
+// is not a boolean switches updates off, and the key does not break the rest
+// of the config.
+#[test]
+fn auto_update_is_read_from_the_config_files() {
+  let rows: Slice<(string, string, Option<bool>)> = [
+    ("", "url = \"http://home:9999\"\n", None),
+    ("", "auto_update = false\n", Some(false)),
+    ("", "auto_update = true\n", Some(true)),
+    ("auto_update = true\n", "auto_update = false\n", Some(true)),
+    ("auto_update = false\n", "auto_update = true\n", Some(false)),
+    ("", "auto_update = \"no\"\n", Some(false)),
+  ]
+  for (repo, home_toml, want) in rows {
+    let assert Ok((root, home)) = fixture(repo, home_toml)
+    assert auto_update_in(root, home) == Ok(want)
+  }
+  let assert Ok((root, home)) = fixture("", "url = \"http://home:9999\"\nauto_update = false\n")
+  let assert Ok(cfg) = load_from(root, home)
+  assert cfg.url == "http://home:9999"
+}

@@ -1473,6 +1473,8 @@ python3 "$REPO_ROOT"/scripts/test_team_refs.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---
 python3 "$REPO_ROOT"/scripts/test_upgrade.py "$LLL_ABS"
+# --- a Homebrew lll older than its server updates itself in the background (LLL-721) ---
+python3 "$REPO_ROOT"/scripts/test_auto_update.py "$LLL_ABS"
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.
 Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')

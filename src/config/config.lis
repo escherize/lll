@@ -14,6 +14,11 @@ pub struct Config {
   pub token: string,
 }
 
+/// The one key `Settings.auto_update` reads. Not a Config field: it is a
+/// boolean, and only the daily version probe reads it.
+#[toml]
+struct AutoUpdateSetting { auto_update: bool }
+
 /// Where each field's winning value came from, None when nothing set it.
 /// Filled in lockstep with the Config it explains and printed by `lll config
 /// list`. The failure it exists for is silent — a repo pointed at the wrong
@@ -103,6 +108,11 @@ pub struct Env {
   /// process.
   pub remint: bool,
   pub remint_member: string,
+  /// LLL_AUTO_UPDATE: "0" (or false, no, off) stops lll updating itself in
+  /// the background; any other value allows it over the config files.
+  pub auto_update: string,
+  /// CI: set by CI systems, where lll never updates itself.
+  pub ci: string,
 }
 
 /// The administrator pair, both halves present.
@@ -272,6 +282,25 @@ impl Settings {
     if b == "" { "127.0.0.1" } else { b }
   }
 
+  /// `auto_update` as the config files set it, the repo's over the
+  /// machine's; None when neither names it (LLL-721). A file that does not
+  /// decode (`auto_update = "no"`) reads as false: a setting written to
+  /// switch updates off must not leave them on because it was misspelt.
+  pub fn auto_update(self) -> Option<bool> {
+    let mut value: Option<bool> = None
+    for (path, _) in config_files(self.env) {
+      let Ok(data) = os.ReadFile(path) else {
+        continue
+      }
+      let mut layer = AutoUpdateSetting { auto_update: false }
+      match toml.Decode(data as string, &layer) {
+        Ok(meta) => if meta.IsDefined("auto_update") { value = Some(layer.auto_update) },
+        Err(_) => value = Some(false),
+      }
+    }
+    value
+  }
+
   /// Path of the machine's config, whether or not it exists.
   pub fn home_path(self) -> Result<string, string> {
     home_path_in(self.env)
@@ -321,6 +350,8 @@ pub fn read_env() -> Env {
     work_host: os.Getenv("LLL_WORK_HOST"),
     remint: os.Getenv("LLL_REMINT") == "1",
     remint_member: os.Getenv("LLL_REMINT_MEMBER"),
+    auto_update: os.Getenv("LLL_AUTO_UPDATE"),
+    ci: os.Getenv("CI"),
   }
 }
 
