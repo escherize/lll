@@ -1,3 +1,4 @@
+import "config"
 import "records"
 
 // LLL-722: `lll new "Title"` derives the team key from the title. Every
@@ -116,4 +117,14 @@ fn each_reachable_address_gets_a_sign_in_link() {
   assert lines.length() == 2
   assert lines[0] == "share  LAN: http://192.168.1.5:8100/?board_token=TOK"
   assert lines[1] == "share  Tailscale: http://box.ts.net:8100/?board_token=TOK"
+}
+
+// LLL-726: a named board's shared boot saves a home login only into an
+// empty slot; another server's login stays.
+#[test]
+fn home_login_free_only_without_another_login() {
+  assert home_login_free(config.Config { .. })
+  assert home_login_free(config.Config { url: "http://127.0.0.1:8090", .. })
+  assert !home_login_free(config.Config { url: "https://lll.example.com", .. })
+  assert !home_login_free(config.Config { url: "http://127.0.0.1:8090", token: "tok", .. })
 }

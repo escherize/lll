@@ -145,15 +145,41 @@ pub struct Settings {
   /// The url the home config names, "" for none: the server its token was
   /// saved for (LLL-688).
   home_url: string,
+  /// Tokens saved for other servers (LLL-726).
+  logins: Logins,
+}
+
+/// Logins saved per server (LLL-726): logins.toml beside the home config,
+/// one `"url" = "token"` line per server. `lll new` saves its board's token
+/// here, so a directory whose .lll.toml names that board's url reaches it
+/// while the home config keeps the user's other login. 0600, like the home
+/// config, and never in .lll.toml, which is committed.
+pub struct Logins {
+  /// Where the file is, "" when the config root is unknown.
+  pub path: string,
+  /// Server url, without a trailing slash, to its token.
+  pub tokens: Map<string, string>,
 }
 
 impl Settings {
   /// The effective configuration and the origin of every field. A home
   /// config token is absent when the effective url is not the one it was
   /// saved with (`withheld`), so nothing that reads it can send it there.
+  ///
+  /// When no layer supplies a token for the effective url, a login saved
+  /// for exactly that url in logins.toml is used (LLL-726). It goes only to
+  /// the server it was saved for, as the home config's token does.
   pub fn traced(self) -> Result<(Config, Sources), string> {
     let (cfg, src) = self.loaded?
-    if withheld_token(cfg, src, self.home_url).is_some() {
+    let held = withheld_token(cfg, src, self.home_url).is_some()
+    if !held && cfg.token != "" { return Ok((cfg, src)) }
+    if let Some(tok) = saved_login(self.logins, cfg.url) {
+      return Ok((
+        Config { token: tok, ..cfg },
+        Sources { token: Some(Source.HomeFile(self.logins.path)), ..src },
+      ))
+    }
+    if held {
       return Ok((Config { token: "", ..cfg }, Sources { token: None, ..src }))
     }
     Ok((cfg, src))
@@ -166,8 +192,10 @@ impl Settings {
   }
 
   /// The home config's token held back from this url, or None (LLL-688).
+  /// None when logins.toml holds a login for that url instead (LLL-726).
   pub fn withheld(self) -> Option<Withheld> {
     let Ok((cfg, src)) = self.loaded else { return None }
+    if saved_login(self.logins, cfg.url).is_some() { return None }
     withheld_token(cfg, src, self.home_url)
   }
 
@@ -249,6 +277,12 @@ impl Settings {
     home_path_in(self.env)
   }
 
+  /// Path of logins.toml beside the machine's config (LLL-726), whether or
+  /// not it exists.
+  pub fn logins_path(self) -> Result<string, string> {
+    Ok(filepath.Join(filepath.Dir(home_path_in(self.env)?), "logins.toml"))
+  }
+
   /// The machine's config alone, without the repo file or the environment.
   /// Login uses the saved API/board pair to detect a server switch reliably.
   pub fn load_home(self) -> Result<Config, string> {
@@ -300,15 +334,56 @@ pub fn no_overrides() -> Overrides {
 /// than shadow: each supplies the keys it names, so a committed repo file can
 /// carry `team` alone and still inherit `url` and `token` from the machine.
 pub fn resolve(env: Env, overrides: Overrides) -> Settings {
-  let loaded = apply_overrides(layered(env), overrides)
   let home_url = home_file(env).map_or("", |path| read_config(path, Config { .. }).map_or("", |c| c.url))
-  Settings { env, overrides, loaded, home_url }
+  // A logins.toml that does not parse fails like a config file that does
+  // not: at the points that ask for configuration, naming the file.
+  let (logins, loaded) = match read_logins(env) {
+    Ok(logins) => (logins, apply_overrides(layered(env), overrides)),
+    Err(e) => (no_logins(), Err(e)),
+  }
+  Settings { env, overrides, loaded, home_url, logins }
+}
+
+/// No saved logins.
+pub fn no_logins() -> Logins {
+  Logins { path: "", tokens: Map.new<string, string>() }
+}
+
+/// logins.toml, or no logins when there is no such file.
+fn read_logins(env: Env) -> Result<Logins, string> {
+  let Ok(root) = config_root(env) else {
+    return Ok(no_logins())
+  }
+  let path = filepath.Join(root, "lll", "logins.toml")
+  let Ok(data) = os.ReadFile(path) else {
+    return Ok(Logins { path, tokens: Map.new<string, string>() })
+  }
+  let mut tokens = Map.new<string, string>()
+  if let Err(e) = toml.Decode(data as string, &tokens) {
+    return Err(f"parsing {path}: {e}\nfix the TOML syntax in {path}, or remove it and rerun 'lll new' for each board")
+  }
+  Ok(Logins { path, tokens })
+}
+
+/// Pure. The token saved in `logins` for `url` (a trailing slash aside), or
+/// None. Nothing else is normalised, as in same_url: a near miss sends no
+/// token rather than one meant for another server.
+pub fn saved_login(logins: Logins, url: string) -> Option<string> {
+  for (server, tok) in logins.tokens {
+    if tok != "" && same_url(server, url) { return Some(tok) }
+  }
+  None
 }
 
 /// Settings from known values, reading no file and no environment: for
 /// tests, which hand a command exactly the configuration it should see.
 pub fn given(cfg: Config, src: Sources, env: Env) -> Settings {
-  Settings { env, overrides: no_overrides(), loaded: Ok((cfg, src)), home_url: "" }
+  Settings { env, overrides: no_overrides(), loaded: Ok((cfg, src)), home_url: "", logins: no_logins() }
+}
+
+/// `given` with saved logins (LLL-726), for tests.
+pub fn given_logins(cfg: Config, src: Sources, env: Env, logins: Logins) -> Settings {
+  Settings { logins, ..given(cfg, src, env) }
 }
 
 /// A home config token not sent to the effective url (LLL-688), and why.

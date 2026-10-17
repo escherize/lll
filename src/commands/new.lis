@@ -6,6 +6,7 @@ import "go:os/exec"
 import "go:path/filepath"
 import "go:strings"
 
+import "config"
 import "flags"
 import "output"
 import "pb"
@@ -160,6 +161,30 @@ fn new_board(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   )
 }
 
+/// Point the CLI in this directory at the board (LLL-726): .lll.toml names
+/// its url and board url, and its member token goes to logins.toml beside
+/// the home config, keyed by that url. The home config's login, whichever
+/// server it is for, is not touched, so other directories keep it. Returns
+/// the banner line.
+fn log_directory_in(
+  settings: config.Settings,
+  url: string,
+  board_url: string,
+  token: string,
+) -> Result<string, pb.CliError> {
+  let repo = set_repo_key(settings, "url", url)?
+  let _ = set_repo_key(settings, "web_url", board_url)?
+  let logins = save_login(settings, url, token)?
+  Ok(f"cli    logged in here: url in {repo}, token in {logins}")
+}
+
+/// Pure. Whether the home config has no login to keep: no token, and no
+/// url naming another machine's server. Only then may a named board's
+/// shared boot save its login there (LLL-726).
+fn home_login_free(home: config.Config) -> bool {
+  home.token == "" && (home.url == "" || is_loopback(home.url))
+}
+
 /// Pure. The team key a title suggests: the initials of three or more words
 /// (at most five), else the first three letters and digits of the title, so
 /// "Payments rewrite" is PAY and "Big new launch plan" is BNLP. ASCII only,
@@ -304,8 +329,14 @@ Usage:
 Starts a board for TITLE and attaches the current directory to it: the team
 key comes from the title (PAY for \"Payments rewrite\"; --key chooses one),
 the data lives in boards/<key> beside the lll config file (normally
-~/.config/lll/boards/pay), and .lll.toml here names the team. Then it is
-'lll up': the same banner, board link, login link and agent prompt.
+~/.config/lll/boards/pay), and .lll.toml here names the team and the board's
+url. Then it is 'lll up': the same banner, board link, login link and agent
+prompt.
+
+The CLI in this directory is logged in to the board: its token goes to
+logins.toml beside the config file (0600), never to .lll.toml. A login the
+home config already holds, for any server, is kept and still used everywhere
+else.
 
 Run it again with the same title to reopen that board. A key that already
 holds a board with another title is refused (exit 4); choose another --key.

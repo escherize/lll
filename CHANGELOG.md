@@ -22,6 +22,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   Tailscale address (never every interface) and prints a sign-in link for
   each, the MagicDNS name included. The README quickstart now leads with it
   (LLL-722).
+- `lll new` works beside a login for another server (LLL-726). It writes the
+  board's `url` and `web_url` to `.lll.toml` and saves the board's token in
+  `logins.toml` beside the home config (0600, one token per server url). A
+  command whose url has no token from another layer uses the login saved for
+  exactly that url. So `lll new X && lll issue create -t hi` makes X-1 on the
+  new board, and other directories keep the home config's login, which is
+  never rewritten. A named board no longer tries the home config's token
+  against its own new API.
 
 ## [1.2.0] - 2026-10-16
 
