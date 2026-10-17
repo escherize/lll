@@ -12,8 +12,14 @@
 
      Rows exist only where a destination does. "My issues" is the board
      pre-filtered to config's `me`, so it needs a configured `me`; the rest
-     arrive with the pages they lead to. */}}
-{{define "rail"}}<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
+     arrive with the pages they lead to.
+
+     LLL-718: the first line of every page shell is for an agent reading the
+     HTML: where the Markdown form and the CLI are. Hidden from sighted users
+     (.agent-hint) and from screen readers (aria-hidden). ?raw never renders
+     a template, so it never carries this line. */}}
+{{define "rail"}}<p class="agent-hint" aria-hidden="true">{{.AgentHint}}</p>
+<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
 <nav id="rail" class="rail" aria-label="Workspace">
 <div class="workspace"><span class="mark">L</span> lll</div>
 <a data-g="b" href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
@@ -33,6 +39,15 @@
 </nav>
 {{template "cmdk" .}}
 {{template "kbd-help" .}}{{end}}
+
+{{/* LLL-719: the topbar's "Copy agent instructions". Its dot is the
+     RailVM, whose AgentText the page handler scoped to this team and issue;
+     pages that set none get no button. The text sits in the page itself, so
+     the copy is synchronous; navigation.js binds [data-copy-from], with a
+     selection fallback for a plain-HTTP board that has no Clipboard API.
+     Outside every morph boundary: the topbar is never broadcast. */}}
+{{define "agent-copy"}}{{if .AgentText}}<button type="button" id="agent-copy" class="btn agent-copy" data-copy-from="agent-text" aria-live="polite" title="Copy instructions for a coding agent: this board, the CLI and the ?raw Markdown form">Copy agent instructions</button>
+<pre id="agent-text" hidden>{{.AgentText}}</pre>{{end}}{{end}}
 
 {{/* LLL-546: "Add a bot", for a read-write member viewer only (.BotOwner).
      The POST mints a bot the viewer owns, with the viewer's own token, and

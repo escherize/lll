@@ -8,6 +8,7 @@ import "go:strconv"
 import "go:strings"
 import "go:time"
 
+import "agentdoc"
 import "config"
 import "flags"
 import "output"
@@ -599,14 +600,9 @@ fn saved_login_reaches(
 fn agent_lines(cli_saved: bool, team: string, url: string) -> Slice<string> {
   let hint = "agent  own identity: lll bot create bot-NAME --env > agent.env"
   if !cli_saved { return [hint] }
-  [
-    "agent  paste this into your agent:",
-    f"  You're on lll team {team} at {url}.",
-    f"  Run `lll attach --key {team}` in your working directory first.",
-    "  Run `lll skill get software-factory` and follow it.",
-    "  Claim before you edit: `lll issue next --claim`.",
-    hint,
-  ]
+  // The words are agentdoc's, shared with the board's /llms.txt (LLL-717).
+  let prompt = agentdoc.brief(team, url).map(|line| "  " + line)
+  ["agent  paste this into your agent:"].append(prompt...).append(hint)
 }
 
 fn loopback_bind(settings: config.Settings) -> bool {
