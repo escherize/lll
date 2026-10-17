@@ -203,7 +203,9 @@ never infer it from the holder. Hidden member names stay hidden.
 is acknowledged on stderr; JSON events go to stdout. Reconnects do not replay
 missed events. Keep the last handled event time and reconcile issue changes
 with `lll issue list --since <time>`. That list misses comment/claim-only
-activity: a complete activity snapshot must also re-read comments and claims.
+activity; `lll activity --since CURSOR` does not. It reads the server's audit
+log of every issue, comment and claim write in order, with who made it, and
+prints the next cursor on stderr (with `--json`, the last item's `seq`).
 Stream silence alone is not proof that the board has not changed.
 
 **Use covered JSON fields.** Issue view and next JSON provide

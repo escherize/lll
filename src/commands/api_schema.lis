@@ -19,6 +19,27 @@ is the rule itself. Auth is the member token the CLI stores
 (lll login, or lll token create), as `Authorization: Bearer <token>`;
 `lll api METHOD PATH` sends it for you.
 
+## audit_events (base)
+
+Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) view @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= team) create (superuser only) update (superuser only) delete (superuser only)
+
+| field | type | required | notes |
+|-------|------|----------|-------|
+| seq | number | yes |  |
+| collection | select | yes | values: issues, comments, claims |
+| record | text | yes |  |
+| action | select | yes | values: create, update, delete |
+| team | text |  |  |
+| issue | text |  |  |
+| number | number |  |  |
+| project | text |  |  |
+| actor | text |  |  |
+| actor_kind | select | yes | values: person, bot, superuser, system |
+| agent | text |  |  |
+| origin_host | text |  |  |
+| changes | json |  |  |
+| created | autodate |  | set on create |
+
 ## claims (base)
 
 Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= issue.team) view @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @request.auth.teams.id ?= issue.team) && (@request.auth.owner = \"\" || @request.auth.owner.scope = \"all\" || @request.auth.owner.teams.id ?= issue.team) create (superuser only) update (superuser only) delete (superuser only)
