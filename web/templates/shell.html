@@ -40,6 +40,15 @@
 {{template "cmdk" .}}
 {{template "kbd-help" .}}{{end}}
 
+{{/* LLL-719: the topbar's "Copy agent instructions". Its dot is the
+     RailVM, whose AgentText the page handler scoped to this team and issue;
+     pages that set none get no button. The text sits in the page itself, so
+     the copy is synchronous; navigation.js binds [data-copy-from], with a
+     selection fallback for a plain-HTTP board that has no Clipboard API.
+     Outside every morph boundary: the topbar is never broadcast. */}}
+{{define "agent-copy"}}{{if .AgentText}}<button type="button" id="agent-copy" class="btn agent-copy" data-copy-from="agent-text" aria-live="polite" title="Copy instructions for a coding agent: this board, the CLI and the ?raw Markdown form">Copy agent instructions</button>
+<pre id="agent-text" hidden>{{.AgentText}}</pre>{{end}}{{end}}
+
 {{/* LLL-546: "Add a bot", for a read-write member viewer only (.BotOwner).
      The POST mints a bot the viewer owns, with the viewer's own token, and
      its response alone patches the agent prompt into #bot-result. Every

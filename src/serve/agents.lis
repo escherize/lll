@@ -29,6 +29,25 @@ fn agent_team(teams: Slice<RailTeamVM>, preferred: string) -> string {
   teams.get(0).map_or("", |t| t.key)
 }
 
+/// The rail with the copy button's text (LLL-719): the same instructions
+/// /llms.txt serves, scoped to the page's team and, on an issue page, its
+/// issue. Built from the rail's own teams, so it names no team the rail
+/// does not already show.
+fn with_agent_text(
+  rail: RailVM,
+  r: Ref<http.Request>,
+  team: string,
+  issue: string,
+) -> RailVM {
+  let text = agentdoc.instructions(
+    agent_origin(r),
+    agent_teams(rail.teams),
+    team,
+    issue,
+  )
+  RailVM { agent_text: text, ..rail }
+}
+
 /// GET /llms.txt. Read as the viewer, like the rail: a scoped login sees its
 /// own teams named and no others.
 fn llms_txt(

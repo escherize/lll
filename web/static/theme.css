@@ -226,6 +226,8 @@ html, body {
   font-weight: 600;
 }
 .btn.primary:hover { background: var(--accent-hover); }
+/* LLL-719: a default button in the topbar; it keeps one line as it wraps. */
+.agent-copy { flex: none; white-space: nowrap; }
 
 input, textarea, select {
   font: inherit;

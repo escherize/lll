@@ -41,6 +41,7 @@ fn shell_rail(ctx: pb.Client, active: string, me: string, team: models.Team) -> 
     scoped: false,
     bot_owner: "",
     agent_hint: agentdoc.hint(),
+    agent_text: "",
   }
 }
 
@@ -381,7 +382,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
     write_raw(w, board_raw(vm))
     return
   }
-  let rail = rail_for(ctx, viewer, active, me, team)
+  let rail = with_agent_text(rail_for(ctx, viewer, active, me, team), r, team.key, "")
   render_html(w, "board-page", PageVM { rail, page: vm })
 }
 
@@ -492,7 +493,8 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   }
   if let Ok(Some(_)) = fetch_favorite(ctx, issue.id) { page.favorited = true }
   page.emojis = emoji_catalog()
-  let vm = PageVM { rail: rail_for(ctx, viewer, "board", me, team), page }
+  let rail = with_agent_text(rail_for(ctx, viewer, "board", me, team), r, own, canonical)
+  let vm = PageVM { rail, page }
   render_html(w, "issue-page", vm)
 }
 

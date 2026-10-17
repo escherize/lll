@@ -1574,6 +1574,15 @@ if command -v playwright-cli >/dev/null 2>&1; then
   assert_contains "$cmdk_browser" 'cmdk palette browser passed' "browser: the cmd+K palette opens, filters, searches and lands"
   "$LIN" issue delete "$CMDK_KEY" --yes >/dev/null
 
+  # LLL-718/719: the hidden agent line, and the copy button on board and issue.
+  COPY_PROBE=$("$LIN" issue create -t "Agent copy probe" --json)
+  COPY_KEY=$(printf '%s' "$COPY_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  copy_js=$(sed -e "s|__WEB__|$WEB|" -e "s|__TEAM__|$LLL_TEAM|" -e "s|__KEY__|$COPY_KEY|" \
+    "$REPO_ROOT"/scripts/browser_agent_copy.js)
+  copy_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$copy_js" 2>&1)
+  assert_contains "$copy_browser" 'agent copy browser passed' "browser: Copy agent instructions copies the scoped text"
+  "$LIN" issue delete "$COPY_KEY" --yes >/dev/null
+
   # LLL-531/532: '?' sheet, '/' search and g-chords, including the keys that must not act.
   shortcuts_js=$(sed -e "s|__WEB__|$WEB|" "$REPO_ROOT"/scripts/browser_shortcuts.js)
   shortcuts_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$shortcuts_js" 2>&1)

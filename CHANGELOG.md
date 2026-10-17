@@ -16,6 +16,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - Every board page's HTML carries one hidden line for agents: append `?raw`
   for Markdown, see `/llms.txt`, the CLI is `lll`. It is invisible and
   `aria-hidden`, and absent from `?raw` output (LLL-718).
+- The board and issue pages have a "Copy agent instructions" button in the
+  topbar. It copies the `/llms.txt` text scoped to the page's team and, on an
+  issue page, to that issue. It also works on a board served over plain HTTP
+  (LLL-719).
 
 ## [1.2.0] - 2026-10-16
 

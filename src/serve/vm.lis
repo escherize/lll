@@ -310,6 +310,9 @@ pub struct RailVM {
   // The hidden line for an agent reading the HTML (LLL-718): agentdoc's
   // hint, the same on every page.
   pub agent_hint: string,
+  // The agent instructions the topbar's copy button copies (LLL-719), scoped
+  // to this page's team and issue. "" on pages without the button.
+  pub agent_text: string,
 }
 
 /// One starred issue in the rail's FAVORITES group.
