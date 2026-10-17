@@ -1,0 +1,50 @@
+import "go:net/http"
+
+import "agentdoc"
+import "pb"
+
+// The board's doors to the agent instructions (LLL-717). The words live in
+// agentdoc, shared with `lll up`'s agent prompt; this file only decides
+// whose teams and which address they name.
+//
+// The text names only what the viewer can already see on the rail (the
+// teams its own read returned) and never a credential, and the route sits
+// behind the same gate as every board page.
+
+/// The viewer's teams, in the shape agentdoc lists them.
+fn agent_teams(teams: Slice<RailTeamVM>) -> Slice<agentdoc.Team> {
+  teams.map(|t| agentdoc.Team { key: t.key, name: t.name })
+}
+
+/// The board's address as this request reached it, or "" when the Host is
+/// not one the text should repeat (request_origin's own rule).
+fn agent_origin(r: Ref<http.Request>) -> string {
+  request_origin(r).unwrap_or("")
+}
+
+/// The team the examples should use: `preferred` when the viewer can see
+/// it, else the first team it can, else "" (agentdoc then says KEY).
+fn agent_team(teams: Slice<RailTeamVM>, preferred: string) -> string {
+  if teams.any(|t| t.key == preferred) { return preferred }
+  teams.get(0).map_or("", |t| t.key)
+}
+
+/// GET /llms.txt. Read as the viewer, like the rail: a scoped login sees its
+/// own teams named and no others.
+fn llms_txt(
+  ctx: pb.Client,
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  boot_key: string,
+) {
+  let teams = rail_teams(ctx, "")
+  let text = agentdoc.instructions(
+    agent_origin(r),
+    agent_teams(teams),
+    agent_team(teams, boot_key),
+    "",
+  )
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+  let _ = w.Write(text.bytes())
+}

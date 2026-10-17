@@ -1,0 +1,88 @@
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:strings"
+
+import "config"
+import "models"
+import "pb"
+import "records"
+
+#[test]
+fn agent_team_prefers_a_team_the_viewer_sees() {
+  let teams = [RailTeamVM { key: "AAA", .. }, RailTeamVM { key: "BBB", .. }]
+  assert agent_team(teams, "ZZZ") == "AAA"
+  assert agent_team(teams, "BBB") == "BBB"
+  assert agent_team([], "BBB") == ""
+}
+
+fn llms_get(router: http.Handler, cookie: string) -> (int, string, string) {
+  let mut req = httptest.NewRequest(
+    "GET",
+    "http://127.0.0.1:8100/llms.txt",
+    None,
+  )
+  if cookie != "" {
+    let mut h = req.Header.unwrap_or(http.Header { .. })
+    h.Set("Cookie", "lll_board=" + cookie)
+  }
+  let mut rec = httptest.NewRecorder()
+  router.ServeHTTP(rec, req)
+  let Some(body) = rec.Body else {
+    panic("missing body")
+  }
+  (rec.Code, rec.Header().Get("Content-Type"), body.String())
+}
+
+// LLL-717: /llms.txt answers behind the board gate, as text/plain, naming
+// the teams the server returns and carrying no credential.
+#[test]
+fn llms_txt_is_gated_plain_text_naming_the_teams() {
+  let mut upstream = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else {
+      panic("missing request URL")
+    }
+    if strings.HasPrefix(u.Path, "/api/collections/teams/records") {
+      let _ = w.Write(
+        "{\"items\":[{\"id\":\"t1\",\"key\":\"AAA\",\"name\":\"Alpha\"},{\"id\":\"t2\",\"key\":\"OLD\",\"name\":\"Old\",\"archived\":true}],\"totalPages\":1}".bytes(),
+      )
+      return
+    }
+    let _ = w.Write("{}".bytes())
+  }))
+  defer upstream.Close()
+  let secret = "board-secret-for-llms-test"
+  let ctx = pb.Client.new(config.given(
+    config.Config {
+      url: upstream.URL,
+      token: "process-token-for-llms-test",
+      team: "AAA",
+      ..,
+    },
+    config.Sources { team: Some(config.Source.RepoFile("/test/.lll.toml")), .. },
+    config.Env { board_token: secret, .. },
+  ))
+  let Ok(router) = board_mux(
+    ctx,
+    models.Team { key: "AAA", .. },
+    router_test_hub(),
+    records.Actor { .. },
+    false,
+    None,
+  ) else {
+    panic("router failed")
+  }
+
+  let (status, _, body) = llms_get(router, "")
+  assert status == 401
+  assert !body.contains("AAA")
+
+  let (status, ctype, body) = llms_get(router, secret)
+  assert status == 200
+  assert ctype == "text/plain; charset=utf-8"
+  assert body.contains("- AAA: Alpha\n")
+  assert !body.contains("OLD")
+  assert body.contains("?raw")
+  assert body.contains(f"lll attach --key AAA")
+  assert !body.contains(secret)
+  assert !body.contains("process-token-for-llms-test")
+}

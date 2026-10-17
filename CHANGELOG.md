@@ -6,6 +6,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- `GET /llms.txt` on the board serves plain-text instructions for an agent:
+  install, sign in, the issue loop, the teams this login can see and the
+  `?raw` Markdown form of every page. It is gated like every board page and
+  carries no credential. The text shares one source with `lll up`'s agent
+  prompt (LLL-717).
+
 ## [1.2.0] - 2026-10-16
 
 ### Upgrading from 1.1
