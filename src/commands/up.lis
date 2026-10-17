@@ -306,15 +306,17 @@ check what is configured with 'lll config list'"),
   // An explicit local share boot owns a new database, so an opaque token from
   // the user's hosted config cannot be allowed to win by the normal
   // conservative "maybe usable" rule.
-  let mut using_token = share_bind == "" && cfg.token != "" &&
-  pb.token_usable(db_url, cfg.token)
+  // LLL-726: a named board's API is its own, so a token saved for another
+  // url (the home config's hosted login) is not tried against it either.
+  let foreign = share_bind != "" || (named.is_some() && !config.same_url(cfg.url, db_url))
+  let mut using_token = !foreign && cfg.token != "" && pb.token_usable(db_url, cfg.token)
   // The in-process board (and its PB client) must talk to the db we chose.
   let mut ctx = ctx.with_url(db_url)
   if !using_token {
     match superuser_token(db_url, email, pass) {
       Ok(tok) => {
         admin_ok = true
-        if cfg.token != "" && share_bind != "" {
+        if cfg.token != "" && foreign {
           fmt.Println(
             "auth   ignoring the inherited token for this new local board",
           )
@@ -329,7 +331,7 @@ check what is configured with 'lll config list'"),
         )
       },
       Err(e) => {
-        if cfg.token == "" || share_bind != "" {
+        if cfg.token == "" || foreign {
           return Err(
             e.with_message(f"could not authenticate as the server administrator at {db_url}: {e.message}
 collection rules now refuse unauthenticated requests, so the boot cannot even
@@ -425,6 +427,14 @@ password in its own data directory's .lll-admin.json."),
         db_url,
       },
     )
+    // LLL-726: a named board logs in this directory below, so another
+    // server's login in the home config is kept without a way to switch.
+    let plan = match (plan, named.is_some()) {
+      (CliLogin.Keep(_), true) => CliLogin.Untouched(
+        "the home config keeps its login for other directories",
+      ),
+      (other, _) => other,
+    }
     cli_saved = match plan {
       CliLogin.Save => saved_login_reaches(db_url, src.token, cfg.url, src.url),
       CliLogin.Already | CliLogin.Untouched(_) | CliLogin.Keep(_) => false,
@@ -441,10 +451,17 @@ password in its own data directory's .lll-admin.json."),
   // The board token, settled once: the link saved below, the browser opened
   // below and the gate run_server builds all read it from these settings.
   let ctx = ctx.with_settings(ctx.settings.with_board_token(serve.resolve_board_token(ctx.settings)))
-  if share_bind != "" {
+  // A named board's shared boot writes only an empty home login slot: the
+  // directory gets its own login below (LLL-726).
+  let home_free = home_login_free(ctx.settings.load_home().map_err(pb.failed)?)
+  if share_bind != "" && (named.is_none() || home_free) {
     let _ = set_home_key(ctx.settings, "url", board_url)?
     let _ = set_home_key(ctx.settings, "team", team)?
     let _ = set_home_key(ctx.settings, "token", ctx.token())?
+  }
+  if named.is_some() {
+    let cli_url = if share_bind != "" { board_url } else { db_url }
+    fmt.Println(log_directory_in(ctx.settings, cli_url, board_url, ctx.token())?)
   }
   // LLL-680: web_url is saved only into a home config whose url names this
   // board's server, or no server. A boot run beside another server's login (a

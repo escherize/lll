@@ -68,7 +68,13 @@ generates a password for `admin@local.dev`. Read it with
 `jq -r .password ~/.config/lll/boards/pay/.lll-admin.json` (`lll up` without
 `--pb-dir` keeps it in `pb/pb_data`). `lll up` logs the CLI in only
 when your home config holds no token and names no other server; it never
-replaces a login.
+replaces a login. `lll new` also logs in the directory it ran in, even when
+you are logged in to another server: `.lll.toml` names the board's url, and
+its token goes to `~/.config/lll/logins.toml` (0600), never to `.lll.toml`.
+Commands in that directory reach the new board; everywhere else keeps your
+other login, and `lll logout` there removes only the board's. A `.lll.toml`
+that already attaches the directory to another team or server is refused
+(exit 4) rather than rewritten.
 
 In a second shell, in the same directory:
 

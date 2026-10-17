@@ -6,6 +6,7 @@ import "go:os/exec"
 import "go:path/filepath"
 import "go:strings"
 
+import "config"
 import "flags"
 import "output"
 import "pb"
@@ -105,6 +106,14 @@ fn new_board(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if let Some(why) = board_refusal(key, dir, stored, title) {
     return Err(pb.fail(pb.ErrorKind.Refused, why))
   }
+  // LLL-726: .lll.toml gets this board's url and team, so one that attaches
+  // the directory elsewhere (a repo's committed file, say) is refused
+  // before anything is written.
+  let attached = ctx.settings.repo_path()
+  let current = config.load_file(attached).map_err(pb.failed)?
+  if let Some(why) = attach_refusal(attached, current, key, title) {
+    return Err(pb.fail(pb.ErrorKind.Refused, why))
+  }
   if stored.is_none() {
     if let Err(e) = os.MkdirAll(dir, 0o700) {
       return Err(pb.failed(f"creating the board directory {dir}: {e}"))
@@ -159,6 +168,49 @@ fn new_board(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     flags.CommandInput { ctx, args, parsed, usage: input.usage },
     Some(named),
   )
+}
+
+/// Point the CLI in this directory at the board (LLL-726): .lll.toml names
+/// its url and board url, and its member token goes to logins.toml beside
+/// the home config, keyed by that url. The home config's login, whichever
+/// server it is for, is not touched, so other directories keep it. Returns
+/// the banner line.
+fn log_directory_in(
+  settings: config.Settings,
+  url: string,
+  board_url: string,
+  token: string,
+) -> Result<string, pb.CliError> {
+  let repo = set_repo_key(settings, "url", url)?
+  let _ = set_repo_key(settings, "web_url", board_url)?
+  let logins = save_login(settings, url, token)?
+  Ok(f"cli    logged in here: url in {repo}, token in {logins}")
+}
+
+/// Pure. Why `lll new` must not write this board into `path`, whose
+/// contents are `file`, or None (LLL-726). A file that names no team and no
+/// url, or this board's team with no url or a url on this machine (the
+/// board's own, from an earlier run), is this board's to write. Anything
+/// else attaches the directory to another team or server, maybe for every
+/// clone of a repo, and is not rewritten.
+fn attach_refusal(path: string, file: config.Config, key: string, title: string) -> Option<string> {
+  let team_ok = file.team == "" || strings.EqualFold(file.team, key)
+  let url_ok = file.url == "" || (is_loopback(file.url) && file.team != "")
+  if team_ok && url_ok { return None }
+  let team = if file.team == "" { "no team" } else { f"team {file.team}" }
+  let url = if file.url == "" { "" } else { f" at {file.url}" }
+  Some(
+    f"{path} attaches this directory to {team}{url}; lll new would rewrite it with team {key} and this board's url
+to start the board in its own directory: mkdir {strings.ToLower(key)} && cd {strings.ToLower(key)} && lll new \"{title}\"
+to move this directory to the new board: remove the team and url lines from {path}, then rerun",
+  )
+}
+
+/// Pure. Whether the home config has no login to keep: no token, and no
+/// url naming another machine's server. Only then may a named board's
+/// shared boot save its login there (LLL-726).
+fn home_login_free(home: config.Config) -> bool {
+  home.token == "" && (home.url == "" || is_loopback(home.url))
 }
 
 /// Pure. The team key a title suggests: the initials of three or more words
@@ -314,8 +366,15 @@ Usage:
 Starts a board for TITLE and attaches the current directory to it: the team
 key comes from the title (PAY for \"Payments rewrite\"; --key chooses one),
 the data lives in boards/<key> beside the lll config file (normally
-~/.config/lll/boards/pay), and .lll.toml here names the team. Then it is
-'lll up': the same banner, board link, login link and agent prompt.
+~/.config/lll/boards/pay), and .lll.toml here names the team and the board's
+url. Then it is 'lll up': the same banner, board link, login link and agent
+prompt.
+
+The CLI in this directory is logged in to the board: its token goes to
+logins.toml beside the config file (0600), never to .lll.toml. A login the
+home config already holds, for any server, is kept and still used everywhere
+else. A .lll.toml that attaches this directory to another team or server is
+refused (exit 4), not rewritten: run lll new in a directory of its own.
 
 Run it again with the same title to reopen that board. A key that already
 holds a board with another title is refused (exit 4); choose another --key.

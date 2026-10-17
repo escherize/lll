@@ -670,14 +670,38 @@ pub fn logout_command() -> flags.Command {
 fn logout(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let path = ctx.settings.home_path().map_err(pb.failed)?
-  let cleared = clear_home_key(ctx.settings, "token")?
   let mut out = output.none()
+  // LLL-726: the login saved in logins.toml for the url this command goes
+  // to is logged out too. When that is the login in use here (a directory
+  // `lll new` attached), the home config's login is another server's and
+  // stays.
+  let (url, from_logins) = match (ctx.settings.traced(), ctx.settings.logins_path()) {
+    (Ok((cfg, src)), Ok(logins)) => (cfg.url, logins_token(src.token, logins)),
+    _ => ("", false),
+  }
+  if url != "" {
+    if let Some(logins) = clear_login(ctx.settings, url)? {
+      out = out.line(f"token for {url} cleared from {logins}")
+    }
+  }
+  if from_logins { return Ok(out) }
+  let cleared = clear_home_key(ctx.settings, "token")?
   if cleared {
     out = out.line(f"token cleared from {path}")
   } else {
     out = out.line(f"no token in {path}; nothing to clear")
   }
   Ok(out)
+}
+
+/// Pure. Whether the token in use came from logins.toml at `logins`
+/// (LLL-726) rather than the home config.
+fn logins_token(source: Option<config.Source>, logins: string) -> bool {
+  match source {
+    Some(config.Source.HomeFile(path)) => path == logins,
+    Some(config.Source.RepoFile(_)) | Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) |
+      Some(config.Source.Default) | None => false,
+  }
 }
 
 /// The interactive email prompt: written straight to the terminal, since the
@@ -774,7 +798,11 @@ Usage:
 
 Removes token = \"...\" from ~/.config/lll/lll.toml (the file 'lll login'
 wrote) and unsets nothing else. An LLL_TOKEN in the environment is not
-affected: unset it in the shell that has it."
+affected: unset it in the shell that has it.
+
+A login 'lll new' saved in ~/.config/lll/logins.toml for the server this
+directory uses is removed too. When that login is the one in use here, the
+home config's token belongs to another server and is kept."
 }
 
 /// Render a literal argument for the recovery command, including display names.

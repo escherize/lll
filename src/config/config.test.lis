@@ -622,6 +622,88 @@ fn a_url_flag_drops_its_trailing_slash() {
   assert cfg.url == "http://127.0.0.1:28611"
 }
 
+// LLL-726: a login saved per server in logins.toml reaches a directory whose
+// .lll.toml names that server, and only that server, while the home config
+// keeps its own login for everywhere else.
+#[test]
+fn a_saved_login_is_used_only_for_its_own_url() {
+  let a = "http://127.0.0.1:8091"
+  let mut tokens = Map.new<string, string>()
+  tokens[a] = "local-tok"
+  let logins = Logins { path: "/h/lll/logins.toml", tokens }
+  assert saved_login(logins, a) == Some("local-tok")
+  assert saved_login(logins, a + "/") == Some("local-tok")
+  assert saved_login(logins, "http://localhost:8091").is_none()
+  assert saved_login(logins, "https://lll.example.com").is_none()
+}
+
+#[test]
+fn a_saved_login_replaces_a_withheld_home_token() {
+  let a = "http://127.0.0.1:8091"
+  let mut tokens = Map.new<string, string>()
+  tokens[a] = "local-tok"
+  let logins = Logins { path: "/h/lll/logins.toml", tokens }
+  let home = Some(Source.HomeFile("/h/lll/lll.toml"))
+  let repo = Some(Source.RepoFile("/r/.lll.toml"))
+  // The repo names the local board: its saved login, from logins.toml.
+  let here = given_logins(
+    Config { url: a, token: "hosted-tok", .. },
+    Sources { url: repo, token: home, .. },
+    Env { .. },
+    logins,
+  )
+  let Ok((cfg, src)) = here.traced() else { panic("expected settings") };
+  assert cfg.token == "local-tok"
+  assert origin(src.token) == "file:/h/lll/logins.toml"
+  assert here.withheld().is_none()
+  // The home config's own server keeps the home token.
+  let elsewhere = given_logins(
+    Config { url: "https://lll.example.com", token: "hosted-tok", .. },
+    Sources { url: home, token: home, .. },
+    Env { .. },
+    logins,
+  )
+  let Ok((cfg, src)) = elsewhere.traced() else { panic("expected settings") };
+  assert cfg.token == "hosted-tok"
+  assert origin(src.token) == "file:/h/lll/lll.toml"
+  // A token LLL_TOKEN supplies beside the url still wins.
+  let env_tok = given_logins(
+    Config { url: a, token: "env-tok", .. },
+    Sources { url: repo, token: Some(Source.Env("LLL_TOKEN")), .. },
+    Env { .. },
+    logins,
+  )
+  let Ok(cfg) = env_tok.config() else { panic("expected settings") };
+  assert cfg.token == "env-tok"
+}
+
+#[test]
+fn resolve_reads_logins_toml_beside_the_home_config() {
+  let a = "http://127.0.0.1:8091"
+  let assert Ok((root, home)) = fixture(
+    f"team = \"PAY\"\nurl = \"{a}\"\n",
+    "url = \"https://lll.example.com\"\ntoken = \"hosted-tok\"\n",
+  )
+  let logins_path = filepath.Join(home, ".config", "lll", "logins.toml")
+  let assert Ok(_) = write(logins_path, f"\"{a}\" = \"local-tok\"\n")
+  let assert Ok((cfg, src)) = traced_from(root, home)
+  assert cfg.url == a
+  assert cfg.token == "local-tok"
+  assert origin(src.token) == "file:" + logins_path
+  // Outside the attached directory the home login is untouched.
+  let assert Ok((cfg, _)) = traced_from(filepath.Dir(home), home)
+  assert cfg.url == "https://lll.example.com"
+  assert cfg.token == "hosted-tok"
+}
+
+#[test]
+fn a_broken_logins_toml_names_itself() {
+  let assert Ok((root, home)) = fixture("team = \"PAY\"\n", "")
+  let assert Ok(_) = write(filepath.Join(home, ".config", "lll", "logins.toml"), "not toml\n")
+  let Err(e) = traced_from(root, home) else { panic("expected a parse error") };
+  assert e.contains("logins.toml")
+}
+
 // ------------------------------------------------------------- auto_update
 
 /// `auto_update` as settings resolved in `dir` read it. The repo file is
