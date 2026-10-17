@@ -25,7 +25,7 @@ struct AuditEvent {
   issue: string,
   number: int,
   project: string,
-  actor: string,
+  actor: models.MemberId,
   actor_kind: string,
   agent: string,
   origin_host: string,
@@ -142,7 +142,7 @@ fn event_actor(e: AuditEvent, names: Map<string, string>) -> string {
   let name = match e.actor_kind {
     "system" => "the server",
     "superuser" => "an administrator",
-    _ => display.member_name(models.MemberId(e.actor), names.get(e.actor).unwrap_or(""), "unknown"),
+    _ => display.member_name(e.actor, names.get(e.actor.string()).unwrap_or(""), "unknown"),
   }
   display.byline(name, e.agent)
 }
