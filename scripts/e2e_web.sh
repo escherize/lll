@@ -1976,6 +1976,33 @@ assert_not_contains "$raw_settings" "No Issues Here" "identity raw does not carr
 raw_members=$(wcurl -sf "$WEB/settings/members?raw") || fail "settings members ?raw did not serve"
 assert_contains "$raw_members" "No Issues Here" "settings members raw lists the members"
 
+# LLL-720: Accept preferring text/markdown is a second way into the ?raw
+# branch - same handler, same body, same auth, same no-store. Bodies carry
+# relative times, so a mismatch is refetched once before it counts.
+for path in "/" "/issues?state=todo" "/issue/$raw_todo" "/t/ENG/doc/board-render-decision" "/t/ENG/docs"; do
+  sep='?'; case "$path" in *\?*) sep='&' ;; esac
+  for _ in 1 2; do
+    want=$(wcurl -sf "$WEB$path${sep}raw") || fail "$path ?raw did not serve"
+    got=$(wcurl -sf -H 'Accept: text/markdown' "$WEB$path") || fail "$path Accept: text/markdown did not serve"
+    [ "$got" = "$want" ] && break
+  done
+  [ "$got" = "$want" ] || fail "Accept: text/markdown on $path is not the ?raw body"
+done
+md_head=$(wcurl -s -o /dev/null -D - -H 'Accept: text/markdown, */*;q=0.1' "$WEB/")
+assert_contains "$md_head" "text/markdown" "Accept: text/markdown answers as text/markdown"
+assert_contains "$md_head" "no-store" "the negotiated raw form is no-store like ?raw"
+assert_contains "$md_head" "Vary: Accept" "the negotiated raw form says it varies on Accept"
+browser_accept='text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+html_head=$(wcurl -s -o /dev/null -D - -H "Accept: $browser_accept" "$WEB/")
+assert_contains "$html_head" "text/html" "a browser's Accept still gets HTML"
+assert_contains "$html_head" "Vary: Accept" "the HTML the choice was made for varies on Accept too"
+assert_contains "$(wcurl -sf -H 'Accept: text/markdown, text/html' "$WEB/")" "<html" \
+  "a tie between markdown and html goes to HTML"
+# Auth is the ?raw route's own: without the board cookie both answer alike.
+anon_raw=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/?raw")
+anon_md=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/markdown' "$WEB/")
+[ "$anon_md" = "$anon_raw" ] && [ "$anon_md" = "401" ] || fail "unauthenticated Accept: text/markdown ($anon_md) differs from ?raw ($anon_raw)"
+
 # --- /settings: server-side, shared, CLI-only things (task-83) ---
 # The id of the row a section rendered for a named record, so the assertions
 # below can edit and delete the record the page itself is showing.
