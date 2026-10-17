@@ -19,6 +19,7 @@
     <header class="topbar">
       <div class="crumbs"><a href="{{.Rail.BoardBase}}">Board</a><span class="sep">›</span><span class="here">{{.Page.Key}}</span></div>
       <div class="spacer"></div>
+      {{template "agent-copy" .Rail}}
       <!-- The star sits in the topbar, OUTSIDE #issue-detail, so $fav is
            never wiped by an issue morph. It posts the state it just moved to
            rather than "toggle", so the button and the server cannot disagree.

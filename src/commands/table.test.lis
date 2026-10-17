@@ -67,7 +67,7 @@ fn an_issue_alias_or_key_as_the_command_names_the_issue_verb() {
 #[test]
 fn an_issue_synonym_as_the_command_names_the_issue_form() {
   assert refusal(["lll", "send", "FLEET-4"]).contains("--state in-review")
-  assert refusal(["lll", "note", "FLEET-4"]).contains("lll issue comment KEY-123")
+  assert refusal(["lll", "note", "FLEET-4"]).contains("lll issue comment FLEET-4")
   assert refusal(["lll", "move", "FLEET-4"]).contains("--state in-review")
 }
 
@@ -112,7 +112,7 @@ fn a_key_where_the_verb_goes_names_the_verb_first_form() {
 /// 'lll issue comment list KEY': the sub-verbs are edit and delete.
 #[test]
 fn a_comment_sub_verb_guess_names_the_form_that_does_it() {
-  assert refusal(["lll", "issue", "comment", "list", "FLEET-4"]).contains("'lll issue comment KEY-123' lists the comments, numbered; the sub-verbs are edit and delete")
+  assert refusal(["lll", "issue", "comment", "list", "FLEET-4"]).contains("'lll issue comment FLEET-4' lists the comments, numbered; the sub-verbs are edit and delete")
   assert refusal(["lll", "issue", "comment", "add", "FLEET-4"]).contains("adds one")
   assert runs(["lll", "issue", "comment", "FLEET-4", "hello"])
   assert runs(["lll", "issue", "comment", "edit", "FLEET-4", "1", "-b", "x"])
@@ -289,7 +289,7 @@ fn a_key_first_command_names_the_meant_verb() {
 #[test]
 fn state_guesses_name_update_state() {
   for word in ["set", "mark", "send-review", "to-review", "review"] {
-    assert refusal(["lll", "issue", word, "FLEET-4"]).contains("'lll issue update KEY-123 --state in-review'")
+    assert refusal(["lll", "issue", word, "FLEET-4"]).contains("'lll issue update FLEET-4 --state in-review'")
   }
   assert runs(["lll", "issue", "comments", "FLEET-4"])
 }
@@ -339,7 +339,7 @@ fn a_flag_after_a_noun_is_an_unknown_flag() {
 /// A review word with a slash keeps the review hint, as 1.0's contains test did.
 #[test]
 fn a_review_word_with_a_slash_names_in_review() {
-  assert refusal(["lll", "issue", "send/review", "FLEET-4"]).contains("'lll issue update KEY-123 --state in-review'")
+  assert refusal(["lll", "issue", "send/review", "FLEET-4"]).contains("'lll issue update FLEET-4 --state in-review'")
   assert refusal(["lll", "send/review", "FLEET-4"]).contains("--state in-review")
 }
 
@@ -349,4 +349,41 @@ fn a_review_word_with_a_slash_names_in_review() {
 fn an_exclusive_pair_is_not_a_stdin_conflict() {
   assert runs(["lll", "login", "--password", "-", "--token", "-"])
   assert refusal(["lll", "login", "--token", "-", "--admin-password", "-"]).starts_with("only one of --token and --admin-password can read stdin")
+}
+
+/// LLL-695: a hint echoes the key the user typed, not a KEY-123
+/// placeholder, wherever the guess came from.
+#[test]
+fn a_guess_hint_echoes_the_typed_key() {
+  assert refusal(["lll", "issue", "assign", "DEMO-4"]).contains("'lll issue claim DEMO-4'; assign someone else with 'lll issue update DEMO-4 --assignee NAME'")
+  assert refusal(["lll", "issue", "depends", "DEMO-4"]).contains("'lll issue block DEMO-4 BLOCKER' records that DEMO-4 waits on BLOCKER")
+  assert refusal(["lll", "issue", "review", "DEMO-4"]).contains("'lll issue update DEMO-4 --state in-review'")
+  assert refusal(["lll", "issue", "priority", "DEMO-4"]).contains("'lll issue update DEMO-4 --priority <name>'")
+  assert refusal(["lll", "issue", "comment", "list", "DEMO-4"]).contains("'lll issue comment DEMO-4' lists the comments")
+  assert refusal(["lll", "send", "DEMO-4"]).contains("'lll issue start DEMO-4' sets in-progress")
+  // No key typed, or a word that is no key: the placeholder stays.
+  assert refusal(["lll", "issue", "assign"]).contains("'lll issue claim KEY-123'")
+  assert refusal(["lll", "issue", "assign", "bob"]).contains("'lll issue claim KEY-123'")
+}
+
+/// LLL-695: 'lll comment add KEY' names the runnable form, key and body
+/// included; a real sub-verb keeps its place.
+#[test]
+fn a_misplaced_comment_add_names_key_and_text() {
+  assert refusal(["lll", "comment", "add", "DEMO-4"]).contains("it is an issue verb: 'lll issue comment DEMO-4 \"text\"'")
+  assert refusal(["lll", "comment", "add", "DEMO-4", "hi"]).contains("'lll issue comment DEMO-4 \"text\"'")
+  assert refusal(["lll", "comment", "edit", "DEMO-4", "2"]).contains("'lll issue comment edit DEMO-4 ...' (see 'lll issue comment edit -h')")
+  assert refusal(["lll", "comment", "frob", "DEMO-4"]).contains("'lll issue comment ...'")
+}
+
+/// LLL-702: a verb's example is the last thing its help prints, under
+/// Example:, whether the page is generated or hand-written.
+#[test]
+fn a_verb_example_ends_its_help() {
+  assert help_page(["lll", "issue", "claim", "--help"]).ends_with("\n\nExample:\n  lll issue claim DEMO-4 --agent worker-1")
+  assert help_page(["lll", "issue", "close", "-h"]).ends_with("\n\nExample:\n  lll issue close DEMO-3")
+  assert help_page(["lll", "search", "--help"]).ends_with("\n\nExample:\n  lll search \"login redirect\" --issues")
+  assert help_page(["lll", "bot", "--help"]).ends_with("\n\nExample:\n  lll bot create bot-myrepo")
+  assert help_page(["lll", "issue", "update", "--help"]).contains("'lll issue block KEY-123 BLOCKER' records one")
+  assert !help_page(["lll", "issue", "view", "--help"]).contains("Example:")
 }

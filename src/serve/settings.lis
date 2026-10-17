@@ -55,7 +55,7 @@ fn settings_page(
       return
     },
   }
-  if wants_raw(r) {
+  if wants_raw(w, r) {
     write_raw(w, settings_raw(vm))
     return
   }

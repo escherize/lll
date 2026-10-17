@@ -384,7 +384,7 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if released == "" {
     if let Some(to) = state {
       if models.move_effect(issue.state(), to, hold, keep_claim) != models.ClaimEffect.Untouched {
-        released = finish_note(hold, keep_claim, fetch_claim(ctx, issue.id)?, me, agent)
+        released = finish_note(hold, held_before, keep_claim, fetch_claim(ctx, issue.id)?, me, agent)
       }
     }
   }
@@ -401,11 +401,17 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
 }
 
 /// The success line's word on what a finishing move did to the claim:
-/// `before` is the hold read before the write, `after` the claim read back.
-fn finish_note(before: models.Hold, keep_claim: bool, after: Option<models.Claim>, me: Option<models.MemberId>, agent: string) -> string {
+/// `before` is the hold read before the write (`held` its claim), `after`
+/// the claim read back. A release is worded as `issue close` words it
+/// (LLL-695), naming the holder.
+fn finish_note(before: models.Hold, held: Option<models.Claim>, keep_claim: bool, after: Option<models.Claim>, me: Option<models.MemberId>, agent: string) -> string {
   let mine_before = before == models.Hold.Caller || before == models.Hold.OtherSession
   let Some(h) = after else {
-    return if mine_before { "; released your claim (assignee kept)" } else { "" }
+    // A hold that was the caller's was read before the write, so it is there.
+    let Some(c) = held else { return "" }
+    if !mine_before { return "" }
+    let holder = display.byline(display.member_name(c.member, c.expand.member.name, "an unknown member"), c.agent)
+    return f"; released {holder}'s claim; assignee unchanged"
   }
   if keep_claim && mine_before && models.hold_of(Some(h), me, agent) == models.Hold.Caller {
     return "; kept your claim"

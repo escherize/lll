@@ -298,7 +298,7 @@ fn issue_next_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--claim",
-      help: "atomically claim the chosen issue before printing it; if another\nmember wins the race, exit non-zero and print no key",
+      help: "atomically claim the chosen issue before printing it; if another\nmember wins the race, exit non-zero and print no key. With nothing\nnew to offer, hands back your own held ready claim (same --agent\nlabel, or unlabelled) instead of exiting 5",
       ..,
     },
     flags.Flag {
@@ -323,7 +323,9 @@ fn issue_next_page() -> string {
 
 stdout: the key (or, with --json, one JSON object) and nothing else.
 stderr: notices. Exit 5 when nothing can be offered: no ready issue, or
-every ready one assigned or claimed.
+every ready one assigned or claimed. With --claim, a ready issue you
+already hold (same agent label, or an unlabelled hold) is printed with
+exit 0 before exit 5, and stderr says 'Resuming KEY'.
 Capture stdout only: key=$(lll issue next --claim)"
 }
 
@@ -357,13 +359,26 @@ fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // offered here that 'claim' then refuses is a lie to the loop.
   let team_claims = claims.for_team(ctx, scope)?
   let held = team_claims.map(|c| c.issue)
-  let ranked = rank_agenda(candidates, unblocks).filter(|i| !held.contains(i.id))
+  let ordered = rank_agenda(candidates, unblocks)
+  let ranked = ordered.filter(|i| !held.contains(i.id))
   let agenda = ranked.filter(|i| i.assignee == "")
-  if agenda.is_empty() {
-    let idle = nothing_to_do(matched, candidates, ranked, team_claims, records.token_member(ctx.token()))
+  let me = records.token_member(ctx.token())
+  // A loop that crashed after claiming must get its own claim back, or it
+  // exits 5 with its work unfinished (LLL-693). Only once nothing new is
+  // offerable: unlabelled sessions sharing a token cannot be told apart.
+  let resumed = if agenda.is_empty() && p.given("--claim") {
+    resumable_claim(ordered, team_claims, me, agent)
+  } else {
+    None
+  }
+  if agenda.is_empty() && resumed.is_none() {
+    let idle = nothing_to_do(matched, candidates, ranked, team_claims, me)
     return Err(pb.fail(pb.ErrorKind.NothingToDo, nothing_to_do_message(idle)))
   }
-  let best = agenda[0]
+  let best = match resumed {
+    Some(own) => own,
+    None => agenda[0],
+  }
   let key = f"{best.expand.team.key}-{best.number}"
   let mut out = output.none()
   if p.given("--claim") {
@@ -380,7 +395,11 @@ fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       } else { e }
     })?
     // --json carries the claim, so the renderer drops this notice under it.
-    out = out.notice(f"Claimed {key} for {result.member_name}")
+    out = if resumed.is_some() && result.already_owned {
+      out.notice(f"Resuming {key}: already claimed by {display.byline(result.member_name, result.agent)} since {display.relative(result.created)}")
+    } else {
+      out.notice(f"Claimed {key} for {result.member_name}")
+    }
   }
   if p.given("--json") {
     // One packet replaces next-then-view: the 'lll issue view --json' object,
@@ -401,6 +420,23 @@ fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     )?)))
   }
   Ok(out.line(key))
+}
+
+/// The caller's own held ready issue that `issue next --claim` hands back
+/// (LLL-693), first in agenda order. Own means the token's member under the
+/// same agent label, or an unlabelled hold. Stricter than models.hold_of: an
+/// unlabelled caller is not handed a labelled hold, since that label names
+/// a sibling session that said who it is.
+fn resumable_claim(
+  ordered: Slice<models.Issue>,
+  holds: Slice<models.Claim>,
+  me: Option<models.MemberId>,
+  agent: string,
+) -> Option<models.Issue> {
+  let mine = holds
+    .filter(|c| me == Some(c.member) && (c.agent == "" || c.agent == agent))
+    .map(|c| c.issue)
+  ordered.find(|i| mine.contains(i.id))
 }
 
 /// Why `issue next` offers nothing (LLL-685). Four 1.0 fleet agents read
