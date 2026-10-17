@@ -117,3 +117,13 @@ fn each_reachable_address_gets_a_sign_in_link() {
   assert lines[0] == "share  LAN: http://192.168.1.5:8100/?board_token=TOK"
   assert lines[1] == "share  Tailscale: http://box.ts.net:8100/?board_token=TOK"
 }
+
+// A stopped Tailscale still prints its IP; listening on it would fail the
+// boot, so the IP counts only while an interface holds it.
+#[test]
+fn a_tailscale_ip_counts_only_while_an_interface_holds_it() {
+  let up = ["127.0.0.1/8", "192.168.68.82/22", "100.89.101.60/32"]
+  assert holds_address(up, "100.89.101.60")
+  assert !holds_address(["127.0.0.1/8", "192.168.68.82/22"], "100.89.101.60")
+  assert !holds_address(up, "100.89.101.6")
+}

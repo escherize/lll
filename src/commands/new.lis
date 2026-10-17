@@ -118,8 +118,9 @@ fn new_board(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let mut args = ["--pb-dir", dir]
   let mut named = NamedBoard { also_listen: [], links: [] }
   if p.given("--share") {
-    let tailnet = tailscale_addresses()
-    let lan = lan_ip(interface_cidrs())
+    let cidrs = interface_cidrs()
+    let tailnet = tailscale_addresses(cidrs)
+    let lan = lan_ip(cidrs)
     let Some(primary) = lan.or_else(|| tailnet.ip) else {
       return Err(pb.failed(
         "--share found no LAN or Tailscale address on this machine; connect to a network, or omit --share",
@@ -233,6 +234,14 @@ fn lan_ip(cidrs: Slice<string>) -> Option<string> {
   None
 }
 
+/// Pure. Whether one of `cidrs` is the address `ip`.
+fn holds_address(cidrs: Slice<string>, ip: string) -> bool {
+  for c in cidrs {
+    if strings.SplitN(c, "/", 2)[0] == ip { return true }
+  }
+  false
+}
+
 struct Tailnet { ip: Option<string>, dns_name: Option<string> }
 
 #[json]
@@ -249,8 +258,9 @@ struct TailscaleNode {
 
 /// This machine's Tailscale IPv4 address and MagicDNS name, from the
 /// `tailscale` CLI (on PATH, or inside the macOS app). Nothing when it is
-/// absent or not connected.
-fn tailscale_addresses() -> Tailnet {
+/// absent or not connected: a stopped Tailscale still prints its IP, so the
+/// IP counts only while one of this machine's interfaces (`cidrs`) holds it.
+fn tailscale_addresses(cidrs: Slice<string>) -> Tailnet {
   let none = Tailnet { ip: None, dns_name: None }
   let app = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
   let bin = match exec.LookPath("tailscale") {
@@ -265,7 +275,7 @@ fn tailscale_addresses() -> Tailnet {
     return none
   }
   let ip = strings.TrimSpace(strings.SplitN(out as string, "\n", 2)[0])
-  if !strings.Contains(ip, ".") { return none }
+  if !strings.Contains(ip, ".") || !holds_address(cidrs, ip) { return none }
   let dns_name = match exec.Command(bin, "status", "--json").Output() {
     Ok(status) => magic_dns_name(status),
     Err(_) => None,
