@@ -14,6 +14,18 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   The command's output and exit code do not change. Switch it off with
   `LLL_AUTO_UPDATE=0` or `auto_update = false`. It is off under `CI` and on
   a machine that runs the server. Other installs keep the warning.
+- `GET /llms.txt` on the board serves plain-text instructions for an agent:
+  install, sign in, the issue loop, the teams this login can see and the
+  `?raw` Markdown form of every page. It is gated like every board page and
+  carries no credential. The text shares one source with `lll up`'s agent
+  prompt (LLL-717).
+- Every board page's HTML carries one hidden line for agents: append `?raw`
+  for Markdown, see `/llms.txt`, the CLI is `lll`. It is invisible and
+  `aria-hidden`, and absent from `?raw` output (LLL-718).
+- The board and issue pages have a "Copy agent instructions" button in the
+  topbar. It copies the `/llms.txt` text scoped to the page's team and, on an
+  issue page, to that issue. It also works on a board served over plain HTTP
+  (LLL-719).
 - Board pages answer `Accept: text/markdown` with their `?raw` Markdown form
   (LLL-720). Markdown wins only when the header names `text/markdown` with a
   higher q than `text/html` gets (from `text/html`, `text/*` or `*/*`); a tie
