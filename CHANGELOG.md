@@ -6,6 +6,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- A Homebrew install updates itself (LLL-721). When the daily version check
+  finds the server newer, lll starts `brew upgrade lll` in the background,
+  logs it to `auto-update.log` beside the config and prints one stderr line.
+  The command's output and exit code do not change. Switch it off with
+  `LLL_AUTO_UPDATE=0` or `auto_update = false`. It is off under `CI` and on
+  a machine that runs the server. Other installs keep the warning.
+
 ## [1.2.0] - 2026-10-16
 
 ### Upgrading from 1.1

@@ -1,7 +1,9 @@
 # Predictable client and server upgrades
 
 The CLI and the server are separate binaries. A version-skew warning is
-advice, not a compatibility handshake or an automatic upgrade. The covered
+advice, not a compatibility handshake. A Homebrew client may update itself
+when its server is newer ([auto-update](cli-contract.md#version-skew-and-auto-update));
+a server never does. The covered
 1.x CLI spellings, exit codes and JSON fields are in [the contract](cli-contract.md).
 A stable CLI contract does not promise that an older server implements every
 new capability. Consumers should ignore additional fields and event topics.

@@ -1,0 +1,120 @@
+import "go:os"
+import "go:path/filepath"
+import "go:strings"
+import "go:time"
+
+import "config"
+
+const BREW_EXE = "/opt/homebrew/Cellar/lll/0.6.1/bin/lll"
+
+// LLL-721: CI always wins, then LLL_AUTO_UPDATE, then the config files, and
+// with none of them set lll updates itself.
+#[test]
+fn auto_update_is_on_unless_ci_the_environment_or_the_config_says_no() {
+  let rows: Slice<(config.Env, Option<bool>, bool)> = [
+    (config.Env { .. }, None, true),
+    (config.Env { .. }, Some(false), false),
+    (config.Env { .. }, Some(true), true),
+    (config.Env { auto_update: "0", .. }, None, false),
+    (config.Env { auto_update: "false", .. }, Some(true), false),
+    (config.Env { auto_update: "OFF", .. }, None, false),
+    (config.Env { auto_update: "1", .. }, Some(false), true),
+    (config.Env { ci: "true", .. }, None, false),
+    (config.Env { ci: "1", auto_update: "1", .. }, Some(true), false),
+    (config.Env { ci: "false", .. }, None, true),
+  ]
+  for (env, configured, want) in rows {
+    assert auto_update_enabled(env, configured) == want
+  }
+}
+
+// Only Homebrew has an argv to start, and only when enabled and no server
+// runs here. Every other install keeps the plain warning.
+#[test]
+fn only_an_enabled_homebrew_install_without_a_server_updates() {
+  let brew = install_of(BREW_EXE)
+  let none = || false
+  let serving = || true
+  assert auto_update_argv(true, brew, none).map(|a| strings.Join(a, " ")) ==
+  Some("brew upgrade lll")
+  assert auto_update_argv(false, brew, none).is_none()
+  assert auto_update_argv(true, brew, serving).is_none()
+  assert auto_update_argv(
+    true,
+    install_of("/src/lll/target/.lisette/bin/lll"),
+    none,
+  ).is_none()
+  assert auto_update_argv(true, install_of("/Users/me/bin/lll"), none).is_none()
+}
+
+#[test]
+fn the_background_line_names_both_versions_the_log_and_the_opt_out() {
+  assert auto_update_line("0.6.1", "0.7.0", "/h/.config/lll/auto-update.log") ==
+  "lll: updating 0.6.1 -> 0.7.0 in the background (log: /h/.config/lll/auto-update.log). Disable: LLL_AUTO_UPDATE=0"
+}
+
+/// A stand-in for PATH and symlink resolution: Homebrew's bin link and a
+/// bare `lll` resolve into the Cellar, a checkout build to itself, and a
+/// relative path to nothing.
+fn resolve_fixture(argv0: string) -> Option<string> {
+  if argv0 == "/opt/homebrew/bin/lll" || argv0 == "lll" {
+    return Some(BREW_EXE)
+  }
+  if argv0 == "/src/lll/target/.lisette/bin/lll" { return Some(argv0) }
+  None
+}
+
+// LLL-655: a running `lll up` from Homebrew is a server the upgrade would
+// replace; one from a checkout is not; one that cannot be placed counts.
+#[test]
+fn a_homebrew_lll_up_in_the_process_list_is_a_server_here() {
+  let quiet = [
+    "",
+    "/sbin/launchd",
+    "/opt/homebrew/bin/lll issue list",
+    "/opt/homebrew/bin/lll watch --json",
+    "/src/lll/target/.lisette/bin/lll up --scratch",
+  ]
+  assert !homebrew_server_running(quiet, resolve_fixture)
+  for line in [
+    "/opt/homebrew/bin/lll up",
+    "lll --team ENG up --no-open",
+    "target/.lisette/bin/lll up",
+  ] {
+    assert homebrew_server_running(quiet.append(line), resolve_fixture)
+  }
+}
+
+#[test]
+fn a_board_login_url_beside_the_config_means_a_server_ran_here() {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-auto-update-serves")
+  defer {
+    let _ = os.RemoveAll(dir)
+  }
+  let assert Ok(_) = os.WriteFile(
+    filepath.Join(dir, "board-login-url"),
+    "http://127.0.0.1:8100/\n".bytes(),
+    0o600,
+  )
+  assert serves_here(dir)
+}
+
+// Never two upgrades at once: the lock is exclusive until it is removed or
+// has gone stale.
+#[test]
+fn the_lock_admits_one_upgrade_and_takes_over_a_stale_one() {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-auto-update-lock")
+  defer {
+    let _ = os.RemoveAll(dir)
+  }
+  let lock = filepath.Join(dir, "auto-update.lock")
+  let now = time.Now()
+  assert take_lock(lock, now, time.Hour)
+  assert !take_lock(lock, now, time.Hour)
+  let assert Ok(_) = os.Remove(lock)
+  assert take_lock(lock, now, time.Hour)
+  let old = now.Add(-2 * time.Hour)
+  let assert Ok(_) = os.Chtimes(lock, old, old)
+  assert take_lock(lock, now, time.Hour)
+  assert !take_lock(lock, now, time.Hour)
+}

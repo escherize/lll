@@ -112,6 +112,21 @@ its data directory (`pb/pb_data`, or your `--pb-dir`). The new version
 migrates the database on first start; the backup is the only way back.
 Upgrade the server first, then its clients.
 
+A Homebrew install updates itself. Once a day per server, lll checks the
+server's version. When the server is newer, lll starts `brew upgrade lll` in
+the background, prints one line on stderr and finishes your command
+unchanged:
+
+    lll: updating 1.2.0 -> 1.3.0 in the background (log: ~/.config/lll/auto-update.log). Disable: LLL_AUTO_UPDATE=0
+
+To switch this off, set `LLL_AUTO_UPDATE=0` or put `auto_update = false` in
+`~/.config/lll/lll.toml`. It is off when `CI` is set. It is also off on a
+machine that runs the server: where `lll up` has run (it leaves
+`board-login-url` beside the config) or where a Homebrew `lll up` is running.
+There, and on every install that is not Homebrew, lll prints the warning
+`... Upgrade: lll upgrade` instead. A machine that starts `lll up` with
+another config directory should set `auto_update = false`.
+
 From 1.0, the surface in [docs/cli-contract.md](docs/cli-contract.md) follows
 SemVer. [docs/upgrading-to-1.0.md](docs/upgrading-to-1.0.md) lists every
 0.9 -> 1.0 change a script can observe; [CHANGELOG.md](CHANGELOG.md) has the
@@ -221,6 +236,7 @@ Client settings:
 | `LLL_SORT` | `sort` | default sort: `created`, `updated`, `priority`, `number`, `title`; `-` descends |
 | `LLL_WEB_URL` | `web_url` | board base URL for browser links |
 | `LLL_TOKEN` | `token` | auth token; a secret, never in a repo's `.lll.toml` |
+| `LLL_AUTO_UPDATE` | `auto_update` | `0` / `false` stops a Homebrew install updating itself; see [Upgrade](#upgrade) |
 
 `lll board` never puts the board token into a link to a repo file's
 `web_url`.
