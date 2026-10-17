@@ -20,6 +20,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   topbar. It copies the `/llms.txt` text scoped to the page's team and, on an
   issue page, to that issue. It also works on a board served over plain HTTP
   (LLL-719).
+- Board pages answer `Accept: text/markdown` with their `?raw` Markdown form
+  (LLL-720). Markdown wins only when the header names `text/markdown` with a
+  higher q than `text/html` gets (from `text/html`, `text/*` or `*/*`); a tie
+  and every browser get HTML. Same handler, auth and `no-store` as `?raw`, and
+  these routes now send `Vary: Accept`.
 
 ## [1.2.0] - 2026-10-16
 

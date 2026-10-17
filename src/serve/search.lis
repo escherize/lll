@@ -49,7 +49,7 @@ fn search_page(
   let page = SearchVM { team_key: team.key, q, results }
   // ?raw beats ?fragment: a raw fetch is a one-shot answer, not a datastar
   // event, so it short-circuits before the fragment branch.
-  if wants_raw(r) {
+  if wants_raw(w, r) {
     write_raw(w, search_raw(page))
     return
   }

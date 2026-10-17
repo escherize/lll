@@ -329,7 +329,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
       return
     },
   }
-  let raw_mode = wants_raw(r)
+  let raw_mode = wants_raw(w, r)
   let compose = match compose_vm(ctx, team_id, roster) {
     Ok(c) => c,
     Err(e) => {
@@ -487,7 +487,7 @@ fn issue_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
   // catalogue) are fetched: none of them are markdown's business. An
   // unknown key never gets here — fetch_issue already 404'd above, raw or
   // not.
-  if wants_raw(r) {
+  if wants_raw(w, r) {
     write_raw(w, issue_raw(page))
     return
   }
