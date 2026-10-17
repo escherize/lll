@@ -247,6 +247,10 @@ fn board_mux(
   // The sign-in confirm page's POST (LLL-545). Ungated: it carries the
   // credential itself and checks Origin before setting any cookie.
   mux.HandleFunc("POST /login", |w: http.ResponseWriter, r: Ref<http.Request>| board_login(ctx, w, r))
+  // LLL-717: how an agent works this board, as plain text. Gated like every
+  // board page: it names the viewer's teams, which an anonymous visitor
+  // never sees anywhere else either.
+  mux.HandleFunc("GET /llms.txt", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| llms_txt(v.reads, w, r, boot_key)))
   mux.HandleFunc(
     "GET /{$}",
     gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, _v: Viewing| {

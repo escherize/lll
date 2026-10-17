@@ -21,6 +21,11 @@ its team-routed twin (`/t/SCRAT/`). Create an issue from another terminal with
 The driver opens a board page, drives a CLI-side change, and waits for the card
 to appear. It is the canonical proof that a change did not break SSE.
 
+`scripts/browser_agent_copy.js` (LLL-719), also run from `e2e_web.sh`, clicks
+"Copy agent instructions" on the board and on an issue page and reads the
+clipboard back; it also checks the shell's hidden agent line (LLL-718).
+`curl` with the `lll_board` cookie proves `/llms.txt` (LLL-717).
+
 ## Gotchas
 
 A broadcast must not clear a draft the user is mid-way through typing. That is

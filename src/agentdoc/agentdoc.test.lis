@@ -1,0 +1,46 @@
+fn doc_test_teams() -> Slice<Team> {
+  [Team { key: "AAA", name: "Alpha\nteam" }, Team { key: "BBB", name: "Beta" }]
+}
+
+#[test]
+fn instructions_name_the_board_its_teams_and_the_raw_form() {
+  let text = instructions("http://127.0.0.1:8100", doc_test_teams(), "BBB", "")
+  assert text.starts_with("# lll board at http://127.0.0.1:8100\n")
+  assert text.contains("- AAA: Alpha team\n")
+  assert text.contains("- BBB: Beta\n")
+  assert text.contains("brew install escherize/lll/lll")
+  assert text.contains("lll issue next --claim")
+  assert text.contains("lll issue comment KEY-N")
+  assert text.contains("lll issue close KEY-N")
+  assert text.contains("http://127.0.0.1:8100/t/BBB/?raw")
+  assert text.contains("lll login --url http://127.0.0.1:8100 --token -")
+  assert !text.contains("## Your issue")
+}
+
+// The full text opens with the very lines `lll up` prints, so the two
+// cannot drift apart.
+#[test]
+fn instructions_open_with_the_brief() {
+  let text = instructions("http://b.test", doc_test_teams(), "AAA", "")
+  assert text.contains(
+    "## Start here\n\n" + brief("AAA", "http://b.test").join("\n") + "\n",
+  )
+}
+
+#[test]
+fn instructions_scope_to_an_issue_when_given_one() {
+  let text = instructions("http://b.test", doc_test_teams(), "AAA", "AAA-7")
+  assert text.contains("## Your issue: AAA-7\n")
+  assert text.contains("http://b.test/t/AAA/issue/AAA-7\n")
+  assert text.contains("lll issue claim AAA-7")
+}
+
+#[test]
+fn instructions_fall_back_when_the_reader_sees_no_team() {
+  let text = instructions("", [], "", "")
+  assert text.contains("BOARD_URL/t/KEY/?raw")
+  assert text.contains("- none visible to this login")
+  assert instructions("", doc_test_teams(), "", "").contains(
+    "lll attach --key AAA",
+  )
+}
