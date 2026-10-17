@@ -122,7 +122,19 @@ with tempfile.TemporaryDirectory(prefix='lll-cli-contract-') as directory:
         # An empty agenda: CON-3 is the only ready issue; claim it, then ask.
         code(0, 'issue', 'claim', 'CON-3')
         clean(code(5, 'issue', 'next'))
+        # LLL-693 (replay case 13): with --claim, the caller's own stranded
+        # hold comes back, exit 0, key alone on stdout. Own is the same label
+        # or an unlabelled hold; a sibling label's hold never is.
+        resumed = code(0, 'issue', 'next', '--claim', '--agent', 'wt-a')
+        assert resumed.stdout == 'CON-2\n', resumed.stdout
+        assert resumed.stderr.startswith('Resuming CON-2: already claimed by contract-owner (agent wt-a)'), resumed.stderr
+        assert code(0, 'issue', 'next', '--claim', '--agent', 'wt-b').stdout == 'CON-3\n'
+        assert code(0, 'issue', 'next', '--claim').stdout == 'CON-3\n'
         code(0, 'issue', 'release', 'CON-3')
+        code(0, 'issue', 'claim', 'CON-3', '--agent', 'wt-a')
+        clean(code(5, 'issue', 'next', '--claim', '--agent', 'wt-b'))
+        clean(code(5, 'issue', 'next', '--claim'))
+        code(0, 'issue', 'release', 'CON-3', '--agent', 'wt-a')
 
         # --- the list envelope, one shape whatever the flags (D2, LLL-673) ---
         plain = as_json('issue', 'list', '--json')

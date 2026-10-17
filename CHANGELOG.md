@@ -6,6 +6,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Changed
+
+- `lll issue next --claim` hands back the caller's own held ready issue, exit
+  0 with the key on stdout and `Resuming KEY: already claimed by ...` on
+  stderr, when it has nothing new to offer, instead of exiting 5. A loop that
+  crashed after claiming now resumes its own work (LLL-693). Own means the same
+  member under the same `--agent` label, or an unlabelled hold; a sibling
+  session's labelled hold is never handed out, and an unlabelled caller does
+  not get a labelled hold. Unclaimed work is still offered first. Plain
+  `lll issue next` is unchanged.
+
 ## [1.2.0] - 2026-10-16
 
 ### Upgrading from 1.1
