@@ -18,6 +18,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   diffing snapshots, and sees comments and claims that `issue list --since`
   misses. The CLI now sends `X-LLL-Agent` (from `LLL_AGENT`) and
   `X-LLL-Origin-Host` on every request (LLL-609).
+- `lll usage [--days N] [--json]` reads the audit log over the last N days
+  (default 7) and counts, per member and agent label, the claims taken,
+  issues closed, claims handed off (released without closing) and claims
+  failed (expired, or force-released by someone else) (LLL-705).
 
 ## [1.2.0] - 2026-10-16
 

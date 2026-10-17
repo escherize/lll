@@ -1,0 +1,43 @@
+fn ev(seq: int, collection: string, action: string, issue: string, actor: string, kind: string, agent: string, changes: Map<string, AuditChange>) -> AuditEvent {
+  AuditEvent { seq, collection, action, issue, actor, actor_kind: kind, agent, changes, .. }
+}
+
+fn set_change(field: string, to: string) -> Map<string, AuditChange> {
+  let mut m = Map.new<string, AuditChange>()
+  m[field] = AuditChange { from: None, to }
+  m
+}
+
+fn hold_change(member: string, agent: string, to: bool) -> Map<string, AuditChange> {
+  let mut m = Map.new<string, AuditChange>()
+  m["member"] = if to { AuditChange { from: None, to: member } } else { AuditChange { from: member, to: None } }
+  m["agent"] = if to { AuditChange { from: None, to: agent } } else { AuditChange { from: agent, to: None } }
+  m
+}
+
+/// LLL-705: a claim's end is a close, a handoff or a failure, by who ended
+/// it and whether its issue closed in the same write.
+#[test]
+fn usage_tallies_claims_closes_handoffs_and_failures_per_agent() {
+  let events = [
+    // wt-a claims i1 and closes it: claim, then the close and its release.
+    ev(1, "claims", "create", "i1", "a", "person", "wt-a", hold_change("a", "wt-a", true)),
+    ev(2, "issues", "update", "i1", "a", "person", "wt-a", set_change("state", "done")),
+    ev(3, "claims", "delete", "i1", "a", "person", "wt-a", hold_change("a", "wt-a", false)),
+    // wt-a claims i2 and gives it back.
+    ev(4, "claims", "create", "i2", "a", "person", "wt-a", hold_change("a", "wt-a", true)),
+    ev(5, "claims", "delete", "i2", "a", "person", "wt-a", hold_change("a", "wt-a", false)),
+    // wt-b's claim on i3 expires; its claim on i4 is forced off by wt-a.
+    ev(6, "claims", "create", "i3", "a", "person", "wt-b", hold_change("a", "wt-b", true)),
+    ev(7, "claims", "delete", "i3", "", "system", "", hold_change("a", "wt-b", false)),
+    ev(8, "claims", "create", "i4", "a", "person", "wt-b", hold_change("a", "wt-b", true)),
+    ev(9, "claims", "delete", "i4", "a", "person", "wt-a", hold_change("a", "wt-b", false)),
+  ]
+  let rows = tally(events)
+  assert rows.length() == 2
+  let a = rows[0]
+  assert (a.agent, a.claimed, a.closed, a.handed_off, a.failed) == ("wt-a", 2, 1, 1, 0)
+  let b = rows[1]
+  assert (b.agent, b.claimed, b.closed, b.handed_off, b.failed) == ("wt-b", 2, 0, 0, 2)
+  assert tally([]).is_empty()
+}

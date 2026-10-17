@@ -3,6 +3,7 @@ import "go:net/url"
 import "go:sort"
 import "go:strconv"
 import "go:strings"
+import "go:time"
 
 import "display"
 import "flags"
@@ -188,4 +189,136 @@ fn excerpt(body: string) -> string {
   let line = strings.Join(strings.Fields(body), " ")
   let runes = line as Slice<rune>
   if runes.length() <= 60 { line } else { f"{runes[..59] as string}…" }
+}
+
+/// One agent's tally over the window (LLL-705). `member` and `agent` name
+/// the claim's holder, or for a close the member and label that closed it.
+#[json]
+struct AgentUsage {
+  member: string,
+  member_name: string,
+  agent: string,
+  claimed: int,
+  closed: int,
+  handed_off: int,
+  failed: int,
+}
+
+pub fn usage_command() -> flags.Command {
+  flags.Command {
+    name: "usage",
+    access: flags.Access.Read,
+    summary: "what each agent did over a window: claims taken, issues closed, claims handed off and claims lost",
+    page: usage_page(),
+    spec: flags.with_team([
+      flags.Flag { name: "--days", value: true, hint: "N", help: "the window: the last N days (default 7)", .. },
+      flags.Flag { name: "--json", help: "print one object per member and agent label", .. },
+    ]),
+    run: usage,
+    ..,
+  }
+}
+
+fn usage_page() -> string {
+  "lll usage - what each agent did over a window
+
+Usage:
+  lll usage [--days N] [--team KEY] [--json]
+
+Counts the audit log's claim and issue writes (see 'lll activity') per
+member and agent label:
+  claimed     claims taken
+  closed      issues moved to done
+  handed off  claims the holder gave back without closing the issue
+  failed      claims that expired, or that someone else force-released
+
+Flags:
+  --days N    the last N days (default 7)
+  --team KEY  team for this invocation (overrides LLL_TEAM)
+  --json      one object per member and agent label"
+}
+
+fn usage(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let p = input.parsed
+  let days = whole_number(p.one("--days"), 7, "--days")?
+  if days < 1 { return Err(flags.usage_error("--days must be at least 1")) }
+  let from = time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05.000Z")
+  let team = records.configured_team(ctx)?
+  let mut base = [f"created >= {query.quote(from)}", "(collection = 'claims' || collection = 'issues')"]
+  if let Some(t) = team { base = base.append(f"team = {query.quote(t.id.string())}") }
+
+  // ponytail: reads the whole window client-side, 500 rows a page; a server
+  // aggregate when windows outgrow a few thousand rows.
+  let mut events: Slice<AuditEvent> = []
+  let mut cursor = 0
+  loop {
+    let filter = url.QueryEscape(strings.Join(base.append(f"seq > {cursor}"), " && "))
+    let mut page = AuditPage { .. }
+    pb.fetch(ctx, f"/api/collections/audit_events/records?filter={filter}&sort=seq&perPage=500&skipTotal=1", "usage", &page)?
+    events = events.append(page.items...)
+    if page.items.length() < 500 { break }
+    cursor = page.items[page.items.length() - 1].seq
+  }
+
+  let mut names = Map.new<string, string>()
+  for m in records.fetch_members(ctx)? { names[m.id.string()] = m.name }
+  let rows = tally(events).map(|u| AgentUsage {
+    member_name: display.member_name(models.MemberId(u.member), names.get(u.member).unwrap_or(""), "unknown"),
+    ..u
+  })
+  if p.given("--json") { return list_json(rows, whole_list(rows.length()), "usage") }
+  if rows.is_empty() { return Ok(output.notice(f"no claims or closes in the last {days} days")) }
+  let mut out = output.line("AGENT\tCLAIMED\tCLOSED\tHANDED OFF\tFAILED")
+  for u in rows {
+    out = out.line(f"{display.byline(u.member_name, u.agent)}\t{u.claimed}\t{u.closed}\t{u.handed_off}\t{u.failed}")
+  }
+  Ok(out)
+}
+
+/// The per-agent counts, from events in seq order. A claim's release is
+/// classified by who released it and by its neighbours: a close and its
+/// release are one transaction, so they are adjacent rows (one writer).
+fn tally(events: Slice<AuditEvent>) -> Slice<AgentUsage> {
+  let mut by = Map.new<string, AgentUsage>()
+  let mut order: mut Slice<string> = []
+  let bump = |member: string, agent: string, f: fn(AgentUsage) -> AgentUsage| {
+    let k = f"{member}\t{agent}"
+    if by.get(k).is_none() {
+      order = order.append(k)
+      by[k] = AgentUsage { member, agent, .. }
+    }
+    by[k] = f(by.get(k).unwrap_or(AgentUsage { .. }))
+  }
+  for (i, e) in events.enumerate() {
+    match (e.collection, e.action) {
+      ("claims", "create") => bump(changed(e, "member", true), changed(e, "agent", true), |u| AgentUsage { claimed: u.claimed + 1, ..u }),
+      ("issues", "update") if changed(e, "state", true) == "done" && e.actor != "" => bump(e.actor, e.agent, |u| AgentUsage { closed: u.closed + 1, ..u }),
+      ("claims", "delete") => {
+        let holder = changed(e, "member", false)
+        let label = changed(e, "agent", false)
+        let by_someone = e.actor_kind == "person" || e.actor_kind == "bot"
+        let lost = !by_someone || e.actor != holder || (e.agent != "" && label != "" && e.agent != label)
+        if lost {
+          bump(holder, label, |u| AgentUsage { failed: u.failed + 1, ..u })
+        } else if !closed_beside(events, i, e.issue) {
+          bump(holder, label, |u| AgentUsage { handed_off: u.handed_off + 1, ..u })
+        }
+      },
+      _ => (),
+    }
+  }
+  order.map(|k| by.get(k).unwrap_or(AgentUsage { .. }))
+}
+
+/// The field's value after (`to`) or before the write, as text.
+fn changed(e: AuditEvent, field: string, to: bool) -> string {
+  let Some(c) = e.changes.get(field) else { return "" }
+  if to { text_of(c.to) } else { text_of(c.from) }
+}
+
+fn closed_beside(events: Slice<AuditEvent>, i: int, issue: string) -> bool {
+  [i - 1, i + 1].any(|j| j >= 0 && j < events.length()
+    && events[j].collection == "issues" && events[j].issue == issue
+    && ["done", "cancelled"].contains(changed(events[j], "state", true)))
 }

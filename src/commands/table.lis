@@ -10,6 +10,7 @@ pub fn nouns() -> Slice<flags.Noun> {
     flags.Noun { name: "issue", tagline: "work with issues", intro: issue_intro(), shape: flags.Shape.Verbs(issue_commands()), server: true, scoped: true, .. },
     flags.Noun { name: "search", shape: flags.Shape.Single(search_command()), server: true, scoped: true, .. },
     flags.Noun { name: "activity", shape: flags.Shape.Single(activity_command()), server: true, scoped: true, .. },
+    flags.Noun { name: "usage", shape: flags.Shape.Single(usage_command()), server: true, scoped: true, .. },
     flags.Noun { name: "bot", page: bot_page(false), shape: flags.Shape.VerbsOr(bot_commands(), "create"), server: true, .. },
     flags.Noun { name: "team", tagline: "work with teams", intro: team_intro(), shape: flags.Shape.Verbs(team_commands()), server: true, .. },
     flags.Noun { name: "member", tagline: "work with members", intro: member_intro(), shape: flags.Shape.Verbs(member_commands()), server: true, .. },

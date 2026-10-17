@@ -183,6 +183,8 @@ Usage:
                           ready agenda (see 'lll watch --help')
   lll activity [flags]    every issue, comment and claim write, in order after
                           a cursor, with who made it (see 'lll activity --help')
+  lll usage [--days N]    per agent: claims taken, issues closed, handed off
+                          and lost (see 'lll usage --help')
   lll webhook <command>   outbound webhooks: add/list/remove URLs that the
                           server POSTs issue events to (see 'lll webhook --help')
   lll up [--port 8100]    start the lll server and web board together (see 'lll up --help')
