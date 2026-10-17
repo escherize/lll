@@ -1,5 +1,7 @@
+import "models"
+
 fn ev(seq: int, collection: string, action: string, issue: string, actor: string, kind: string, agent: string, changes: Map<string, AuditChange>) -> AuditEvent {
-  AuditEvent { seq, collection, action, issue, actor, actor_kind: kind, agent, changes, .. }
+  AuditEvent { seq, collection, action, issue, actor: models.MemberId(actor), actor_kind: kind, agent, changes, .. }
 }
 
 fn set_change(field: string, to: string) -> Map<string, AuditChange> {

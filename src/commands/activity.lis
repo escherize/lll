@@ -264,7 +264,7 @@ fn usage(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let mut names = Map.new<string, string>()
   for m in records.fetch_members(ctx)? { names[m.id.string()] = m.name }
   let rows = tally(events).map(|u| AgentUsage {
-    member_name: display.member_name(models.MemberId(u.member), names.get(u.member).unwrap_or(""), "unknown"),
+    member_name: names.get(u.member).unwrap_or_else(|| if u.member == "" { "unknown" } else { display.hidden_member() }),
     ..u
   })
   if p.given("--json") { return list_json(rows, whole_list(rows.length()), "usage") }
@@ -293,12 +293,12 @@ fn tally(events: Slice<AuditEvent>) -> Slice<AgentUsage> {
   for (i, e) in events.enumerate() {
     match (e.collection, e.action) {
       ("claims", "create") => bump(changed(e, "member", true), changed(e, "agent", true), |u| AgentUsage { claimed: u.claimed + 1, ..u }),
-      ("issues", "update") if changed(e, "state", true) == "done" && e.actor != "" => bump(e.actor, e.agent, |u| AgentUsage { closed: u.closed + 1, ..u }),
+      ("issues", "update") if moved_to(e) == Some(models.IssueState.Done) && e.actor != "" => bump(e.actor.string(), e.agent, |u| AgentUsage { closed: u.closed + 1, ..u }),
       ("claims", "delete") => {
         let holder = changed(e, "member", false)
         let label = changed(e, "agent", false)
         let by_someone = e.actor_kind == "person" || e.actor_kind == "bot"
-        let lost = !by_someone || e.actor != holder || (e.agent != "" && label != "" && e.agent != label)
+        let lost = !by_someone || e.actor.string() != holder || (e.agent != "" && label != "" && e.agent != label)
         if lost {
           bump(holder, label, |u| AgentUsage { failed: u.failed + 1, ..u })
         } else if !closed_beside(events, i, e.issue) {
@@ -317,8 +317,12 @@ fn changed(e: AuditEvent, field: string, to: bool) -> string {
   if to { text_of(c.to) } else { text_of(c.from) }
 }
 
+fn moved_to(e: AuditEvent) -> Option<models.IssueState> {
+  models.IssueState.parse(changed(e, "state", true))
+}
+
 fn closed_beside(events: Slice<AuditEvent>, i: int, issue: string) -> bool {
   [i - 1, i + 1].any(|j| j >= 0 && j < events.length()
     && events[j].collection == "issues" && events[j].issue == issue
-    && ["done", "cancelled"].contains(changed(events[j], "state", true)))
+    && [Some(models.IssueState.Done), Some(models.IssueState.Cancelled)].contains(moved_to(events[j])))
 }
