@@ -28,6 +28,7 @@ pub fn search_command() -> flags.Command {
     spec: search_spec(),
     positional: "TEXT...",
     missing: "what to search for?",
+    example: "lll search \"login redirect\" --issues",
     run: search_cmd,
     ..,
   }

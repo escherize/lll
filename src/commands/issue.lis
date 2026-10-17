@@ -337,6 +337,14 @@ fn issue_claim_page() -> string {
 Give it back without closing: lll issue release KEY. Close releases it too."
 }
 
+/// Four final-replay workers (LLL-695) looked in update's help for blockers.
+fn issue_update_page() -> string {
+  let spec = issue_update_spec()
+  f"usage: {flags.usage("lll issue update", spec, "[KEY-123]")}{flags.section(spec)}
+
+Blockers are not an update field: 'lll issue block KEY-123 BLOCKER' records one, 'lll issue unblock' removes it."
+}
+
 fn issue_release_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
@@ -522,6 +530,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "print the key of the one issue to work next - ready and unclaimed, then priority (urgent first), then oldest, then most-unblocking; --claim takes it (key alone on stdout, notices on stderr; exit 5 when nothing is ready)",
       spec: issue_next_spec(),
       page: issue_next_page(),
+      example: "lll issue next --claim --agent worker-1",
       run: issue_next,
       ..,
     },
@@ -542,7 +551,9 @@ pub fn issue_commands() -> Slice<flags.Command> {
       alias: "edit",
       summary: "change fields (at least one flag)",
       spec: issue_update_spec(),
+      page: issue_update_page(),
       positional: "[KEY-123]",
+      example: "lll issue update DEMO-2 --state in-review --priority high",
       run: update,
       ..,
     },
@@ -552,6 +563,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "set state done and release your claim (--keep-claim keeps it); another member's claimed issue needs --force, which comments why",
       spec: issue_close_spec(),
       positional: "[KEY-123]",
+      example: "lll issue close DEMO-3",
       run: close_issue,
       ..,
     },
@@ -571,6 +583,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       spec: issue_claim_spec(),
       page: issue_claim_page(),
       positional: "[KEY-123]",
+      example: "lll issue claim DEMO-4 --agent worker-1",
       run: claim,
       ..,
     },
@@ -602,6 +615,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       verbs: comment_commands(),
       spec: issue_comment_spec(),
       positional: "[KEY-123] [\"body\"]",
+      example: "lll issue comment DEMO-4 -b \"Repro: the redirect drops the query string\"",
       run: comment,
       ..,
     },
@@ -611,6 +625,7 @@ pub fn issue_commands() -> Slice<flags.Command> {
       summary: "stream live events for the issue and its comments until interrupted",
       spec: issue_watch_spec(),
       positional: "[KEY-123]",
+      example: "lll issue watch DEMO-2 --until LGTM --timeout 600",
       run: |i| streamed(issue_watch(i)),
       ..,
     },
