@@ -8,6 +8,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- A Homebrew install updates itself (LLL-721). When the daily version check
+  finds the server newer, lll starts `brew upgrade lll` in the background,
+  logs it to `auto-update.log` beside the config and prints one stderr line.
+  The command's output and exit code do not change. Switch it off with
+  `LLL_AUTO_UPDATE=0` or `auto_update = false`. It is off under `CI` and on
+  a machine that runs the server. Other installs keep the warning.
 - `GET /llms.txt` on the board serves plain-text instructions for an agent:
   install, sign in, the issue loop, the teams this login can see and the
   `?raw` Markdown form of every page. It is gated like every board page and
