@@ -14,6 +14,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   The command's output and exit code do not change. Switch it off with
   `LLL_AUTO_UPDATE=0` or `auto_update = false`. It is off under `CI` and on
   a machine that runs the server. Other installs keep the warning.
+- Board pages answer `Accept: text/markdown` with their `?raw` Markdown form
+  (LLL-720). Markdown wins only when the header names `text/markdown` with a
+  higher q than `text/html` gets (from `text/html`, `text/*` or `*/*`); a tie
+  and every browser get HTML. Same handler, auth and `no-store` as `?raw`, and
+  these routes now send `Vary: Accept`.
 
 ## [1.2.0] - 2026-10-16
 

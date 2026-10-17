@@ -39,7 +39,7 @@ fn projects_page(
       return
     },
   }
-  if wants_raw(r) {
+  if wants_raw(w, r) {
     write_raw(w, projects_raw(vm, team.key))
     return
   }
