@@ -82,6 +82,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	registerIssueProvenance(app)
 	registerDocAuthor(app)
 	registerIdempotency(app)
+	registerAuditLog(app)
 	registerWebhookDelivery(app)
 	registerWebhookRecords(app)
 	registerMemberGuards(app)
