@@ -31,6 +31,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   higher q than `text/html` gets (from `text/html`, `text/*` or `*/*`); a tie
   and every browser get HTML. Same handler, auth and `no-store` as `?raw`, and
   these routes now send `Vary: Accept`.
+- `lll new "Title"` starts a board in one command, with no env var and no
+  mkdir: it derives the team key from the title (`--key` overrides), keeps the
+  data in `boards/<key>` beside the lll config file, writes `.lll.toml` in the
+  current directory, then boots exactly as `lll up`. Running it again with the
+  same title reopens the board; a key held by another title exits 4.
+  `--share` listens on the LAN address and, when Tailscale is connected, the
+  Tailscale address (never every interface) and prints a sign-in link for
+  each, the MagicDNS name included. The README quickstart now leads with it
+  (LLL-722).
 
 ## [1.2.0] - 2026-10-16
 
