@@ -2,6 +2,7 @@ import "go:net/http"
 import "go:net/http/httptest"
 import "go:strings"
 
+import "agentdoc"
 import "config"
 import "models"
 import "pb"
@@ -85,4 +86,29 @@ fn llms_txt_is_gated_plain_text_naming_the_teams() {
   assert body.contains(f"lll attach --key AAA")
   assert !body.contains(secret)
   assert !body.contains("process-token-for-llms-test")
+}
+
+// LLL-718: every page template wears the shell's agent line, hidden from
+// sight and from screen readers, and the ?raw form of a page does not.
+#[test]
+fn every_page_shell_carries_the_hidden_agent_hint() {
+  let rail = RailVM { agent_hint: agentdoc.hint(), .. }
+  let line = "<p class=\"agent-hint\" aria-hidden=\"true\">" + agentdoc.hint() +
+  "</p>"
+  let pages: Slice<(string, Unknown)> = [
+    ("board-page", BoardVM { .. }),
+    ("issue-page", IssueVM { .. }),
+    ("issues-page", IssuesVM { .. }),
+    ("projects-page", ProjectsVM { .. }),
+    ("docs-page", DocsVM { .. }),
+    ("doc-page", DocVM { .. }),
+    ("search-page", SearchVM { .. }),
+    ("settings-page", SettingsVM { .. }),
+  ]
+  for (name, vm) in pages {
+    let assert Ok(html) = render(name, PageVM { rail, page: vm })
+    assert html.contains(line)
+  }
+  assert !board_raw(BoardVM { .. }).contains("Agents:")
+  assert !issue_raw(IssueVM { key: "AAA-1", .. }).contains("Agents:")
 }

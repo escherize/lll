@@ -307,6 +307,9 @@ pub struct RailVM {
   // The member an "Add a bot" would own (LLL-546): a read-write member
   // viewer's name, else "" and no button. Never a token.
   pub bot_owner: string,
+  // The hidden line for an agent reading the HTML (LLL-718): agentdoc's
+  // hint, the same on every page.
+  pub agent_hint: string,
 }
 
 /// One starred issue in the rail's FAVORITES group.

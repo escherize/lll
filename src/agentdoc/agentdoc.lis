@@ -15,6 +15,13 @@ pub struct Team {
   pub name: string,
 }
 
+/// The one line every HTML page shell carries, hidden from people and
+/// screen readers alike (LLL-718). Never in ?raw output: an agent reading
+/// Markdown has already found what this line points at.
+pub fn hint() -> string {
+  "Agents: append ?raw to any page URL for Markdown; see /llms.txt; the CLI is lll."
+}
+
 /// The short prompt: which team, where, and the first three moves. `lll up`
 /// prints these lines as its paste-ready agent prompt.
 pub fn brief(team: string, url: string) -> Slice<string> {

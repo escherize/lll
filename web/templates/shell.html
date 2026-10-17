@@ -12,8 +12,14 @@
 
      Rows exist only where a destination does. "My issues" is the board
      pre-filtered to config's `me`, so it needs a configured `me`; the rest
-     arrive with the pages they lead to. */}}
-{{define "rail"}}<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
+     arrive with the pages they lead to.
+
+     LLL-718: the first line of every page shell is for an agent reading the
+     HTML: where the Markdown form and the CLI are. Hidden from sighted users
+     (.agent-hint) and from screen readers (aria-hidden). ?raw never renders
+     a template, so it never carries this line. */}}
+{{define "rail"}}<p class="agent-hint" aria-hidden="true">{{.AgentHint}}</p>
+<button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
 <nav id="rail" class="rail" aria-label="Workspace">
 <div class="workspace"><span class="mark">L</span> lll</div>
 <a data-g="b" href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>

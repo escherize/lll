@@ -13,6 +13,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   `?raw` Markdown form of every page. It is gated like every board page and
   carries no credential. The text shares one source with `lll up`'s agent
   prompt (LLL-717).
+- Every board page's HTML carries one hidden line for agents: append `?raw`
+  for Markdown, see `/llms.txt`, the CLI is `lll`. It is invisible and
+  `aria-hidden`, and absent from `?raw` output (LLL-718).
 
 ## [1.2.0] - 2026-10-16
 

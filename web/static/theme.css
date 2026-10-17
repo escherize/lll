@@ -149,6 +149,20 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
+/* LLL-718: the shell's line for agents reading the HTML. Out of the layout
+   and invisible; aria-hidden in the markup keeps it from screen readers. */
+.agent-hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Main column ───────────────────────────────────────── */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
