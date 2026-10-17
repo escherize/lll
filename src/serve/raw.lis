@@ -1,27 +1,80 @@
 import "go:net/http"
+import "go:strconv"
 import "go:strings"
 
 import "display"
 
 // The URL is the API; ?raw is the address bar's view source.
 //
-// One mechanism, no content negotiation: any HTML route answers the SAME URL
-// with a `raw` query param in markdown (a plain list where markdown would be
-// theatre, i.e. /settings). No Accept-header matrix, no router abstraction —
-// each handler builds the view model it always built and grows exactly one
-// branch: if the request wants raw, render THAT view model as text. Because
-// the raw form is a projection of the same struct the HTML renders, the two
-// can never disagree, and because a raw page is a one-shot fetch, none of
-// this ever subscribes to /events.
+// One mechanism: any HTML route answers the SAME URL with a `raw` query
+// param in markdown (a plain list where markdown would be theatre, i.e.
+// /settings). No router abstraction — each handler builds the view model it
+// always built and grows exactly one branch: if the request wants raw,
+// render THAT view model as text. Because the raw form is a projection of
+// the same struct the HTML renders, the two can never disagree, and because
+// a raw page is a one-shot fetch, none of this ever subscribes to /events.
+//
+// The one piece of content negotiation (LLL-720) is a second way into that
+// same branch, not a matrix: a request whose Accept header prefers
+// text/markdown over text/html is answered as if it carried ?raw. Same
+// handler, same auth, same no-store; `Vary: Accept` says the choice was made.
 
 /// Does this request want the raw form? Presence of the param is the switch
 /// — `curl '/issues?state=todo&raw'` reads left to right as the filtered URL
-/// it mirrors, no value required.
-fn wants_raw(r: Ref<http.Request>) -> bool {
+/// it mirrors, no value required. `Accept: text/markdown` is the other
+/// switch (see prefers_markdown). Every response from a route that asks
+/// carries `Vary: Accept`, the HTML one included, so a cache keyed on URL
+/// alone never hands a browser the markdown or an agent the HTML.
+fn wants_raw(w: http.ResponseWriter, r: Ref<http.Request>) -> bool {
+  w.Header().Add("Vary", "Accept")
+  let accept = r.Header.map_or("", |h| strings.Join(h.Values("Accept"), ","))
+  if prefers_markdown(accept) { return true }
   let Some(u) = r.URL else {
     return false
   }
   u.Query().Has("raw")
+}
+
+/// Does this Accept header rank text/markdown above text/html? The rule,
+/// kept small on purpose: text/markdown must be named, with q > 0; text/html
+/// takes its q from the most specific of `text/html`, `text/*`, `*/*` that
+/// appears (0 when none does); markdown wins only when its q is strictly
+/// higher. A tie goes to HTML, the default. So `text/markdown` and
+/// `text/markdown, */*;q=0.1` get markdown, while a browser's
+/// `text/html,...,*/*;q=0.8` (no text/markdown) and
+/// `text/markdown, text/html` (a tie) get HTML.
+fn prefers_markdown(accept: string) -> bool {
+  let md = accept_q(accept, "text/markdown")
+  if md <= 0.0 { return false }
+  let html = accept_q(accept, "text/html")
+  let text = accept_q(accept, "text/*")
+  let any = accept_q(accept, "*/*")
+  let html_q = if html >= 0.0 {
+    html
+  } else if text >= 0.0 { text } else if any >= 0.0 { any } else { 0.0 }
+  md > html_q
+}
+
+/// The q of `media` in an Accept header: 1 when listed without q, -1 when not
+/// listed at all, 0 for an unparseable q (an invalid range accepts nothing).
+fn accept_q(accept: string, media: string) -> float64 {
+  for part in accept.split(",") {
+    let params = part.split(";")
+    if params.is_empty() || strings.ToLower(strings.TrimSpace(params[0])) != media {
+      continue
+    }
+    let mut q = 1.0
+    for p in params[1..] {
+      if let Some(v) = strings.CutPrefix(
+        strings.ToLower(strings.TrimSpace(p)),
+        "q=",
+      ) {
+        q = strconv.ParseFloat(strings.TrimSpace(v), 64).unwrap_or(0.0)
+      }
+    }
+    return q
+  }
+  -1.0
 }
 
 /// Serve the raw form. text/markdown, no-store like the pages it mirrors.
