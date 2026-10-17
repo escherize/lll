@@ -6,6 +6,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-17
+
+### Upgrading from 1.2
+
+No migrations, exit codes, covered JSON fields or command spellings change.
+Upgrade the server before clients, as for 1.2 (`docs/upgrading.md`).
+A Homebrew install now runs `brew upgrade lll` in the background when its
+server is newer; set `LLL_AUTO_UPDATE=0` or `auto_update = false` to keep the
+warning only. `lll logout` now also removes a login saved in `logins.toml` for
+the url it would reach.
+
 ### Added
 
 - A Homebrew install updates itself (LLL-721). When the daily version check
