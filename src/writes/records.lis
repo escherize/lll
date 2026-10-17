@@ -309,6 +309,14 @@ pub fn create_webhook(
   ctx: pb.Client,
   hook: models.NewWebhook,
 ) -> Result<string, pb.CliError> {
+  if hook.activity {
+    require_capability(
+      ctx,
+      "webhooks.activity",
+      "/api/lll/activity",
+      "activity webhooks; upgrade the server before registering --activity",
+    )?
+  }
   create(ctx, pb.Caller.Process, collection_path("webhooks"), hook, "webhook")
 }
 
@@ -343,3 +351,4 @@ pub fn create_view(
   let _ = create(ctx, caller, collection_path("views"), view, "request")?
   Ok(())
 }
+

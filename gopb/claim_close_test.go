@@ -36,7 +36,7 @@ func setState(t *testing.T, app core.App, issueID, state string) {
 // assignee; keepClaim keeps the hold; no comment either way.
 func TestCloseByTheHolderReleases(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-a"})
+	held, err := acquireClaim(app, issueID, alpha, "wt-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestCloseByTheHolderReleases(t *testing.T) {
 // It may not keep another member's claim.
 func TestCloseByANonHolderNeedsForce(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestCloseByANonHolderNeedsForce(t *testing.T) {
 // leaves the claim alone.
 func TestAssignmentToATerminalStateReleasesTheHoldersClaim(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: "wt-a"})
+	held, err := acquireClaim(app, issueID, alpha, "wt-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestAssignmentToATerminalStateReleasesTheHoldersClaim(t *testing.T) {
 
 func TestFinishReleasesOnlyOnAMoveIntoATerminalState(t *testing.T) {
 	app, issueID, alpha, _ := claimFixture(t)
-	if _, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""}); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	held, err := currentClaim(app, issueID)
@@ -187,14 +187,14 @@ func TestForcedReleaseCommentNamesOnlyTeamRosterMembers(t *testing.T) {
 	if err := app.Save(hidden); err != nil {
 		t.Fatal(err)
 	}
-	held, err := acquireClaim(app, issueID, releaser{memberID: beta, agent: "bot-a"})
+	held, err := acquireClaim(app, issueID, beta, "bot-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, force: true}); err != nil {
 		t.Fatal(err)
 	}
-	held, err = acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
+	held, err = acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestForcedReleaseCommentNamesOnlyTeamRosterMembers(t *testing.T) {
 // system label.
 func TestForcedReleaseWithAHostileReasonIsTheReleasers(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}

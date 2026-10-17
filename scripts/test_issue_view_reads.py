@@ -18,7 +18,9 @@ binary = os.path.abspath(sys.argv[1])
 record = sys.argv[2:] == ['--record']
 # Captured from the published v0.5.0 binary using --record, then re-recorded
 # for the 1.0 output contract (LLL-645: RFC3339, key, claim object, unwrapped
-# errors, the claim line in --raw) after reviewing every changed line. Regenerate only
+# errors, the claim line in --raw) after reviewing every changed line. LLL-691
+# manually adds only the specified blocker refs and comment name/marker fields.
+# Regenerate only
 # from an independently selected reference, never the candidate under test.
 golden_path = Path(__file__).parent / 'fixtures' / 'issue_view_reads.json'
 issue_id, member_id, team_id = 'issue0000000001', 'member000000001', 'team00000000001'

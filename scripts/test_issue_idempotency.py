@@ -137,6 +137,19 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def forward(self):
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == '/.well-known/lll' and state['mode'] in ('old', 'unlisted'):
+            # LLL-710: 'old' answers like 1.1.0, which has no capability list;
+            # 'unlisted' lists capabilities but not this one.
+            with urllib.request.urlopen(api + parsed.path, timeout=15) as response:
+                doc = json.load(response)
+            if state['mode'] == 'old':
+                del doc['capabilities']
+            else:
+                doc['capabilities'] = [c for c in doc['capabilities'] if c != 'issues.idempotency']
+            self.reply(200, doc)
+            return
+        if parsed.path == '/api/lll/issues/idempotency':
+            state['support_gets'] = state.get('support_gets', 0) + 1
         if state['mode'] == 'old' and parsed.path == '/api/lll/issues/idempotency':
             self.reply(404, {'message': 'not supported'})
             return
@@ -180,6 +193,15 @@ proxy_url = f'http://127.0.0.1:{proxy.server_port}'
 try:
     old = cli('issue', 'create', '-t', 'Old server', '--idempotency-key', 'old', url=proxy_url, success=False)
     assert 'upgrade the server' in old.stderr and state['posts'] == 0
+    assert old.returncode == 1 and state['support_gets'] == 1, (old.returncode, state)
+
+    # LLL-710: a server whose capability list omits keyed issues is refused
+    # from the list alone, before the support route or a POST.
+    state.update(mode='unlisted', posts=0, support_gets=0)
+    unlisted = cli('issue', 'create', '-t', 'Unlisted', '--idempotency-key', 'unlisted', url=proxy_url, success=False)
+    assert unlisted.returncode == 1, unlisted
+    assert 'this server (' in unlisted.stderr and 'does not support --idempotency-key' in unlisted.stderr, unlisted.stderr
+    assert state['posts'] == 0 and state['support_gets'] == 0, state
 
     state.update(mode='lost', posts=0, keys=[], intercepted=False)
     lost_args = ('issue', 'create', '-t', 'Lost response', '--idempotency-key', 'lost-response', '--json')

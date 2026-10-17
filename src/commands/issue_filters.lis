@@ -49,6 +49,10 @@ fn filters_from(p: flags.Parsed, search: string) -> Result<query.Criteria, pb.Cl
 /// With no team (TeamScope.Every) a name means that name in every team the
 /// token sees, so `--label bug` matches each team's `bug` (LLL-671).
 fn resolve_filter_query(ctx: pb.Client, scope: query.TeamScope, filters: query.Criteria) -> Result<string, pb.CliError> {
+  Ok(query.filter(resolve_issue_filter(ctx, scope, filters)?))
+}
+
+fn resolve_issue_filter(ctx: pb.Client, scope: query.TeamScope, filters: query.Criteria) -> Result<query.IssueFilter, pb.CliError> {
   let assignee = if filters.assignee == "" { None } else { Some(records.resolve_member(ctx, filters.assignee)?.id) }
   // Every label resolves, so a typo in the second one is still reported rather
   // than quietly widening the result to whatever the first one matched.
@@ -57,12 +61,12 @@ fn resolve_filter_query(ctx: pb.Client, scope: query.TeamScope, filters: query.C
     if name != "" { label_ids = label_ids.append(records.label_ids(ctx, scope, name)?...) }
   }
   let projects = if filters.project == "" { [] } else { records.project_ids(ctx, scope, filters.project)? }
-  Ok(query.filter(query.IssueFilter {
+  Ok(query.IssueFilter {
     scope,
     states: filters.states,
     assignee,
     projects,
     labels: label_ids,
     search: filters.search,
-  }))
+  })
 }

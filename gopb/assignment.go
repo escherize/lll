@@ -156,6 +156,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 				if err != nil {
 					return err
 				}
+				claimEventBy(held, by)
 				if err := tx.Delete(held); err != nil {
 					return err
 				}
@@ -166,6 +167,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 				}
 				outcome = ClaimOutcome{ClaimID: held.Id, MemberID: memberID, MemberName: name, ClearedAssignee: true, Forced: forced}
 			} else if fields.State != nil && finishReleases(held, issue.GetString("state"), *fields.State, by, keepClaim) {
+				claimEventBy(held, by)
 				if err := tx.Delete(held); err != nil {
 					return err
 				}

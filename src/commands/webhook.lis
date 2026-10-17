@@ -24,6 +24,11 @@ prints a generated one once, or takes yours with --secret, and nothing shows
 it again; 'list' says only whether one is set. A registration cannot be
 edited; remove it and add it again.
 
+With --activity, a registration also delivers comment and claim events with
+issue key and actor metadata. The CLI checks server support before registering;
+an older server is refused with an upgrade instruction. Existing registrations
+and new ones without --activity deliver issue events only.
+
 A registration delivers only while the member who added it can still read
 its team: remove that member from the team and its deliveries stop, with a
 'webhook: skipped' line in the server's log. Registrations added before lll
@@ -72,6 +77,8 @@ pub fn webhook_commands() -> Slice<flags.Command> {
 fn webhook_add_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--project", value: true, hint: "NAME", help: "scope deliveries to one project instead of the whole team", .. },
+    flags.Flag { name: "--activity", help: "also deliver comment and claim events (requires server support);
+default: issue events only", .. },
     flags.Flag { name: "--secret", value: true, stdin: true, hint: "SECRET", help: "sent on every delivery as the X-LLL-Secret header ('-' reads it from stdin;\ndefault: generated and printed once)", .. },
   ])
 }
@@ -125,7 +132,7 @@ fn webhook_add(input: flags.CommandInput) -> Result<output.Output, pb.CliError> 
     Some(s) => s.reveal(),
     None => rand.Text(),
   }
-  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret: value })?
+  let body = writes.create_webhook(ctx, models.NewWebhook { team: team.id, project: project_id, url: target, secret: value, activity: p.given("--activity") })?
   let mut created = models.Webhook { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &created) {
     return Err(pb.failed(f"decoding created webhook: {e}"))

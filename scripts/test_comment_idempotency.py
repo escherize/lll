@@ -107,6 +107,19 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def forward(self):
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == '/.well-known/lll' and state['mode'] in ('old', 'unlisted'):
+            # LLL-710: 'old' answers like 1.1.0, which has no capability list;
+            # 'unlisted' lists capabilities but not this one.
+            with urllib.request.urlopen(api + parsed.path, timeout=15) as response:
+                doc = json.load(response)
+            if state['mode'] == 'old':
+                del doc['capabilities']
+            else:
+                doc['capabilities'] = [c for c in doc['capabilities'] if c != 'comments.idempotency']
+            self.reply(200, doc)
+            return
+        if parsed.path == '/api/lll/comments/idempotency':
+            state['support_gets'] = state.get('support_gets', 0) + 1
         if state['mode'] == 'old' and parsed.path == '/api/lll/comments/idempotency':
             self.reply(404, {'message': 'not supported'})
             return
@@ -143,6 +156,14 @@ try:
     # A server without keyed comments is refused before anything is posted.
     old = cli('issue', 'comment', 'IDEMC-1', '-b', 'old server', '--idempotency-key', 'old', url=proxy_url, code=1)
     assert 'upgrade the server' in old.stderr and state['posts'] == 0, (old.stderr, state)
+    assert state['support_gets'] == 1, state
+
+    # LLL-710: a server whose capability list omits keyed comments is refused
+    # from the list alone, before the support route or a POST.
+    state.update(mode='unlisted', posts=0, support_gets=0)
+    unlisted = cli('issue', 'comment', 'IDEMC-1', '-b', 'unlisted', '--idempotency-key', 'unlisted', url=proxy_url, code=1)
+    assert 'this server (' in unlisted.stderr and 'does not support --idempotency-key' in unlisted.stderr, unlisted.stderr
+    assert state['posts'] == 0 and state['support_gets'] == 0, state
 
     # The issue's case: the comment is saved but the answer is lost. The
     # retry with the same key returns that comment instead of a second one.

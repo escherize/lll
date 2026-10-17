@@ -59,7 +59,7 @@ func auditRows(t *testing.T, app core.App) []auditRow {
 func TestAuditRecordsClaimLifecycleWithActor(t *testing.T) {
 	app, issueID, alpha, beta := auditFixture(t)
 	by := releaser{memberID: alpha, agent: "wt-a", origin: "host-a"}
-	held, err := acquireClaim(app, issueID, by)
+	held, err := acquireClaim(app, issueID, alpha, "wt-a", by)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestAuditRecordsClaimLifecycleWithActor(t *testing.T) {
 // The sweep is the server's own write: unstamped, so actor kind system.
 func TestAuditRecordsExpiryAsSystem(t *testing.T) {
 	app, issueID, alpha, _ := auditFixture(t)
-	if _, err := acquireClaim(app, issueID, releaser{memberID: alpha}); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := expireClaims(app, time.Now().Add(48*time.Hour), claimMaxAge); err != nil || n != 1 {
@@ -146,7 +146,7 @@ func TestAuditSkipsNoOpsAndFailedWrites(t *testing.T) {
 // Append-only: not even a model save may rewrite a row.
 func TestAuditRowsAreAppendOnly(t *testing.T) {
 	app, issueID, alpha, _ := auditFixture(t)
-	if _, err := acquireClaim(app, issueID, releaser{memberID: alpha}); err != nil {
+	if _, err := acquireClaim(app, issueID, alpha, ""); err != nil {
 		t.Fatal(err)
 	}
 	row, err := app.FindFirstRecordByFilter("audit_events", "seq = 1")

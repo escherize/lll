@@ -91,8 +91,11 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"),
-			releaser{memberID: body.Member, agent: body.Agent, origin: originHost(re.Request)})
+		by := releaser{agent: body.Agent, origin: originHost(re.Request)}
+		if !re.HasSuperuserAuth() {
+			by.memberID = re.Auth.Id
+		}
+		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member, body.Agent, by)
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 

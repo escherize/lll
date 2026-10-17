@@ -1447,6 +1447,7 @@ done
 python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
 # --- the 1.0 CLI contract: exit codes, list envelope, issue JSON, time flags (LLL-645) ---
 python3 "$REPO_ROOT"/scripts/test_cli_contract.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_watch_activity.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
 # --- who made or owns a record is the server's word, not a member's (LLL-681) ---
@@ -1663,7 +1664,7 @@ done
 # know. `lll watch --help` is generated from the watch spec; the completions
 # entry for the verb-less watch noun reads the same table.
 comp_watch=$("$LIN" completions bash | grep -F "watch,*)" | head -1 | sed "s/.*words='//;s/'.*//")
-assert_contains "$comp_watch" "--state --assignee --label --project --search --ready --json" \
+assert_contains "$comp_watch" "--state --assignee --label --project --activity --search --ready --json" \
   "watch completions carry exactly the watch spec's flags"
 comp_doc=$("$LIN" completions bash | grep -F "doc,new" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \

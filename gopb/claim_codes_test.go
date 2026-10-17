@@ -12,7 +12,7 @@ import (
 // message.
 func TestClaimRejectionsCarryStableCodes(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	held, err := acquireClaim(app, issueID, releaser{memberID: alpha, agent: ""})
+	held, err := acquireClaim(app, issueID, alpha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestClaimRejectionsCarryStableCodes(t *testing.T) {
 		}
 		return rejected.code
 	}
-	if _, err := acquireClaim(app, issueID, releaser{memberID: beta, agent: ""}); codeOf(err) != "claim_held" {
+	if _, err := acquireClaim(app, issueID, beta, ""); codeOf(err) != "claim_held" {
 		t.Fatalf("held: %v", err)
 	}
 	if _, err := releaseClaim(app, issueID, held.ClaimID, releaser{memberID: beta}); codeOf(err) != "needs_force" {
