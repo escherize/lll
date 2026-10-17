@@ -216,7 +216,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
   }
   // ?raw: the same table, as markdown. The choosers and sort links are
   // browser chrome; the rows are the contract.
-  if wants_raw(r) {
+  if wants_raw(w, r) {
     write_raw(w, issues_raw(vm))
     return
   }

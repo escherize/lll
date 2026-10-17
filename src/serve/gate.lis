@@ -559,6 +559,9 @@ pub fn scoped_route(method: string, path: string, writes: bool) -> ScopedVerdict
   // (cards, search rows and doc links use it) each read their issue or team
   // as the viewer before answering.
   if path == "/events" || path == "/attachments/file" { return ScopedVerdict.Open }
+  // The agent instructions (LLL-717) list the teams the viewer's own read
+  // returns, so a scoped login sees only its teams there too.
+  if path == "/llms.txt" { return ScopedVerdict.Open }
   if let Some(bare) = strings.CutPrefix(path, "/issue/") {
     if bare != "" && !strings.Contains(bare, "/") { return ScopedVerdict.Open }
   }
