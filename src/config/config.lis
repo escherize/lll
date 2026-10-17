@@ -660,6 +660,12 @@ fn exists(path: string) -> bool {
   os.Stat(path).is_ok()
 }
 
+/// One config file alone, or an empty Config when there is none at `path`.
+pub fn load_file(path: string) -> Result<Config, string> {
+  if !exists(path) { return Ok(Config { .. }) }
+  read_config(path, Config { .. })
+}
+
 fn read_config(path: string, initial: Config) -> Result<Config, string> {
   let (cfg, _) = read_layer(path, initial)?
   Ok(cfg)

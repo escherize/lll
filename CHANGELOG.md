@@ -29,7 +29,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   exactly that url. So `lll new X && lll issue create -t hi` makes X-1 on the
   new board, and other directories keep the home config's login, which is
   never rewritten. A named board no longer tries the home config's token
-  against its own new API.
+  against its own new API. `lll new` refuses (exit 4) to rewrite a
+  `.lll.toml` that attaches the directory to another team or server, naming
+  the file and what it holds; a file it wrote for the same board reopens.
+  `lll logout` also removes the login `logins.toml` holds for the url it
+  would reach, and says so; when that login was the one in use, the home
+  config's token is kept.
 
 ## [1.2.0] - 2026-10-16
 

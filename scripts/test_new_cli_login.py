@@ -75,6 +75,20 @@ with tempfile.TemporaryDirectory(prefix='lll-new-cli-login-') as directory:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=30)
 
+    # A directory attached to another team and server (a repo's committed
+    # .lll.toml) is refused with exit 4, and nothing is written.
+    attached = root / 'attached'
+    attached.mkdir()
+    attached_text = 'team = "LLL"\nurl = "https://lll.example.com"\n'
+    (attached / '.lll.toml').write_text(attached_text)
+    refused = subprocess.run([binary, 'new', 'Payments rewrite', '--no-open'],
+                             cwd=attached, env=env, text=True, capture_output=True,
+                             timeout=30)
+    assert refused.returncode == 4, (refused.returncode, refused.stdout, refused.stderr)
+    assert 'team LLL at https://lll.example.com' in refused.stderr, refused.stderr
+    assert (attached / '.lll.toml').read_text() == attached_text
+    assert not (root / 'config/lll/boards/pay').exists()
+
     proc, out = boot('new.log')
     try:
         assert 'cli    logged in here' in out, out
@@ -109,4 +123,15 @@ with tempfile.TemporaryDirectory(prefix='lll-new-cli-login-') as directory:
         assert home.read_text() == home_text, home.read_text()
     finally:
         stop(proc)
+
+    # Logging out here removes this board's saved login and keeps the home
+    # config's login for the other server.
+    logins = root / 'config/lll/logins.toml'
+    board_url = [l for l in (work / '.lll.toml').read_text().splitlines()
+                 if l.startswith('url = ')][0].split('"')[1]
+    out = run(work, 'logout')
+    assert f'token for {board_url} cleared from {logins}' in out, out
+    assert board_url not in logins.read_text()
+    assert home.read_text() == home_text, home.read_text()
+    assert 'token=' in run(elsewhere, 'config', 'list')
     print('lll new beside another login: ok')

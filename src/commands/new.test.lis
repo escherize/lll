@@ -128,3 +128,22 @@ fn home_login_free_only_without_another_login() {
   assert !home_login_free(config.Config { url: "https://lll.example.com", .. })
   assert !home_login_free(config.Config { url: "http://127.0.0.1:8090", token: "tok", .. })
 }
+
+// LLL-726: lll new rewrites .lll.toml only when it already belongs to this
+// board, or names nothing.
+#[test]
+fn attach_refusal_keeps_another_teams_or_servers_file() {
+  let path = "/r/.lll.toml"
+  let title = "Payments rewrite"
+  assert attach_refusal(path, config.Config { .. }, "PAY", title).is_none()
+  assert attach_refusal(path, config.Config { team: "PAY", .. }, "PAY", title).is_none()
+  assert attach_refusal(path, config.Config { team: "PAY", url: "http://127.0.0.1:8091", .. }, "PAY", title).is_none()
+  let Some(why) = attach_refusal(path, config.Config { team: "LLL", url: "https://lll.example.com", .. }, "PAY", title) else {
+    panic("expected a refusal")
+  };
+  assert why.contains(path)
+  assert why.contains("team LLL at https://lll.example.com")
+  assert attach_refusal(path, config.Config { team: "LLL", .. }, "PAY", title).is_some()
+  assert attach_refusal(path, config.Config { team: "PAY", url: "https://lll.example.com", .. }, "PAY", title).is_some()
+  assert attach_refusal(path, config.Config { url: "http://127.0.0.1:8091", .. }, "PAY", title).is_some()
+}
