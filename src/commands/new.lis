@@ -1,0 +1,391 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net"
+import "go:os"
+import "go:os/exec"
+import "go:path/filepath"
+import "go:strings"
+
+import "config"
+import "flags"
+import "output"
+import "pb"
+import "records"
+
+// `lll new "Title"` (LLL-722): one command to a running board. It settles
+// the board's team key, its data directory and, with --share, the addresses
+// it listens on; then it is `lll up` (up_run), never a copy of it.
+
+/// What `lll new` adds to an `lll up` boot. A named board owns its data
+/// directory: it never adopts a server already running at the configured url,
+/// and it is not a throwaway, so its team goes to .lll.toml and the CLI is
+/// logged in as on a plain boot.
+struct NamedBoard { also_listen: Slice<string>, links: Slice<(string, string)> }
+
+/// Addresses the board listens on besides --bind (the Tailscale IP).
+/// One banner link per reachable address: (label, host).
+fn new_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--key",
+      value: true,
+      hint: "KEY",
+      help: "team key (default: derived from the title, e.g. PAY for \"Payments rewrite\")",
+      ..,
+    },
+    flags.Flag {
+      name: "--demo",
+      help: "seed issues and docs to try, as lll up --demo does",
+      ..,
+    },
+    flags.Flag {
+      name: "--share",
+      help: "listen on this machine's LAN and Tailscale addresses and print a\nsign-in link for each",
+      ..,
+    },
+    flags.Flag {
+      name: "--port",
+      value: true,
+      hint: "8100",
+      help: "preferred web-board port; taken ports auto-increment",
+      ..,
+    },
+    flags.Flag {
+      name: "--no-open",
+      help: "do not open the board in the browser",
+      ..,
+    },
+  ]
+}
+
+pub fn new_command() -> flags.Command {
+  flags.Command {
+    name: "new",
+    access: flags.Access.Write,
+    summary: "start a named board in one command; run it again to reopen it",
+    page: new_usage(),
+    spec: new_spec(),
+    positional: "TITLE...",
+    missing: "what is the board called? e.g. lll new \"Payments rewrite\"",
+    run: new_board,
+    ..,
+  }
+}
+
+fn new_board(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let p = input.parsed
+  let mut words: Slice<string> = []
+  for i in 0..p.positional_count() {
+    words = words.append(p.nth(i))
+  }
+  let title = strings.Join(strings.Fields(strings.Join(words, " ")), " ")
+  if title == "" {
+    return Err(flags.usage_error(f"a board needs a title\nusage: {input.usage}"))
+  }
+  let key = if p.given("--key") {
+    records.normalize_team_key(p.one("--key"))
+  } else {
+    derive_board_key(title)
+  }
+  if key == "" {
+    return Err(flags.usage_error(
+      f"no team key can be made from '{title}'; choose one with --key KEY",
+    ))
+  }
+  if let Some(why) = records.team_key_problem(key) {
+    return Err(flags.usage_error(f"--key {key}: {why}"))
+  }
+  let home = ctx.settings.home_path().map_err(pb.failed)?
+  let dir = filepath.Join(filepath.Dir(home), "boards", strings.ToLower(key))
+  let title_file = filepath.Join(dir, ".lll-title")
+  let stored = match os.ReadFile(title_file) {
+    Ok(b) => Some(strings.TrimSpace(b as string)),
+    Err(_) => if os.Stat(dir).is_ok() { Some("") } else { None },
+  }
+  if let Some(why) = board_refusal(key, dir, stored, title) {
+    return Err(pb.fail(pb.ErrorKind.Refused, why))
+  }
+  // LLL-726: .lll.toml gets this board's url and team, so one that attaches
+  // the directory elsewhere (a repo's committed file, say) is refused
+  // before anything is written.
+  let attached = ctx.settings.repo_path()
+  let current = config.load_file(attached).map_err(pb.failed)?
+  if let Some(why) = attach_refusal(attached, current, key, title) {
+    return Err(pb.fail(pb.ErrorKind.Refused, why))
+  }
+  if stored.is_none() {
+    if let Err(e) = os.MkdirAll(dir, 0o700) {
+      return Err(pb.failed(f"creating the board directory {dir}: {e}"))
+    }
+    write_home_config(title_file, title + "\n")?
+    fmt.Println(f"new    {title} (team {key}), data in {dir}")
+  } else {
+    fmt.Println(f"open   {title} (team {key}), data in {dir}")
+  }
+
+  let mut args = ["--pb-dir", dir]
+  let mut named = NamedBoard { also_listen: [], links: [] }
+  if p.given("--share") {
+    let cidrs = interface_cidrs()
+    let tailnet = tailscale_addresses(cidrs)
+    let lan = lan_ip(cidrs)
+    let Some(primary) = lan.or_else(|| tailnet.ip) else {
+      return Err(pb.failed(
+        "--share found no LAN or Tailscale address on this machine; connect to a network, or omit --share",
+      ))
+    }
+    args = args.append("--bind", primary)
+    if let Some(ip) = lan { named.links = named.links.append(("LAN", ip)) }
+    match tailnet.ip {
+      Some(ts) => {
+        if ts != primary { named.also_listen = named.also_listen.append(ts) }
+        named.links = named.links.append(("Tailscale", ts))
+        if let Some(name) = tailnet.dns_name {
+          named.links = named.links.append(("Tailscale", name))
+        }
+      },
+      None => {
+        let _ = fmt.Println(
+          "share  Tailscale not found on this machine: sharing on the LAN only",
+        )
+      },
+    }
+  }
+  if p.given("--demo") { args = args.append("--demo") }
+  if p.given("--no-open") { args = args.append("--no-open") }
+  if p.given("--port") { args = args.append("--port", p.one("--port")) }
+  let parsed = flags.parse(up_spec(), args, 0, false, input.usage)?
+  // The team comes from the title, not from whatever this directory was
+  // attached to; a .lll.toml that already names it is left as it is.
+  let (cfg, _) = ctx.settings.traced().map_err(pb.failed)?
+  let ctx = if cfg.team == key {
+    ctx
+  } else {
+    ctx.with_settings(ctx.settings.with_team(key))
+  }
+  up_run(
+    flags.CommandInput { ctx, args, parsed, usage: input.usage },
+    Some(named),
+  )
+}
+
+/// Point the CLI in this directory at the board (LLL-726): .lll.toml names
+/// its url and board url, and its member token goes to logins.toml beside
+/// the home config, keyed by that url. The home config's login, whichever
+/// server it is for, is not touched, so other directories keep it. Returns
+/// the banner line.
+fn log_directory_in(
+  settings: config.Settings,
+  url: string,
+  board_url: string,
+  token: string,
+) -> Result<string, pb.CliError> {
+  let repo = set_repo_key(settings, "url", url)?
+  let _ = set_repo_key(settings, "web_url", board_url)?
+  let logins = save_login(settings, url, token)?
+  Ok(f"cli    logged in here: url in {repo}, token in {logins}")
+}
+
+/// Pure. Why `lll new` must not write this board into `path`, whose
+/// contents are `file`, or None (LLL-726). A file that names no team and no
+/// url, or this board's team with no url or a url on this machine (the
+/// board's own, from an earlier run), is this board's to write. Anything
+/// else attaches the directory to another team or server, maybe for every
+/// clone of a repo, and is not rewritten.
+fn attach_refusal(path: string, file: config.Config, key: string, title: string) -> Option<string> {
+  let team_ok = file.team == "" || strings.EqualFold(file.team, key)
+  let url_ok = file.url == "" || (is_loopback(file.url) && file.team != "")
+  if team_ok && url_ok { return None }
+  let team = if file.team == "" { "no team" } else { f"team {file.team}" }
+  let url = if file.url == "" { "" } else { f" at {file.url}" }
+  Some(
+    f"{path} attaches this directory to {team}{url}; lll new would rewrite it with team {key} and this board's url
+to start the board in its own directory: mkdir {strings.ToLower(key)} && cd {strings.ToLower(key)} && lll new \"{title}\"
+to move this directory to the new board: remove the team and url lines from {path}, then rerun",
+  )
+}
+
+/// Pure. Whether the home config has no login to keep: no token, and no
+/// url naming another machine's server. Only then may a named board's
+/// shared boot save its login there (LLL-726).
+fn home_login_free(home: config.Config) -> bool {
+  home.token == "" && (home.url == "" || is_loopback(home.url))
+}
+
+/// Pure. The team key a title suggests: the initials of three or more words
+/// (at most five), else the first three letters and digits of the title, so
+/// "Payments rewrite" is PAY and "Big new launch plan" is BNLP. ASCII only,
+/// starting with a letter, so it always passes the key rule; "" when the
+/// title has nothing to make one from.
+fn derive_board_key(title: string) -> string {
+  let words = strings
+    .Fields(title)
+    .map(|w| key_chars(w, 64))
+    .filter(|w| w != "")
+  if words.length() >= 3 {
+    return key_chars(strings.Join(words.map(|w| w.substring(0..1)), ""), 5)
+  }
+  key_chars(strings.Join(words, ""), 3)
+}
+
+/// Uppercased ASCII letters and digits of `raw`, from its first letter on,
+/// at most `limit` of them.
+fn key_chars(raw: string, limit: int) -> string {
+  let mut key = ""
+  for r in strings.ToUpper(raw).runes() {
+    if key.length() == limit { break }
+    let letter = r >= 'A' && r <= 'Z'
+    let digit = r >= '0' && r <= '9'
+    if letter || (digit && key != "") { key += r as string }
+  }
+  key
+}
+
+/// Pure. Why `lll new` must not open the board directory `dir` for `title`,
+/// or None. `stored` is the title the directory was made for, None when there
+/// is no directory yet, "" when there is one without a title. The same title
+/// reopens its board; another title with the same key is refused.
+fn board_refusal(
+  key: string,
+  dir: string,
+  stored: Option<string>,
+  title: string,
+) -> Option<string> {
+  let Some(was) = stored else {
+    return None
+  }
+  if was != "" && strings.EqualFold(was, title) { return None }
+  let held = if was == "" { "a board directory" } else { f"the board '{was}'" }
+  Some(
+    f"team key {key} already has {held} in {dir}
+to open that board: lll new \"{was}\"
+to start a separate board: lll new \"{title}\" --key OTHER",
+  )
+}
+
+/// The addresses of this machine's interfaces, as CIDR strings.
+fn interface_cidrs() -> Slice<string> {
+  let Ok(addrs) = net.InterfaceAddrs() else {
+    return []
+  }
+  addrs.map(|a| a.String())
+}
+
+/// Pure. The first private (RFC 1918) IPv4 address among `cidrs`: the LAN
+/// address. Loopback, link-local, public and Tailscale's 100.64.0.0/10 are not
+/// private, so `--share` never listens on them by accident.
+fn lan_ip(cidrs: Slice<string>) -> Option<string> {
+  for c in cidrs {
+    let Ok((ip, _)) = net.ParseCIDR(c) else {
+      continue
+    }
+    let text = ip.String()
+    if !strings.Contains(text, ":") && ip.IsPrivate() { return Some(text) }
+  }
+  None
+}
+
+/// Pure. Whether one of `cidrs` is the address `ip`.
+fn holds_address(cidrs: Slice<string>, ip: string) -> bool {
+  for c in cidrs {
+    if strings.SplitN(c, "/", 2)[0] == ip { return true }
+  }
+  false
+}
+
+struct Tailnet { ip: Option<string>, dns_name: Option<string> }
+
+#[json]
+struct TailscaleStatus {
+  #[json("Self")]
+  me: TailscaleNode,
+}
+
+#[json]
+struct TailscaleNode {
+  #[json("DNSName")]
+  dns_name: string,
+}
+
+/// This machine's Tailscale IPv4 address and MagicDNS name, from the
+/// `tailscale` CLI (on PATH, or inside the macOS app). Nothing when it is
+/// absent or not connected: a stopped Tailscale still prints its IP, so the
+/// IP counts only while one of this machine's interfaces (`cidrs`) holds it.
+fn tailscale_addresses(cidrs: Slice<string>) -> Tailnet {
+  let none = Tailnet { ip: None, dns_name: None }
+  let app = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  let bin = match exec.LookPath("tailscale") {
+    Partial.Ok(path) => path,
+    Partial.Err(_) | Partial.Both(_, _) => if os.Stat(app).is_ok() {
+      app
+    } else {
+      return none
+    },
+  }
+  let Ok(out) = exec.Command(bin, "ip", "-4").Output() else {
+    return none
+  }
+  let ip = strings.TrimSpace(strings.SplitN(out as string, "\n", 2)[0])
+  if !strings.Contains(ip, ".") || !holds_address(cidrs, ip) { return none }
+  let dns_name = match exec.Command(bin, "status", "--json").Output() {
+    Ok(status) => magic_dns_name(status),
+    Err(_) => None,
+  }
+  Tailnet { ip: Some(ip), dns_name }
+}
+
+/// Pure. The MagicDNS name in `tailscale status --json`, without its
+/// trailing dot, or None.
+fn magic_dns_name(status: Slice<byte>) -> Option<string> {
+  let mut parsed = TailscaleStatus { .. }
+  if json.Unmarshal(status, &parsed).is_err() { return None }
+  let name = strings.TrimSuffix(parsed.me.dns_name, ".")
+  if name == "" { None } else { Some(name) }
+}
+
+/// Pure. The banner's sign-in link per reachable address.
+fn share_lines(
+  links: Slice<(string, string)>,
+  port: int,
+  board_token: string,
+) -> Slice<string> {
+  links.map(|link| {
+    let (label, host) = link
+    let addr = net.JoinHostPort(host, f"{port}")
+    f"share  {label}: http://{addr}/?board_token={board_token}"
+  })
+}
+
+fn new_usage() -> string {
+  "lll new - start a named board in one command
+
+Usage:
+  lll new \"TITLE\" [--key KEY] [--demo] [--share] [--port 8100] [--no-open]
+
+Starts a board for TITLE and attaches the current directory to it: the team
+key comes from the title (PAY for \"Payments rewrite\"; --key chooses one),
+the data lives in boards/<key> beside the lll config file (normally
+~/.config/lll/boards/pay), and .lll.toml here names the team and the board's
+url. Then it is 'lll up': the same banner, board link, login link and agent
+prompt.
+
+The CLI in this directory is logged in to the board: its token goes to
+logins.toml beside the config file (0600), never to .lll.toml. A login the
+home config already holds, for any server, is kept and still used everywhere
+else. A .lll.toml that attaches this directory to another team or server is
+refused (exit 4), not rewritten: run lll new in a directory of its own.
+
+Run it again with the same title to reopen that board. A key that already
+holds a board with another title is refused (exit 4); choose another --key.
+
+--share listens on this machine's LAN address and, when Tailscale is
+connected, its Tailscale address, and prints a sign-in link for each (the
+MagicDNS name too). Without Tailscale it says so and shares on the LAN only.
+The board token is kept in the board directory, so links survive a restart.
+It never listens on every interface.
+
+--demo seeds issues and docs to try, as 'lll up --demo' does.
+" +
+  flags.section(new_spec())
+}

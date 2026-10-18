@@ -102,3 +102,27 @@ fn a_revoked_token_is_replaced_where_it_came_from() {
     assert kept_token_notice(source, "a@x", "lll login") == notice
   }
 }
+
+// LLL-726: logout removes the one server's saved login and keeps the rest.
+#[test]
+fn clear_login_removes_only_that_servers_login() {
+  let assert Ok(dir) = os.MkdirTemp("", "lll-logins")
+  defer { let _ = os.RemoveAll(dir) }
+  let s = config.given(config.Config { .. }, config.Sources { .. }, config.Env { config_home: dir, .. })
+  let a = "http://127.0.0.1:8091"
+  let b = "http://127.0.0.1:8092"
+  let assert Ok(path) = save_login(s, a, "tok-a")
+  let assert Ok(_) = save_login(s, b + "/", "tok-b")
+  let assert Ok(Some(cleared)) = clear_login(s, a + "/")
+  assert cleared == path
+  let assert Ok(data) = os.ReadFile(path)
+  let text = data as string
+  assert !text.contains("tok-a")
+  assert text.contains("tok-b")
+  let assert Ok(info) = os.Stat(path)
+  assert info.Mode().Perm() == 0o600
+  // Nothing saved for it: nothing to clear.
+  let assert Ok(None) = clear_login(s, a)
+  assert !login_line_for("token = \"x\"", a)
+  assert login_line_for("  \"http://127.0.0.1:8091/\" = \"x\"", a)
+}

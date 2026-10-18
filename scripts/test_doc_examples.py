@@ -10,7 +10,7 @@ What runs: README.md's fenced `sh`/`bash` blocks and docs/index.html's terminal
 panes (`<span class="cmd">`), every line of each block that has at least one
 line running `lll` (after any VAR=value prefix, or a shell operator). Lines run in order in
 one bash process, so a `cd` carries into later blocks the way it does for a
-reader. Each must exit 0, pipelines included. A line running `lll up` starts
+reader. Each must exit 0, pipelines included. A line running `lll up` or `lll new` starts
 in the background and the check waits for its banner. The run is its own
 process group, stopped as a whole afterwards, so no server outlives it.
 `brew`, `curl`, `wget` and `sudo` are stubs that refuse.
@@ -56,7 +56,7 @@ SKIP = re.compile(r'<!--\s*example-check:\s*skip:\s*(.+?)\s*-->')
 # A '$ ' prompt prefix counts too, so such a block runs (and fails) rather
 # than being passed over.
 LLL_LINE = re.compile(r'(?:^|^\$|&&|\|\||;|\||\$\(|\b(?:then|do|else))\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll(?:\s|$)')
-UP_LINE = re.compile(r'^(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll up(?:\s|$)')
+UP_LINE = re.compile(r'^(?:[A-Z_][A-Z0-9_]*=\S+\s+)*lll (?:up|new)(?:\s|$)')
 
 
 def logical_lines(text):

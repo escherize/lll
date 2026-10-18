@@ -48,7 +48,8 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/commands/watch.lis', 'watch_stream'): 'lll watch: an event stream that runs until interrupted',
     ('src/commands/watch.lis', 'run_issue_watch'): 'lll issue watch: an event stream that runs until interrupted or --until',
     ('src/commands/watch.lis', 'watch_ready'): 'lll watch --ready: an event stream that runs until interrupted',
-    ('src/commands/up.lis', 'up'): 'lll up: the boot banner is on screen while the server it starts keeps running',
+    ('src/commands/up.lis', 'up_run'): 'lll up: the boot banner is on screen while the server it starts keeps running',
+    ('src/commands/new.lis', 'new_board'): 'lll new: boot banner lines before it becomes lll up',
     ('src/commands/up_team.lis', 'ensure_team'): 'lll up: boot banner line',
     ('src/commands/up_team.lis', 'resolve_team'): 'lll up: boot banner line',
     ('src/commands/up_team.lis', 'board_identity'): 'lll up: boot banner lines',
@@ -66,6 +67,8 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/realtime/realtime.lis', 'reconnect'): 'reconnect notices on stderr while a watch stream or the board runs',
     ('src/commands/upgrade.lis', 'run_upgrade'): 'lll upgrade: notes before Homebrew runs, then its output passes through',
     ('src/commands/member_invite.lis', 'member_passes'): 'lll member passes: opens the private 0600 handoff file at --out, a file and not a stream',
+    ('src/commands/auto_update.lis', 'take_lock'): 'auto-update (LLL-721): creates the 0600 lock file beside the config, a file and not a stream',
+    ('src/commands/auto_update.lis', 'spawn_detached'): 'auto-update (LLL-721): opens auto-update.log for the detached brew upgrade, a file and not a stream',
 }
 
 
@@ -79,13 +82,14 @@ CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ('src/commands/watch.lis', 'watch_stream'): {('src/commands/watch.lis', 'watch')},
     ('src/commands/watch.lis', 'run_issue_watch'): {('src/commands/watch.lis', 'issue_watch')},
     ('src/commands/watch.lis', 'watch_ready'): {('src/commands/watch.lis', 'watch_stream')},
-    ('src/commands/up.lis', 'up'): {('src/commands/up.lis', 'up_command')},
-    ('src/commands/up_team.lis', 'ensure_team'): {('src/commands/up.lis', 'up')},
+    ('src/commands/up.lis', 'up_run'): {('src/commands/up.lis', 'up'), ('src/commands/new.lis', 'new_board')},
+    ('src/commands/new.lis', 'new_board'): {('src/commands/new.lis', 'new_command')},
+    ('src/commands/up_team.lis', 'ensure_team'): {('src/commands/up.lis', 'up_run')},
     ('src/commands/up_team.lis', 'resolve_team'): {('src/commands/up_team.lis', 'ensure_team')},
-    ('src/commands/up_team.lis', 'board_identity'): {('src/commands/up.lis', 'up')},
+    ('src/commands/up_team.lis', 'board_identity'): {('src/commands/up.lis', 'up_run')},
     ('src/commands/up_team.lis', 'ask_team'): {('src/commands/up_team.lis', 'ensure_team')},
     ('src/commands/up_team.lis', 'save_team'): {('src/commands/up_team.lis', 'ensure_team')},
-    ('src/commands/demo.lis', 'seed_demo'): {('src/commands/up.lis', 'up')},
+    ('src/commands/demo.lis', 'seed_demo'): {('src/commands/up.lis', 'up_run')},
     ('src/commands/demo.lis', 'point_cli_at_demo'): {('src/commands/demo.lis', 'seed_demo')},
     ('src/commands/delete.lis', 'confirmed'): {
         ('src/commands/delete.lis', 'confirmed_on_terminal'),
@@ -101,6 +105,8 @@ CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ('src/realtime/realtime.lis', 'reconnect'): {('src/realtime/realtime.lis', 'start')},
     ('src/commands/upgrade.lis', 'run_upgrade'): {('src/commands/upgrade.lis', 'upgrade')},
     ('src/commands/member_invite.lis', 'member_passes'): {('src/commands/member.lis', 'member_commands')},
+    ('src/commands/auto_update.lis', 'take_lock'): {('src/commands/auto_update.lis', 'start_auto_update')},
+    ('src/commands/auto_update.lis', 'spawn_detached'): {('src/commands/auto_update.lis', 'start_auto_update')},
 }
 
 
