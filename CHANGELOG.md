@@ -92,7 +92,6 @@ the url it would reach.
   would reach, and says so; when that login was the one in use, the home
   config's token is kept.
 
-
 ## [1.2.0] - 2026-10-16
 
 ### Upgrading from 1.1
