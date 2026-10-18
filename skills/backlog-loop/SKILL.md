@@ -87,7 +87,10 @@ lll issue view KEY --raw                    # read it FULLY, including comments
 
 `lll issue next --claim` picks and claims in one step. Use it only when you
 will apply the filter above to whatever it hands you, and release the issue
-with a comment if it fails.
+with a comment if it fails. When nothing unclaimed is left it hands back a
+ready issue you already hold under the same `--agent` label (or an
+unlabelled hold), saying `Resuming KEY` on stderr, so a loop that crashed
+after claiming picks its own work up again instead of exiting 5.
 
 Comments carry the reasons an issue is harder than its title. One issue on lll's
 board looks like a two-line normalisation and carries a comment explaining it
