@@ -137,3 +137,14 @@ fn a_login_without_url_refuses_a_url_a_repo_or_the_environment_chose() {
   assert login_needs_url("", b, Some(config.Source.HomeFile("/h/lll.toml")), b).is_none()
   assert login_needs_url("", "http://127.0.0.1:8090", Some(config.Source.Default), "").is_none()
 }
+
+// LLL-726: logout keeps the home login when the one in use came from
+// logins.toml.
+#[test]
+fn logins_token_names_only_the_logins_file() {
+  let logins = "/h/lll/logins.toml"
+  assert logins_token(Some(config.Source.HomeFile(logins)), logins)
+  assert !logins_token(Some(config.Source.HomeFile("/h/lll/lll.toml")), logins)
+  assert !logins_token(Some(config.Source.Env("LLL_TOKEN")), logins)
+  assert !logins_token(None, logins)
+}
