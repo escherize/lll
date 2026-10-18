@@ -18,7 +18,9 @@ struct AdvertisedVersion { service: string, version: string }
 
 /// LLL-607: tell the user when the server they talk to runs a newer lll than
 /// this binary, because a newer server can need commands this build lacks and
-/// nothing else says so. Detection only; nothing is replaced or downloaded.
+/// nothing else says so. A Homebrew install starts its own upgrade in the
+/// background instead of warning (LLL-721, auto_update.lis); nothing else is
+/// replaced or downloaded.
 ///
 /// The probe starts in a task before the command runs and its line is read
 /// after, so it overlaps the command's own requests. It runs at most once a
@@ -68,8 +70,13 @@ fn skew_line(ctx: pb.Client, noun: string) -> Option<string> {
   if os.MkdirAll(filepath.Dir(stamp), 0o700).is_err() { return None }
   if os.WriteFile(stamp, today.bytes(), 0o600).is_err() { return None }
   let theirs = probe_server_version(base)?
-  if !newer_version(buildinfo.version(), theirs) { return None }
-  Some(skew_warning(buildinfo.version(), base, theirs))
+  let mine = buildinfo.version()
+  if !newer_version(mine, theirs) { return None }
+  // LLL-721: a Homebrew install updates itself in the background instead.
+  match start_auto_update(ctx.settings, filepath.Dir(home), mine, theirs) {
+    Some(log) => Some(auto_update_line(mine, theirs, log)),
+    None => Some(skew_warning(mine, base, theirs)),
+  }
 }
 
 fn probe_server_version(base: string) -> Option<string> {

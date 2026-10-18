@@ -7,7 +7,8 @@ in [Lisette](https://github.com/ivov/lisette), which compiles to Go.
 - Teams, `ENG-123` identifiers, states, priorities, projects, labels and
   markdown comments.
 - `--json` on reads and NDJSON event streams, for scripts and coding agents.
-- `lll up` starts the server and the web board in one process.
+- `lll new "Payments rewrite"` starts a board, server and web board in one
+  process, and attaches the current directory to it.
 
 ![The lll board: six state columns with issue cards, a left rail, and a search
 field](docs/board.png)
@@ -34,18 +35,19 @@ The binary includes PocketBase, the migrations and the web assets, so
 ## Quickstart
 
 These commands run as written on a machine with only lll installed. A team is
-one tracker; its key (`DEMO`) prefixes every issue id (`DEMO-1`).
+one tracker; its key (`PAY`) prefixes every issue id (`PAY-1`).
 
 ```sh
-mkdir my-board && cd my-board
-LLL_TEAM=DEMO lll up           # lll server (:8090) + web board (:8100)
+lll new "Payments rewrite"     # team PAY: lll server (:8090) + web board (:8100)
 ```
 
-The first boot creates the team, writes `.lll.toml` here, and creates a
-member named after `$USER`. A taken port moves to the next free one. If an lll
-server already answers at the API url, `lll up` uses it, unless only a repo
-`.lll.toml` chose that url: then it stops with exit 4. Ctrl-C stops
-everything.
+The key comes from the title (`--key` picks your own). The first run creates
+the team, keeps its data in `~/.config/lll/boards/pay`, writes `.lll.toml`
+here, and creates a member named after `$USER`. A taken port moves to the next
+free one. Ctrl-C stops everything; run the same command again to reopen the
+board. A key that another title already holds is refused with exit 4.
+`lll new` is `lll up` with those choices made, so everything below about
+`lll up` holds for it too.
 
 `lll up` prints one line per fact:
 
@@ -63,18 +65,25 @@ everything.
 
 With `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot
 generates a password for `admin@local.dev`. Read it with
-`jq -r .password pb/pb_data/.lll-admin.json`. `lll up` logs the CLI in only
+`jq -r .password ~/.config/lll/boards/pay/.lll-admin.json` (`lll up` without
+`--pb-dir` keeps it in `pb/pb_data`). `lll up` logs the CLI in only
 when your home config holds no token and names no other server; it never
-replaces a login.
+replaces a login. `lll new` also logs in the directory it ran in, even when
+you are logged in to another server: `.lll.toml` names the board's url, and
+its token goes to `~/.config/lll/logins.toml` (0600), never to `.lll.toml`.
+Commands in that directory reach the new board; everywhere else keeps your
+other login, and `lll logout` there removes only the board's. A `.lll.toml`
+that already attaches the directory to another team or server is refused
+(exit 4) rather than rewritten.
 
-In a second shell, in `my-board`:
+In a second shell, in the same directory:
 
 ```sh
 lll whoami          # your member, server and team
-lll issue create -t "First issue" --priority 2 --emoji 🧪   # DEMO-1
-lll issue claim DEMO-1
-lll issue comment DEMO-1 -b "Started on it"
-lll issue close DEMO-1   # done; closing also releases your claim
+lll issue create -t "First issue" --priority 2 --emoji 🧪   # PAY-1
+lll issue claim PAY-1
+lll issue comment PAY-1 -b "Started on it"
+lll issue close PAY-1   # done; closing also releases your claim
 lll board -w        # opens the board, signed in
 ```
 
@@ -82,15 +91,15 @@ Attach a repository to the team (a new one stands in for yours):
 
 ```sh
 git init -q ../my-repo && cd ../my-repo
-lll attach --key DEMO     # writes team = "DEMO" to .lll.toml; commit that file
-lll issue list            # DEMO-1, from inside the repo
+lll attach --key PAY     # writes team = "PAY" to .lll.toml; commit that file
+lll issue list            # PAY-1, from inside the repo
 ```
 
 Invite a colleague with a single-use link, or with an email and a temporary
 password:
 
 ```sh
-lll invite create --team DEMO    # prints <board>/join/<code>
+lll invite create --team PAY    # prints <board>/join/<code>
 lll member invite kim --email kim@example.com
 ```
 
@@ -112,6 +121,21 @@ its data directory (`pb/pb_data`, or your `--pb-dir`). The new version
 migrates the database on first start; the backup is the only way back.
 Upgrade the server first, then its clients.
 
+A Homebrew install updates itself. Once a day per server, lll checks the
+server's version. When the server is newer, lll starts `brew upgrade lll` in
+the background, prints one line on stderr and finishes your command
+unchanged:
+
+    lll: updating 1.2.0 -> 1.3.0 in the background (log: ~/.config/lll/auto-update.log). Disable: LLL_AUTO_UPDATE=0
+
+To switch this off, set `LLL_AUTO_UPDATE=0` or put `auto_update = false` in
+`~/.config/lll/lll.toml`. It is off when `CI` is set. It is also off on a
+machine that runs the server: where `lll up` has run (it leaves
+`board-login-url` beside the config) or where a Homebrew `lll up` is running.
+There, and on every install that is not Homebrew, lll prints the warning
+`... Upgrade: lll upgrade` instead. A machine that starts `lll up` with
+another config directory should set `auto_update = false`.
+
 From 1.0, the surface in [docs/cli-contract.md](docs/cli-contract.md) follows
 SemVer. [docs/upgrading-to-1.0.md](docs/upgrading-to-1.0.md) lists every
 0.9 -> 1.0 change a script can observe; [CHANGELOG.md](CHANGELOG.md) has the
@@ -121,11 +145,16 @@ full history.
 
 <!-- example-check: skip: needs a LAN or Tailscale address -->
 ```sh
-mkdir hack-board && cd hack-board
-LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>
-# in a second terminal, in hack-board:
+lll new "Hack night" --share   # prints a sign-in link per LAN and Tailscale address
+# in a second terminal, in the same directory:
 lll member passes --count 10 --prefix hack
 ```
+
+`--share` listens on this machine's LAN address and, when Tailscale is
+connected, its Tailscale address; it never listens on every interface. Without
+Tailscale it says so and shares on the LAN only. The board token is kept in the
+board's directory, so the links survive a restart. To pick one address
+yourself: `LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>`.
 
 `lll member passes` writes a private handoff file (mode 0600) with ten member
 tokens, the API address and a board login link. Send each teammate only their
@@ -221,6 +250,7 @@ Client settings:
 | `LLL_SORT` | `sort` | default sort: `created`, `updated`, `priority`, `number`, `title`; `-` descends |
 | `LLL_WEB_URL` | `web_url` | board base URL for browser links |
 | `LLL_TOKEN` | `token` | auth token; a secret, never in a repo's `.lll.toml` |
+| `LLL_AUTO_UPDATE` | `auto_update` | `0` / `false` stops a Homebrew install updating itself; see [Upgrade](#upgrade) |
 
 `lll board` never puts the board token into a link to a repo file's
 `web_url`.
@@ -241,26 +271,26 @@ In `my-repo` from the quickstart:
 ```sh
 cd ../my-repo
 lll label create bug
-lll issue create -t "Fix login" --priority 1 --assignee "$USER" --label bug   # DEMO-2
+lll issue create -t "Fix login" --priority 1 --assignee "$USER" --label bug   # PAY-2
 lll issue list --state todo --sort -updated
-lll issue branch-name DEMO-2  # print demo-2-fix-login; changes nothing
-lll issue start DEMO-2        # state -> in-progress; leaves Git untouched
-lll issue start DEMO-2 --branch  # also create or switch to that branch, and record the work site
-lll issue claim DEMO-2        # take it exclusively; non-zero if someone holds it
-lll issue view                # DEMO-2, inferred from the git branch
+lll issue branch-name PAY-2  # print pay-2-fix-login; changes nothing
+lll issue start PAY-2        # state -> in-progress; leaves Git untouched
+lll issue start PAY-2 --branch  # also create or switch to that branch, and record the work site
+lll issue claim PAY-2        # take it exclusively; non-zero if someone holds it
+lll issue view                # PAY-2, inferred from the git branch
 lll issue comment -b "done in abc123"   # markdown; renders on the web board
-lll issue ref DEMO-2 gh#42    # append once; also retries a failed PR-reference save
-lll issue release DEMO-2      # give it back
-lll issue close               # DEMO-2 again, from the branch
+lll issue ref PAY-2 gh#42    # append once; also retries a failed PR-reference save
+lll issue release PAY-2      # give it back
+lll issue close               # PAY-2 again, from the branch
 ```
 
 These need a GitHub remote, or stream until Ctrl-C:
 
 <!-- example-check: skip: needs a GitHub remote, or streams until Ctrl-C -->
 ```sh
-lll issue pr                  # gh pr create titled "DEMO-2: Fix login"; records gh#N
+lll issue pr                  # gh pr create titled "PAY-2: Fix login"; records gh#N
 lll watch --state in-review   # live NDJSON-able event stream for a query
-lll issue watch DEMO-2        # one issue + its comments, until Ctrl-C
+lll issue watch PAY-2        # one issue + its comments, until Ctrl-C
 ```
 
 More nouns and helpers:

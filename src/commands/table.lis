@@ -28,6 +28,7 @@ pub fn nouns() -> Slice<flags.Noun> {
     flags.Noun { name: "export", shape: flags.Shape.Single(export_command()), server: true, .. },
     flags.Noun { name: "attach", shape: flags.Shape.Single(attach_command()), .. },
     flags.Noun { name: "watch", shape: flags.Shape.Single(watch_command()), scoped: true, .. },
+    flags.Noun { name: "new", shape: flags.Shape.Single(new_command()), .. },
     flags.Noun { name: "up", shape: flags.Shape.Single(up_command()), .. },
     flags.Noun { name: "board", shape: flags.Shape.Single(board_command()), .. },
     flags.Noun { name: "login", shape: flags.Shape.Single(login_command()), .. },

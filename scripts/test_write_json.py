@@ -48,6 +48,7 @@ WITHOUT_JSON = {
     ('export', '*'): 'writes a directory of Markdown; the files are the result',
     ('skill', 'get'): 'prints the skill itself, as markdown',
     ('up', '*'): 'runs a server',
+    ('new', '*'): 'runs a server (it is lll up)',
     ('board', '*'): ONE_VALUE,
     ('login', '*'): "stores a token; 'lll whoami --json' reads the identity",
     ('upgrade', '*'): 'runs or prints an upgrade command',
