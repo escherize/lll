@@ -70,6 +70,26 @@ comments, so the issue endpoint does not answer for comments.
 `lll issue comment --idempotency-key KEY` checks this before writing and
 reports `Reused the comment` for matching retries.
 
+## The audit log
+
+Every create, update and delete of an issue, comment or claim appends one
+`audit_events` row in the same transaction as the write, whichever path made
+it: the records API, an `/api/lll` route, the claim-expiry sweep. A row names
+the `collection`, `record` and `action`, the issue (`issue`, `number`,
+`team`, `project`), who asked (`actor` member id, `actor_kind` person, bot,
+superuser or system, `agent`, `origin_host`) and `changes`: each changed
+field as `{"from": ..., "to": ...}`.
+
+Read rows in order with `sort=seq&filter=seq > N`. `seq` is the cursor: it
+is assigned inside the write's transaction, so a reader that has seen `seq`
+N has seen every row below it. Rows follow the issues read rule, so a scoped
+member reads only its teams'. No member and no superuser can create or edit
+a row; a superuser may delete one (retention).
+
+The agent label and origin host are self-asserted: the CLI sends
+`X-LLL-Agent` (from `LLL_AGENT`) and `X-LLL-Origin-Host` on every request,
+and a comment's or claim's own agent label wins. `lll activity` reads the log.
+
 ## Webhooks
 
 `POST /api/collections/webhooks/records` registers a URL that receives the

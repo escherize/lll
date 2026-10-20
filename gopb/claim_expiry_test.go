@@ -233,7 +233,7 @@ func TestRenewedClaimSurvivesTheSweep(t *testing.T) {
 	backdateClaim(t, app, held.ClaimID, claimMaxAge-time.Hour)
 	before, _ := currentClaim(app, issueID)
 
-	renewed, err := renewClaim(app, issueID, held.ClaimID, alpha, "")
+	renewed, err := renewClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestRenewBetweenSweepListAndDeleteKeepsTheClaim(t *testing.T) {
 	if err != nil || len(stale) != 1 || stale[0].Id != held.ClaimID {
 		t.Fatalf("expected the backdated claim in the stale list: %v %v", stale, err)
 	}
-	if _, err := renewClaim(app, issueID, held.ClaimID, alpha, ""); err != nil {
+	if _, err := renewClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if expireClaim(app, stale[0], cutoff, now) {
@@ -313,7 +313,7 @@ func TestRenewBetweenSweepListAndDeleteKeepsTheClaim(t *testing.T) {
 // exists. Each refusal changes nothing.
 func TestRenewRefusesAllButTheHolder(t *testing.T) {
 	app, issueID, alpha, beta := claimFixture(t)
-	if _, err := renewClaim(app, issueID, "anything", alpha, ""); err == nil || !strings.Contains(err.Error(), "is not claimed") {
+	if _, err := renewClaim(app, issueID, "anything", releaser{memberID: alpha, agent: ""}); err == nil || !strings.Contains(err.Error(), "is not claimed") {
 		t.Fatalf("renewing an unclaimed issue: %v", err)
 	}
 	held, err := acquireClaim(app, issueID, alpha, "")
@@ -324,13 +324,13 @@ func TestRenewRefusesAllButTheHolder(t *testing.T) {
 	before, _ := currentClaim(app, issueID)
 
 	var rejected *claimRejection
-	if _, err := renewClaim(app, issueID, held.ClaimID, beta, ""); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "held by Alpha") {
+	if _, err := renewClaim(app, issueID, held.ClaimID, releaser{memberID: beta, agent: ""}); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "held by Alpha") {
 		t.Fatalf("a non-holder renewed: %v", err)
 	}
-	if _, err := renewClaim(app, issueID, held.ClaimID, "", ""); !errors.As(err, &rejected) {
+	if _, err := renewClaim(app, issueID, held.ClaimID, releaser{memberID: "", agent: ""}); !errors.As(err, &rejected) {
 		t.Fatalf("a superuser (no member) renewed: %v", err)
 	}
-	if _, err := renewClaim(app, issueID, "stale-id", alpha, ""); err == nil || !strings.Contains(err.Error(), "claim changed") {
+	if _, err := renewClaim(app, issueID, "stale-id", releaser{memberID: alpha, agent: ""}); err == nil || !strings.Contains(err.Error(), "claim changed") {
 		t.Fatalf("a stale claim id renewed: %v", err)
 	}
 	after, _ := currentClaim(app, issueID)
@@ -353,7 +353,7 @@ func TestRenewRefusesADifferentAgentLabel(t *testing.T) {
 	before, _ := currentClaim(app, issueID)
 
 	var rejected *claimRejection
-	if _, err := renewClaim(app, issueID, held.ClaimID, alpha, "wt-b"); !errors.As(err, &rejected) ||
+	if _, err := renewClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: "wt-b"}); !errors.As(err, &rejected) ||
 		err.Error() != "the claim is held by Alpha (agent wt-a); only the holder renews it" {
 		t.Fatalf("a different agent label renewed: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestRenewRefusesADifferentAgentLabel(t *testing.T) {
 		t.Fatal("a refused renewal moved the clock")
 	}
 	for _, agent := range []string{"wt-a", ""} {
-		renewed, err := renewClaim(app, issueID, held.ClaimID, alpha, agent)
+		renewed, err := renewClaim(app, issueID, held.ClaimID, releaser{memberID: alpha, agent: agent})
 		if err != nil || renewed.Agent != "wt-a" {
 			t.Fatalf("renew with %q: %#v %v", agent, renewed, err)
 		}

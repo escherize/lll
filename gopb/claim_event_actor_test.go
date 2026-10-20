@@ -30,7 +30,7 @@ func TestClaimEventsKeepReleaserSeparateAndIdentifyExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := renewClaim(app, issue, held.ClaimID, holder, "worker"); err != nil {
+	if _, err := renewClaim(app, issue, held.ClaimID, releaser{memberID: holder, agent: "worker"}); err != nil {
 		t.Fatal(err)
 	}
 	stored, _ := app.FindRecordById("claims", held.ClaimID)

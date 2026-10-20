@@ -14,6 +14,16 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   help against a scratch board, so an example that stops working fails the
   gate (LLL-702).
 - `lll issue update --help` names `lll issue block` for blockers (LLL-695).
+- An audit log: every create, update and delete of an issue, comment or
+  claim appends an `audit_events` row in the same transaction, with the
+  member, agent label, origin host and the changed fields before and after.
+  The claim-expiry sweep is recorded as the server, a superuser write as an
+  administrator. Rows are append-only and readable per team under the issues
+  rule. `lll activity [--since CURSOR] [--project NAME] [--limit N] [--json]`
+  reads them in order after a cursor, so a client keeps one number instead of
+  diffing snapshots, and sees comments and claims that `issue list --since`
+  misses. The CLI now sends `X-LLL-Agent` (from `LLL_AGENT`) and
+  `X-LLL-Origin-Host` on every request (LLL-609).
 
 ### Changed
 
