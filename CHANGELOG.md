@@ -6,6 +6,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- `--help` for `issue next`, `claim`, `comment`, `close`, `update` and
+  `watch`, `search` and `bot create` ends with one real example invocation
+  under `Example:`. The doc-example check runs every example in the binary's
+  help against a scratch board, so an example that stops working fails the
+  gate (LLL-702).
+- `lll issue update --help` names `lll issue block` for blockers (LLL-695).
+
 ### Changed
 
 - `lll issue next --claim` hands back the caller's own held ready issue, exit
@@ -16,6 +25,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   session's labelled hold is never handed out, and an unlabelled caller does
   not get a labelled hold. Unclaimed work is still offered first. Plain
   `lll issue next` is unchanged.
+- Recovery hints echo the issue key you typed instead of `KEY-123`:
+  `lll issue assign DEMO-4` suggests `lll issue claim DEMO-4`. `lll comment
+  add DEMO-4` now suggests `lll issue comment DEMO-4 "text"` (LLL-695).
+- `lll issue update KEY --state done|cancelled` words the claim release as
+  `lll issue close` does, naming the holder: `released bryan (agent wt-a)'s
+  claim; assignee unchanged` replaces `released your claim (assignee kept)`
+  (LLL-695).
 
 ## [1.3.0] - 2026-10-17
 

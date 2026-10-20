@@ -96,7 +96,7 @@ pub fn parse_command_line(nouns: Slice<Noun>, args: Slice<string>) -> Result<Inv
   // 'lll --help anything' is still the top page, as it always was.
   if word == "--help" || word == "-h" { return Ok(Invocation.Help(Topic.Usage)) }
   let Some(noun) = find_noun(nouns, word) else {
-    return Err(usage_error(unknown_command(nouns, word, args.get(2).unwrap_or(""))))
+    return Err(usage_error(unknown_command(nouns, word, args.get(2).unwrap_or(""), args.get(3).unwrap_or(""))))
   }
   let path = f"lll {noun.name}"
   match noun.shape {
@@ -149,7 +149,7 @@ fn verb(
   // A flag where the verb goes is an unknown flag, not a verb guess: 'lll
   // completions --bogus' is no unknown shell.
   if word.starts_with("-") { return Err(usage_error(unknown_noun_flag(noun.name, word))) }
-  Err(usage_error(unknown_verb(nouns, noun.name, cmds, word)))
+  Err(usage_error(unknown_verb(nouns, noun.name, cmds, word, args.get(3).unwrap_or(""))))
 }
 
 /// Parse one command's flags and positionals from `start`.
@@ -166,13 +166,12 @@ fn command(
   if let Some(sub) = resolve_command(c.verbs, word) {
     return command(nouns, noun, f"{path} {sub.name}", sub, args, start + 1)
   }
-  if let Some(hint) = sub_verb_guess(path, c, word) { return Err(usage_error(hint)) }
+  if let Some(hint) = sub_verb_guess(path, c, word, args.get(start + 1).unwrap_or("")) { return Err(usage_error(hint)) }
   let usage = usage(path, c.spec, c.positional)
   // Help first: no flag error, missing argument or required flag may answer
   // a request for help (TASK-237), and nothing runs.
   if help_requested(c.spec, args, start) {
-    let page = if c.page != "" { c.page } else { usage_help(usage, c.spec) }
-    return Ok(Invocation.Help(Topic.Page(page)))
+    return Ok(Invocation.Help(Topic.Page(command_page(usage, c))))
   }
   let (least, most) = arity(c.positional)
   let parsed = match parse_n(c.spec, args, start, most, usage) {
@@ -190,6 +189,13 @@ fn command(
     return Err(usage_error(f"{what}usage: {usage}"))
   }
   Ok(Invocation.Run(Call { command: c, args, parsed, usage }))
+}
+
+/// One verb's help: its own page or the one generated from its usage and
+/// flags, then its example (LLL-702), the last thing on the page.
+pub fn command_page(usage: string, c: Command) -> string {
+  let page = if c.page != "" { c.page } else { usage_help(usage, c.spec) }
+  if c.example == "" { page } else { f"{page}\n\nExample:\n  {c.example}" }
 }
 
 /// How many positionals a command takes, from its declared shape: a bare or
@@ -216,7 +222,7 @@ pub fn noun_page(noun: Noun) -> string {
   match noun.shape {
     Shape.Single(c) => {
       let usage = usage(f"lll {noun.name}", c.spec, c.positional)
-      if c.page != "" { c.page } else { usage_help(usage, c.spec) }
+      command_page(usage, c)
     },
     Shape.Verbs(cmds) => noun_help(noun.name, noun.tagline, noun.intro, cmds),
     Shape.VerbsOr(cmds, _) => noun_help(noun.name, noun.tagline, noun.intro, cmds),
