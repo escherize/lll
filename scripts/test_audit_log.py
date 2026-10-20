@@ -154,4 +154,15 @@ assert call(row_path, {'actor': 'forged'}, method='PATCH')[0] in (403, 404)
 assert call(row_path, method='DELETE')[0] in (403, 404)
 assert call(row_path, method='DELETE', token=su)[0] == 204
 
-print(f'Audit log: {len(rows)} lifecycle rows in order with actor, agent and origin; cursor, limit, project, scope and append-only passed')
+# LLL-705: the same rows, tallied per agent. A second issue claimed and
+# given back is a handoff, not a close.
+cli('issue', 'create', '-t', 'Handed back')
+cli('issue', 'claim', 'AUDT-3')
+cli('issue', 'release', 'AUDT-3')
+usage = json.loads(cli('usage', '--json').stdout)['items']
+assert [(u['member'], u['agent'], u['claimed'], u['closed'], u['handed_off'], u['failed']) for u in usage] == [(me_id, 'audit-a', 2, 1, 1, 0)], usage
+plain_usage = cli('usage').stdout.splitlines()
+assert plain_usage[0] == 'AGENT\tCLAIMED\tCLOSED\tHANDED OFF\tFAILED' and plain_usage[1].endswith('(agent audit-a)\t2\t1\t1\t0'), plain_usage
+cli('usage', '--days', '0', code=2)
+
+print(f'Audit log: {len(rows)} lifecycle rows in order with actor, agent and origin; cursor, limit, project, scope and append-only passed; usage tallied claims, closes and handoffs')
