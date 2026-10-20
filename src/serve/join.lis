@@ -5,7 +5,9 @@ import "go:net/url"
 import "go:strings"
 import "go:time"
 
+import "gitctx"
 import "pb"
+import "tokens"
 
 // /join/<code> (LLL-544; doc scoped-access-invites): where an invite link
 // lands. Outside the board gate, because the visitor has no credential yet;
@@ -336,15 +338,19 @@ fn cli_steps(
   token: string,
 ) -> string {
   let pre = "style='padding: .6rem .8rem; background: #f4f4f5; border-radius: .35rem; white-space: pre-wrap; word-break: break-all;'"
-  let power = if m.access.mode.writes() { "acts as you" } else { "reads as you" }
+  let power = if m.access.mode.writes() {
+    "acts as you"
+  } else {
+    "reads as you"
+  }
   if token == "" {
-    return f"<p>Install lll first: see <a href='https://github.com/escherize/lll#install'>Install</a> in the README. Then show your CLI login: the token this browser signs in with. Anyone holding it {power}, so it is shown only when you ask, never on a reload.</p>
+    return f"<p>Install lll with <code>brew install escherize/lll/lll</code> (<a href='https://github.com/escherize/lll/releases'>other platforms</a>). Use the token login below; no email or password is needed. Then show your CLI login: the token this browser signs in with. Anyone holding it {power}, so it is shown only when you ask, never on a reload.</p>
 <form method='post' action='/me'>
 <button type='submit' style='padding: .55rem 1rem; font: inherit; border: 1px solid #1c1c1e; border-radius: .35rem; background: #1c1c1e; color: #fff; cursor: pointer;'>Show my CLI login</button>
 </form>"
   }
   let attach = match teams.get(0) {
-    Some(key) => f"<li>In your repository, attach it to the team:<pre {pre}>lll attach --key {template.HTMLEscapeString(key)}</pre></li>",
+    Some(key) => f"<li>In your repository, run this only if <code>.lll.toml</code> is not already attached to this team and server:<pre {pre}>lll attach --key {template.HTMLEscapeString(key)}</pre></li>",
     None => "",
   }
   let expiry = match pb.token_expiry(token) {
@@ -354,10 +360,35 @@ fn cli_steps(
     },
     None => "",
   }
+  let agent = member_agent_steps(m, teams, pre)
   f"<ol>
 <li>Log in. The command prompts for the token:<pre {pre}>lll login --url {template.HTMLEscapeString(origin)} --token -</pre></li>
 <li>Paste this token at the prompt and press Enter:<pre {pre}>{template.HTMLEscapeString(token)}</pre></li>
 {attach}
 </ol>
-<p>Keep the token private: anyone holding it {power}.{expiry} If it leaks, ask whoever invited you to remove this member.</p>"
+<p>Keep the token private: anyone holding it {power}.{expiry} If it leaks, ask whoever invited you to remove this member.</p>
+{agent}"
+}
+
+fn member_agent_steps(
+  m: ViewerMember,
+  teams: Slice<string>,
+  pre: string,
+) -> string {
+  if !m.access.mode.writes() {
+    return "<p>Your login is read-only. You can read the board and use the CLI; creating an agent needs a read-write login.</p>"
+  }
+  let Some(team) = teams.get(0) else {
+    return ""
+  }
+  let slug = gitctx.slug(m.name)
+  let short = if slug == "" {
+    "my-agent"
+  } else if slug.length() > 30 { slug.substring(0..30) } else { slug }
+  let command = f"lll bot create bot-{short} --team {tokens.shell_word(team)}"
+  f"<h2 style='font-size: 1.1rem; margin-top: 2rem;'>Connect your coding agent</h2>
+<p>After logging in above, run this in your terminal:</p>
+<pre {pre}>{template.HTMLEscapeString(command)}</pre>
+<p>It prints a prompt with your bot's own token. Paste that prompt into your agent. Your bot is owned by you and cannot exceed your access; do not give your agent the personal login token above.</p>
+<p>If that bot name already exists, choose another name. Create does not rotate an existing bot's token.</p>"
 }

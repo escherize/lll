@@ -1,0 +1,8 @@
+#[test]
+fn hosted_invites_cannot_fall_back_to_a_loopback_board() {
+  assert shareable_invite_base("https://hosted.test", "http://127.0.0.1:8100").is_err()
+  assert shareable_invite_base("https://hosted.test", "http://localhost:8100").is_err()
+  assert shareable_invite_base("https://hosted.test", "https://user:password@board.test").is_err()
+  assert shareable_invite_base("http://127.0.0.1:8090", "http://127.0.0.1:8100").is_ok()
+  assert shareable_invite_base("https://hosted.test", "https://hosted.test").is_ok()
+}

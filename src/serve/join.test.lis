@@ -51,3 +51,38 @@ fn the_me_page_shows_a_token_only_after_the_post() {
   assert strings.Contains(me_html(link, "", ""), "names no member")
   assert !strings.Contains(me_html(Viewer.Full, "", ""), "action='/me'")
 }
+
+#[test]
+fn the_member_setup_names_its_own_bot_without_exposing_the_personal_token_on_get() {
+  let ada = ViewerMember {
+    id: "m1",
+    name: "Ada <script>",
+    token: "private-token",
+    access: models.Access {
+      reach: models.Reach.Teams([]),
+      mode: models.Mode.ReadWrite,
+    },
+  }
+  let viewer = Viewer.Scoped(
+    ScopedViewer { teams: ["ALPHA"], member: Some(ada) },
+  )
+  let page = me_html(viewer, "https://board.example", "private-token")
+  assert page.contains("lll bot create bot-ada-script --team ALPHA")
+  assert !page.contains("Ada <script>")
+  assert page.contains("already attached")
+  assert !me_html(viewer, "", "").contains("private-token")
+  let reader = ViewerMember {
+    access: models.Access {
+      reach: models.Reach.Teams([]),
+      mode: models.Mode.ReadOnly,
+    },
+    ..ada,
+  }
+  let read_page = me_html(
+    Viewer.Scoped(ScopedViewer { teams: ["ALPHA"], member: Some(reader) }),
+    "https://board.example",
+    "private-token",
+  )
+  assert !read_page.contains("lll bot create")
+  assert read_page.contains("creating an agent needs a read-write login")
+}

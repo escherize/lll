@@ -306,3 +306,13 @@ is still running. It also prints it when this machine runs the server
 (`board-login-url` beside the config, or a running Homebrew `lll up`).
 `LLL_AUTO_UPDATE` set to any other value overrides the config; `CI`
 overrides both. Each server gets one attempt a day.
+
+## Named group invites
+
+Without `--for`, `invite create --json` keeps the existing single-invite object.
+With repeated `--for NAME`, it prints one object: `invites` (objects with
+`name`, `url`, `code`, `expires`), `teams` (team keys), `mode`, `pending` (names
+without a returned link), and boolean `complete`. Partial failure exits nonzero
+and preserves that JSON on stdout; stderr carries the error. A failed request
+may have committed, so creation retries are not idempotent. See
+[Inviting people and agents](inviting.md).

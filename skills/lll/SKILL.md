@@ -130,6 +130,22 @@ lll bot create bot-myrepo          # a member for an agent: prints a paste-ready
 surface the doc. `--paths` takes comma-separated paths; `lll finding near` matches
 by them in both directions.
 
+## Invite people and their agents
+
+`lll invite create --team KEY --for Alice --for Bob` prints one message to send,
+with a separate single-use link for each person. Keep its output; if it fails
+partway, preserve completed links and retry only the pending names. `--json`
+returns `invites`, `pending` and `complete` for a named group; without `--for`,
+the single-invite format stays the same. A lost response can still leave an
+unused invite: do not claim that a retry recovers the same link.
+
+Opening a join page does not redeem or validate a link. Submitting its form
+creates the person; their setup page shows the token-based CLI login when
+asked, then a command for creating their own bot. They do not need a password.
+Skip attachment when the repo already names the correct team and server.
+Do not create their bots with the inviter's broader token or copy their personal
+tokens into a shared message. No message is sent by the CLI.
+
 ## Bots, owners and worker credentials
 
 A bot with a human owner may create a worker with `lll bot create bot-NAME`.
