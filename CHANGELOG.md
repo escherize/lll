@@ -8,6 +8,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- `lll invite create --team ENG --for Sloan --for Maksym` prints a ready-to-send
+  group message with one labelled single-use link per person. Partial failures
+  retain completed links and name pending recipients; JSON reports completion
+  explicitly. Invite links use the contacted server's advertised board address
+  rather than a stale local setting. Joined members get token-login guidance,
+  an optional repository attachment step and their own scoped bot setup command
+  on `/me` (LLL-730). See `docs/inviting.md`.
+
 - `--help` for `issue next`, `claim`, `comment`, `close`, `update` and
   `watch`, `search` and `bot create` ends with one real example invocation
   under `Example:`. The doc-example check runs every example in the binary's

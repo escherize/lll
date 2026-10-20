@@ -1,6 +1,9 @@
 import "go:encoding/json"
 import "go:strings"
+import "go:unicode"
+import "go:time"
 
+import "config"
 import "flags"
 import "models"
 import "output"
@@ -35,7 +38,7 @@ Only a person with read-write access to every team, or a superuser, can
 create invites. A team-scoped or read-only member, a bot, and a member with
 an owner are refused: ask a full member to create the link.
 
-To give a colleague an email and password login for the CLI instead, use
+For a group, repeat --for: lll invite create --team ENG --for Sloan --for Maksym.\nIt prints one message to send, with a separate single-use link per person. Labels\nare for the sender; each person chooses their own name when joining. On a partial\nfailure, keep the links printed and retry only the pending names.\n\nLink-based members use the token login shown after joining, not a password.\nTo give a colleague an email and password login for the CLI instead, use
 'lll member invite NAME --email EMAIL'."
 }
 
@@ -56,7 +59,19 @@ fn invite_create_spec() -> Slice<flags.Flag> {
       help: "they can read but not change anything (default: read-write)",
       ..,
     },
-    flags.Flag { name: "--json", help: "print the invite as JSON: url, code, expires, mode, teams", .. },
+    flags.Flag {
+      name: "--for",
+      value: true,
+      hint: "NAME",
+      repeat: true,
+      help: "label one invite for this person; repeat to print a ready-to-send group message (labels do not reserve names)",
+      ..,
+    },
+    flags.Flag {
+      name: "--json",
+      help: "print the invite as JSON; with --for: invites, pending, complete",
+      ..,
+    },
   ]
 }
 
@@ -68,14 +83,40 @@ struct InviteResponse { code: string, expires: string }
 
 /// `lll invite create --json` (LLL-645). `teams` are keys; `expires` is RFC3339.
 #[json]
-struct InviteJson { url: string, code: string, expires: string, mode: string, teams: Slice<string> }
+struct InviteJson {
+  url: string,
+  code: string,
+  expires: string,
+  mode: string,
+  teams: Slice<string>,
+}
 
-fn invite_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
+fn invite_create(
+  input: flags.CommandInput,
+) -> Result<output.Output, pb.CliError> {
   let ctx = input.ctx
   let p = input.parsed
   let keys = p.all("--team").map(records.normalize_team_key).filter(|k| k != "")
   if keys.is_empty() { return Err(flags.usage_error(f"usage: {input.usage}")) }
-  let base = web_base(ctx)?
+  let names = p.all("--for").map(strings.TrimSpace)
+  if names.length() > 50 || names.any(
+    |n| n == "" || n.length() > 80 || n.runes().any(unicode.IsControl),
+  ) {
+    return Err(flags.usage_error(
+      "--for takes a nonempty name on one line (up to 80 characters); invite at most 50 people at once",
+    ))
+  }
+  let mut seen: Slice<string> = []
+  for name in names {
+    let lower = strings.ToLower(name)
+    if seen.contains(lower) {
+      return Err(flags.usage_error(
+        "each --for name must be different; no invites were created",
+      ))
+    }
+    seen = seen.append(lower)
+  }
+  let base = invite_link_base(ctx)?
   let mut ids: Slice<models.TeamId> = []
   for key in keys {
     let Some(team) = records.find_team(ctx, key)? else {
@@ -83,24 +124,183 @@ fn invite_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError
     }
     ids = ids.append(team.id)
   }
-  let mode = if p.given("--read-only") { models.Mode.ReadOnly } else { models.Mode.ReadWrite }
-  let payload = match json.Marshal(InviteRequest { teams: ids, mode: mode.wire() }) {
+  let mode = if p.given("--read-only") {
+    models.Mode.ReadOnly
+  } else {
+    models.Mode.ReadWrite
+  }
+  let payload = match json.Marshal(
+    InviteRequest { teams: ids, mode: mode.wire() },
+  ) {
     Ok(b) => b,
     Err(e) => return Err(pb.failed(f"encoding the invite: {e}")),
   }
-  let body = ctx.post("/api/lll/invites", payload as string)?
+  if !names.is_empty() {
+    let mut invites: Slice<NamedInvite> = []
+    for i in 0..names.length() {
+      let made = match mint_invite(ctx, payload as string) {
+        Ok(made) => made,
+        Err(e) => {
+          let pending = names[i..]
+          let said = group_invites_output(
+            invites,
+            pending,
+            keys,
+            mode.wire(),
+            p.given("--json"),
+          )?
+          return Err(e
+            .with_message(
+              f"{e.message}\nStopped at {names[i]}; that request may have committed without a usable reply. Keep the links already printed; retry only the pending names.",
+            )
+            .after(said))
+        },
+      }
+      invites = invites.append(
+        NamedInvite {
+          name: names[i],
+          url: f"{base}/join/{made.code}",
+          code: made.code,
+          expires: made.expires,
+        },
+      )
+    }
+    return group_invites_output(
+      invites,
+      [],
+      keys,
+      mode.wire(),
+      p.given("--json"),
+    )
+  }
+  let made = mint_invite(ctx, payload as string)?
+  if p.given("--json") {
+    return json_value(
+      InviteJson {
+        url: f"{base}/join/{made.code}",
+        code: made.code,
+        expires: made.expires,
+        mode: mode.wire(),
+        teams: keys,
+      },
+      "invite",
+    )
+  }
+  let access = if mode.writes() { "read-write" } else { "read-only" }
+  Ok(output
+    .line(f"{base}/join/{made.code}")
+    .notice(
+      f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
+    )
+    .if_lost(
+      "an invite was created but its one-time link could not be written; do not assume a retry returns the same link",
+    ))
+}
+
+fn mint_invite(
+  ctx: pb.Client,
+  payload: string,
+) -> Result<InviteResponse, pb.CliError> {
+  let body = ctx.post("/api/lll/invites", payload)?
   let mut made = InviteResponse { .. }
   if let Err(e) = json.Unmarshal(body.bytes(), &made) {
     return Err(pb.failed(f"decoding the invite: {e}"))
   }
-  if made.code == "" { return Err(pb.failed("the server returned no invite code")) }
-  if p.given("--json") {
-    return json_value(InviteJson { url: f"{base}/join/{made.code}", code: made.code, expires: made.expires, mode: mode.wire(), teams: keys }, "invite")
+  if made.code == "" {
+    return Err(pb.failed("the server returned no invite code"))
   }
-  let access = if mode.writes() { "read-write" } else { "read-only" }
-  Ok(
-    output.line(f"{base}/join/{made.code}").notice(
-      f"single-use invite: {access}, {strings.Join(keys, ", ")}; expires {made.expires}. Send the link to one person; it is shown only here",
+  Ok(made)
+}
+
+#[json]
+struct NamedInvite { name: string, url: string, code: string, expires: string }
+
+#[json]
+struct GroupInvites {
+  invites: Slice<NamedInvite>,
+  pending: Slice<string>,
+  complete: bool,
+  teams: Slice<string>,
+  mode: string,
+}
+
+fn group_invites_output(
+  invites: Slice<NamedInvite>,
+  pending: Slice<string>,
+  teams: Slice<string>,
+  mode: string,
+  json_mode: bool,
+) -> Result<output.Output, pb.CliError> {
+  let lost = "one-time invite links were created but could not be written; a retry creates different invites"
+  if json_mode {
+    let out = json_value(
+      GroupInvites {
+        invites,
+        pending,
+        complete: pending.is_empty(),
+        teams,
+        mode,
+      },
+      "group invites",
+    )?
+    return Ok(out.if_lost(lost))
+  }
+  let access = if mode == "ro" { "read-only" } else { "read-write" }
+  let mut text = f"Here are your invites for {strings.Join(teams, ", ")}. Each link works once for one person ({access}).\n\n"
+  for invite in invites {
+    let expiry = match time.Parse(time.RFC3339, invite.expires) {
+      Ok(when) => when.UTC().Format("2 Jan 2006"),
+      Err(_) => invite.expires,
+    }
+    text += f"- {markdown_name(invite.name)}: {invite.url} (expires {expiry} UTC)\n"
+  }
+  let next = if mode == "ro" {
+    "The page will guide you through connecting your terminal. Your access is read-only."
+  } else {
+    "The page will guide you through connecting your terminal and setting up your own agent."
+  }
+  text += f"\nOpen your link and pick a name. {next} Keep your login token private.\n"
+  if !pending.is_empty() {
+    text += f"\nNo link returned for: {strings.Join(pending, ", ")}. Keep the links above; retry only these names.\n"
+  }
+  Ok(output.text(text).if_lost(lost))
+}
+
+fn markdown_name(name: string) -> string {
+  let mut out = name
+  for c in ["\\", "`", "*", "_", "[", "]", "<", ">"] {
+    out = strings.ReplaceAll(out, c, "\\" + c)
+  }
+  out
+}
+
+/// Use the contacted server's own advertisement unless the operator explicitly
+/// selected a web endpoint. A stale machine web_url must not redirect invites
+/// for a hosted API to localhost. No invite is minted until this succeeds.
+fn invite_link_base(ctx: pb.Client) -> Result<string, pb.CliError> {
+  let (_, sources) = ctx.settings.traced().map_err(pb.failed)?
+  match sources.web_url {
+    Some(config.Source.Env(_)) | Some(config.Source.Flag(_)) => return checked_web_url(
+      web_base(ctx)?,
     ),
-  )
+    Some(config.Source.HomeFile(_)) | Some(config.Source.RepoFile(_)) | Some(config.Source.Default) | None => (),
+  }
+  let api = ctx.url()?
+  if let Some(found) = discover_board_url(api) { return shareable_invite_base(api, found) }
+  let home = ctx.settings.load_home().map_err(pb.failed)?
+  if !config.same_url(api, home.url) {
+    return Err(pb.failed("this server did not advertise a board address, and the saved board address belongs to another server; set LLL_WEB_URL to this server's shared board address before creating invites"))
+  }
+  let fallback = checked_web_url(web_base(ctx)?)?
+  shareable_invite_base(api, fallback)
+}
+
+fn shareable_invite_base(api: string, candidate: string) -> Result<string, pb.CliError> {
+  let board = checked_web_url(candidate)?
+  if !is_loopback(api) && is_loopback(board) {
+    return Err(pb.failed(
+      "the hosted server did not advertise a board address, and web_url points to this machine; set LLL_WEB_URL to the shared board address before creating invites",
+    ))
+  }
+  Ok(board)
 }

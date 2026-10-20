@@ -322,7 +322,144 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
             assert call(api, '/api/collections/invites/records', {'code_hash': 'a' * 64, 'mode': 'rw'}, tok)[0] == 403
         # Control: a superuser does see them, so the 403s above are the rules.
         assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == 5  # four, plus LLL-632's warned link
-        print('invites: ok')
+        # LLL-730: group output, stale local web_url, and each invited human's
+        # actual browser -> token login -> privately owned scoped bot flow.
+        count_before = call(api, '/api/collections/invites/records', token=su)[1]['totalItems']
+        for labels in [('--for', ''), ('--for', 'Same', '--for', 'same'), ('--for', 'bad\nname'), ('--for', 'bad\x1bname')]:
+            result = lll('invite', 'create', '--team', 'ALPHA', *labels)
+            assert result.returncode == 2, result.stderr
+        assert call(api, '/api/collections/invites/records', token=su)[1]['totalItems'] == count_before
+        assert lll('config', 'set', 'web_url', 'http://127.0.0.1:1').returncode == 0
+        hosted_env = dict(cli, LLL_URL=board)
+        hosted_env.pop('LLL_WEB_URL', None)
+        made = subprocess.run([binary, 'invite', 'create', '--team', 'ALPHA', '--for', 'Sloan',
+                               '--for', 'Maksym', '--for', 'Timothy', '--json'],
+                              cwd=root, env=hosted_env, text=True, capture_output=True, timeout=30)
+        assert made.returncode == 0, made.stderr
+        group = json.loads(made.stdout)
+        assert group['complete'] and group['pending'] == [] and group['teams'] == ['ALPHA'] and group['mode'] == 'rw'
+        assert [i['name'] for i in group['invites']] == ['Sloan', 'Maksym', 'Timothy']
+        assert len(set(i['code'] for i in group['invites'])) == 3
+        for item in group['invites']:
+            assert item['url'] == board + '/join/' + item['code']
+            path = '/join/' + item['code']
+            assert call(board, path)[0] == 200 and call(board, path)[0] == 200
+            status, _, hdr = redeem(path, item['name'])
+            assert status == 303, status
+            personal = hdr['Set-Cookie'].split('lll_board=', 1)[1].split(';', 1)[0]
+            cookie_headers = {'Cookie': 'lll_board=' + personal}
+            assert personal not in call(board, '/me', headers=cookie_headers)[1]
+            page = call(board, '/me', {}, method='POST', form=True, headers=dict(cookie_headers, Origin=board))[1]
+            bot_name = 'bot-' + item['name'].lower()
+            assert f'lll bot create {bot_name} --team ALPHA' in page
+            assert 'already attached' in page and f'lll login --url {board} --token -' in page
+            person_home = root / item['name']
+            person_home.mkdir()
+            person_env = {k: v for k, v in env.items() if not k.startswith('LLL_')}
+            person_env.update(HOME=str(person_home), LC_ALL='C')
+            signed = subprocess.run([binary, 'login', '--url', board, '--token', '-'], input=personal+'\n',
+                                    cwd=person_home, env=person_env, text=True, capture_output=True, timeout=30)
+            assert signed.returncode == 0, signed.stderr
+            bot = subprocess.run([binary, 'bot', 'create', bot_name, '--team', 'ALPHA'],
+                                 cwd=person_home, env=person_env, text=True, capture_output=True, timeout=30)
+            assert bot.returncode == 0, bot.stderr
+            import shlex
+            exports = dict(line.removeprefix('export ').split('=', 1) for line in bot.stdout.splitlines() if line.startswith('export '))
+            bot_token = shlex.split(exports['LLL_TOKEN'])[0]
+            members = call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+            human = next(m for m in members if m['name'] == item['name'])
+            owned_bot = next(m for m in members if m['name'] == bot_name)
+            assert owned_bot['owner'] == human['id'] and owned_bot['teams'] == [alpha['id']]
+            assert owned_bot['scope'] == 'teams' and owned_bot['mode'] == 'rw'
+            limited = lll('issue', 'list', '--team', 'BETA', token=bot_token)
+            assert limited.returncode != 0 and 'beta secret' not in limited.stdout
+            assert redeem(path, item['name'] + ' Twice')[0] != 303
+
+        reader_invite = lll('invite', 'create', '--team', 'ALPHA', '--read-only', '--for', 'Group Reader', '--json')
+        assert reader_invite.returncode == 0
+        reader_path = '/join/' + json.loads(reader_invite.stdout)['invites'][0]['code']
+        status, _, reader_headers = redeem(reader_path, 'Group Reader')
+        assert status == 303
+        reader_cookie = reader_headers['Set-Cookie'].split('lll_board=', 1)[1].split(';', 1)[0]
+        reader_page = call(board, '/me', {}, method='POST', form=True,
+                           headers={'Cookie': 'lll_board='+reader_cookie, 'Origin': board})[1]
+        assert 'lll bot create' not in reader_page and 'creating an agent needs a read-write login' in reader_page
+        reader_text = lll('invite', 'create', '--team', 'ALPHA', '--read-only', '--for', 'Another Reader')
+        assert reader_text.returncode == 0 and '(read-only)' in reader_text.stdout
+        assert 'setting up your own agent' not in reader_text.stdout
+
+        # A partial server failure must return the first usable link rather
+        # than losing every link and encouraging a blind three-person rerun.
+        import http.server
+        import threading
+        class PartialInvites(http.server.BaseHTTPRequestHandler):
+            created = 0
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                status, body, _ = call(api, self.path, token=owner)
+                self.answer(status, body)
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if self.path == '/api/lll/invites':
+                    type(self).created += 1
+                    if type(self).created == 2:
+                        return self.answer(503, {'status': 503, 'message': 'simulated interruption'})
+                status, body, _ = call(api, self.path, body, owner)
+                self.answer(status, body)
+            def answer(self, status, body):
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+        proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), PartialInvites)
+        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        thread.start()
+        try:
+            no_board = dict(cli, LLL_URL=f'http://127.0.0.1:{proxy.server_port}')
+            no_board.pop('LLL_WEB_URL', None)
+            refused = subprocess.run([binary, 'invite', 'create', '--team', 'ALPHA', '--for', 'Unsent'],
+                                     cwd=root, env=no_board, text=True, capture_output=True, timeout=30)
+            assert refused.returncode != 0 and PartialInvites.created == 0
+            assert '/join/' not in refused.stdout and 'LLL_WEB_URL' in refused.stderr
+            for machine in (True, False):
+                PartialInvites.created = 0
+                interrupted = subprocess.run([binary, 'invite', 'create', '--team', 'ALPHA', '--for', 'First',
+                                              '--for', 'Second', '--for', 'Third', *(['--json'] if machine else [])],
+                                             cwd=root, env=dict(cli, LLL_URL=f'http://127.0.0.1:{proxy.server_port}'),
+                                             text=True, capture_output=True, timeout=30)
+                assert interrupted.returncode != 0 and PartialInvites.created == 2
+                if machine:
+                    partial = json.loads(interrupted.stdout)
+                    assert not partial['complete'] and partial['pending'] == ['Second', 'Third']
+                    kept = partial['invites'][0]['url']
+                else:
+                    assert interrupted.stdout.count(board + '/join/') == 1
+                    assert 'No link returned for: Second, Third' in interrupted.stdout
+                    import re
+                    kept = re.search(r'http://[^ ]+/join/[A-Za-z0-9_-]+', interrupted.stdout)[0]
+                assert redeem(kept[len(board):], 'Partial ' + str(machine))[0] == 303
+        finally:
+            proxy.shutdown()
+            proxy.server_close()
+            thread.join(timeout=5)
+        import shutil
+        if shutil.which('playwright-cli'):
+            from browser_session import new_session, open_session, require_result
+            evidence = Path(os.environ.get('LLL_INVITE_EVIDENCE', str(root / 'browser-evidence')))
+            evidence.mkdir(parents=True, exist_ok=True)
+            path = invite('--team', 'ALPHA')
+            session = new_session()
+            try:
+                open_session(session, board + path)
+                driver = (Path(__file__).parent / 'browser_invite_setup.js').read_text()
+                driver = driver.replace('__WEB__', board).replace('__EVIDENCE__', str(evidence))
+                driven = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', driver],
+                                        text=True, capture_output=True, timeout=90)
+                require_result(driven, 'invite setup browser passed', board)
+            finally:
+                subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=20)
+        print('invites: group output, stale URL, single use, human CLI login and scoped owned agents passed')
     finally:
         child.terminate()
         child.wait(timeout=10)
