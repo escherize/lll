@@ -6,6 +6,76 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Changed
+
+- `lll issue next --claim` hands back the caller's own held ready issue, exit
+  0 with the key on stdout and `Resuming KEY: already claimed by ...` on
+  stderr, when it has nothing new to offer, instead of exiting 5. A loop that
+  crashed after claiming now resumes its own work (LLL-693). Own means the same
+  member under the same `--agent` label, or an unlabelled hold; a sibling
+  session's labelled hold is never handed out, and an unlabelled caller does
+  not get a labelled hold. Unclaimed work is still offered first. Plain
+  `lll issue next` is unchanged.
+
+## [1.3.0] - 2026-10-17
+
+### Upgrading from 1.2
+
+No migrations, exit codes, covered JSON fields or command spellings change.
+Upgrade the server before clients, as for 1.2 (`docs/upgrading.md`).
+A Homebrew install now runs `brew upgrade lll` in the background when its
+server is newer; set `LLL_AUTO_UPDATE=0` or `auto_update = false` to keep the
+warning only. `lll logout` now also removes a login saved in `logins.toml` for
+the url it would reach.
+
+### Added
+
+- A Homebrew install updates itself (LLL-721). When the daily version check
+  finds the server newer, lll starts `brew upgrade lll` in the background,
+  logs it to `auto-update.log` beside the config and prints one stderr line.
+  The command's output and exit code do not change. Switch it off with
+  `LLL_AUTO_UPDATE=0` or `auto_update = false`. It is off under `CI` and on
+  a machine that runs the server. Other installs keep the warning.
+- `GET /llms.txt` on the board serves plain-text instructions for an agent:
+  install, sign in, the issue loop, the teams this login can see and the
+  `?raw` Markdown form of every page. It is gated like every board page and
+  carries no credential. The text shares one source with `lll up`'s agent
+  prompt (LLL-717).
+- Every board page's HTML carries one hidden line for agents: append `?raw`
+  for Markdown, see `/llms.txt`, the CLI is `lll`. It is invisible and
+  `aria-hidden`, and absent from `?raw` output (LLL-718).
+- The board and issue pages have a "Copy agent instructions" button in the
+  topbar. It copies the `/llms.txt` text scoped to the page's team and, on an
+  issue page, to that issue. It also works on a board served over plain HTTP
+  (LLL-719).
+- Board pages answer `Accept: text/markdown` with their `?raw` Markdown form
+  (LLL-720). Markdown wins only when the header names `text/markdown` with a
+  higher q than `text/html` gets (from `text/html`, `text/*` or `*/*`); a tie
+  and every browser get HTML. Same handler, auth and `no-store` as `?raw`, and
+  these routes now send `Vary: Accept`.
+- `lll new "Title"` starts a board in one command, with no env var and no
+  mkdir: it derives the team key from the title (`--key` overrides), keeps the
+  data in `boards/<key>` beside the lll config file, writes `.lll.toml` in the
+  current directory, then boots exactly as `lll up`. Running it again with the
+  same title reopens the board; a key held by another title exits 4.
+  `--share` listens on the LAN address and, when Tailscale is connected, the
+  Tailscale address (never every interface) and prints a sign-in link for
+  each, the MagicDNS name included. The README quickstart now leads with it
+  (LLL-722).
+- `lll new` works beside a login for another server (LLL-726). It writes the
+  board's `url` and `web_url` to `.lll.toml` and saves the board's token in
+  `logins.toml` beside the home config (0600, one token per server url). A
+  command whose url has no token from another layer uses the login saved for
+  exactly that url. So `lll new X && lll issue create -t hi` makes X-1 on the
+  new board, and other directories keep the home config's login, which is
+  never rewritten. A named board no longer tries the home config's token
+  against its own new API. `lll new` refuses (exit 4) to rewrite a
+  `.lll.toml` that attaches the directory to another team or server, naming
+  the file and what it holds; a file it wrote for the same board reopens.
+  `lll logout` also removes the login `logins.toml` holds for the url it
+  would reach, and says so; when that login was the one in use, the home
+  config's token is kept.
+
 ## [1.2.0] - 2026-10-16
 
 ### Upgrading from 1.1

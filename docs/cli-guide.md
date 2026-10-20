@@ -95,6 +95,7 @@ Client settings:
 | `LLL_SORT` | `sort` | default sort: `created`, `updated`, `priority`, `number`, `title`; `-` descends |
 | `LLL_WEB_URL` | `web_url` | board base URL for browser links |
 | `LLL_TOKEN` | `token` | auth token; a secret, never in a repo's `.lll.toml` |
+| `LLL_AUTO_UPDATE` | `auto_update` | `0` / `false` stops a Homebrew install updating itself; see [Upgrades](setup.md#upgrades) |
 
 `lll board` never puts the board token into a link to a repo file's
 `web_url`.

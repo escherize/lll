@@ -283,3 +283,26 @@ board. Without the list, for these three, the CLI asks the feature's own authent
 way when that route answers 404. Discovery is read without credentials, gives
 up after 2 seconds, and any failure reads as an absent list. Commands that need no capability never read
 the list. The version-skew warning is separate and unchanged.
+
+## Version skew and auto-update
+
+Once a day per server, a command that talks to the server also reads the
+server's version from `GET /.well-known/lll`. Any failure is silent. When the
+server is newer, the CLI writes exactly one line to stderr after the
+command's own output. Stdout, `--json` output and the exit code are the same
+as without the line.
+
+A Homebrew install starts `brew upgrade lll` in its own session and does not
+wait for it. Its output goes to `auto-update.log` beside the config file. The
+line is:
+
+    lll: updating MINE -> THEIRS in the background (log: PATH). Disable: LLL_AUTO_UPDATE=0
+
+Other installs print `lll: this lll is MINE; URL runs THEIRS, which may have
+commands this build lacks. Upgrade: lll upgrade`. A Homebrew install prints
+this line too when `LLL_AUTO_UPDATE` is `0`, `false`, `no` or `off`, when the
+config sets `auto_update = false`, when `CI` is set, or when another update
+is still running. It also prints it when this machine runs the server
+(`board-login-url` beside the config, or a running Homebrew `lll up`).
+`LLL_AUTO_UPDATE` set to any other value overrides the config; `CI`
+overrides both. Each server gets one attempt a day.

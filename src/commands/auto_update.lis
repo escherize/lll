@@ -1,0 +1,197 @@
+import "go:os"
+import "go:os/exec"
+import "go:path/filepath"
+import "go:strings"
+import "go:syscall"
+import "go:time"
+
+import "config"
+
+/// LLL-721: when the daily version probe finds the server newer than this
+/// binary, a Homebrew install starts the upgrade `lll upgrade` would run, in
+/// the background, and says so in one stderr line. Every other install, and
+/// every case below that says no, keeps the plain skew warning.
+///
+/// It never delays or fails the command: the upgrade runs in its own session
+/// with its output in a log, and every failure to start it falls back to the
+/// warning. It is attempted at most once a day per server, because it runs
+/// only from the probe, which the daily stamp already limits.
+///
+/// No when: LLL_AUTO_UPDATE=0 or `auto_update = false`; CI is set; another
+/// upgrade holds the lock; or this machine runs the server (LLL-655: a new
+/// version migrates the server's database on its first start, so the person
+/// running it has to stop it and back it up first).
+///
+/// Returns the log path when an upgrade started.
+fn start_auto_update(
+  settings: config.Settings,
+  dir: string,
+  mine: string,
+  theirs: string,
+) -> Option<string> {
+  let enabled = auto_update_enabled(settings.env, settings.auto_update())
+  let Ok(install) = running_install() else {
+    return None
+  }
+  let argv = auto_update_argv(enabled, install, || serves_here(dir))?
+  let lock = filepath.Join(dir, "auto-update.lock")
+  if !take_lock(lock, time.Now(), time.Hour) { return None }
+  let log = filepath.Join(dir, "auto-update.log")
+  let header = f"{time.Now().Format(time.RFC3339)} lll {mine} -> {theirs}: {strings.Join(argv, " ")}\n"
+  if spawn_detached(argv, lock, log, header).is_err() {
+    let _ = os.Remove(lock)
+    return None
+  }
+  Some(log)
+}
+
+/// The one stderr line an update in the background prints.
+fn auto_update_line(mine: string, theirs: string, log: string) -> string {
+  f"lll: updating {mine} -> {theirs} in the background (log: {log}). Disable: LLL_AUTO_UPDATE=0"
+}
+
+/// Whether lll may update itself: never under CI, else LLL_AUTO_UPDATE when
+/// set, else the config files' `auto_update`, else yes.
+fn auto_update_enabled(env: config.Env, configured: Option<bool>) -> bool {
+  if env.ci != "" && !switched_off(env.ci) { return false }
+  if env.auto_update != "" { return !switched_off(env.auto_update) }
+  configured.unwrap_or(true)
+}
+
+fn switched_off(value: string) -> bool {
+  ["0", "false", "no", "off"].contains(strings.ToLower(strings.TrimSpace(value)))
+}
+
+/// The argv to start in the background, or None for the plain warning.
+/// `serves` is asked last: it lists processes, and only an install that has
+/// an upgrade argv needs the answer.
+fn auto_update_argv(
+  enabled: bool,
+  install: Install,
+  serves: fn() -> bool,
+) -> Option<Slice<string>> {
+  if !enabled { return None }
+  let argv = upgrade_argv(install)?
+  if serves() { return None }
+  Some(argv)
+}
+
+/// Whether this machine runs an lll server the upgrade would affect.
+/// `lll up` writes board-login-url beside the config on every boot, so its
+/// presence says a server has run here even while it is stopped. A running
+/// `lll up` from Homebrew counts too, whatever config it was started with.
+/// When processes cannot be listed, the answer is yes: the warning is the
+/// safe side.
+fn serves_here(dir: string) -> bool {
+  if os.Stat(filepath.Join(dir, "board-login-url")).is_ok() { return true }
+  let Ok(out) = exec.Command("ps", "-axo", "args=").Output() else {
+    return true
+  }
+  homebrew_server_running(strings.Split(out as string, "\n"), resolve_exe)
+}
+
+/// Whether one of `ps` lines is `lll up` run from a Homebrew install, or
+/// from a path `resolve` cannot place (which may be one).
+fn homebrew_server_running(
+  lines: Slice<string>,
+  resolve: fn(string) -> Option<string>,
+) -> bool {
+  for line in lines {
+    let fields = strings.Fields(line)
+    if fields.length() < 2 { continue }
+    if filepath.Base(fields[0]) != "lll" || first_word(fields[1..]) != "up" {
+      continue
+    }
+    let Some(path) = resolve(fields[0]) else {
+      return true
+    }
+    if homebrew_path(path) { return true }
+  }
+  false
+}
+
+/// Whether `path` is Homebrew's: in a Cellar, or under a Homebrew prefix
+/// (a bin/ link left dangling once its keg was removed).
+fn homebrew_path(path: string) -> bool {
+  if let Install.Homebrew = install_of(path) { return true }
+  strings.Contains(path, "/homebrew/") || strings.Contains(path, "/linuxbrew/")
+}
+
+/// The noun in an lll argv: the first argument that is not a flag, skipping
+/// the value of --team, which may come before it.
+fn first_word(args: Slice<string>) -> string {
+  let mut skip = false
+  for arg in args {
+    if skip {
+      skip = false
+      continue
+    }
+    if arg == "--team" {
+      skip = true
+      continue
+    }
+    if !arg.starts_with("-") { return arg }
+  }
+  ""
+}
+
+/// The resolved executable a process's argv[0] names: absolute as given,
+/// a bare name through PATH. A relative path depends on that process's
+/// working directory, so it is not placed. A path that no longer resolves
+/// (its checkout deleted, or its keg cleaned up while it runs) is judged
+/// as spelled: a deleted Cellar path still names Homebrew.
+fn resolve_exe(argv0: string) -> Option<string> {
+  let path = if !strings.Contains(argv0, "/") {
+    match exec.LookPath(argv0) {
+      Partial.Ok(found) => found,
+      Partial.Err(_) | Partial.Both(_, _) => return None,
+    }
+  } else if filepath.IsAbs(argv0) { argv0 } else { return None }
+  Some(filepath.EvalSymlinks(path).unwrap_or(path))
+}
+
+/// Take the lock at `path`, or false when another upgrade holds it. The
+/// upgrade's shell removes it on exit; one older than `stale` was left by an
+/// upgrade that died, and is taken over.
+fn take_lock(path: string, now: time.Time, stale: time.Duration) -> bool {
+  for _ in 0..2 {
+    match os.OpenFile(path, os.O_WRONLY | os.O_CREATE | os.O_EXCL, 0o600) {
+      Ok(file) => {
+        let _ = file.WriteString(f"{os.Getpid()} {now.Format(time.RFC3339)}\n")
+        let _ = file.Close()
+        return true
+      },
+      Err(_) => {
+        let Ok(info) = os.Stat(path) else {
+          continue
+        }
+        if now.Sub(info.ModTime()) < stale { return false }
+        let _ = os.Remove(path)
+      },
+    }
+  }
+  false
+}
+
+/// Start `argv` in its own session, so it outlives this command and a ^C to
+/// it, with stdin from /dev/null and its output appended to `log`. A shell
+/// runs it so the lock goes when the upgrade ends, however it ends.
+fn spawn_detached(
+  argv: Slice<string>,
+  lock: string,
+  log: string,
+  header: string,
+) -> Result<(), error> {
+  let file = os.OpenFile(log, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0o600)?
+  defer file.Close()
+  let _ = file.WriteString(header)
+  let script = "lock=$1; shift; \"$@\"; status=$?; rm -f \"$lock\"; exit $status"
+  let args = ["-c", script, "lll-auto-update", lock].append(argv...)
+  let mut cmd = exec.Command("/bin/sh", args...)
+  cmd.Stdout = Some(file)
+  cmd.Stderr = Some(file)
+  cmd.SysProcAttr = Some(&syscall.SysProcAttr { Setsid: true, .. })
+  cmd.Start()?
+  if let Some(process) = cmd.Process { let _ = process.Release() }
+  Ok(())
+}

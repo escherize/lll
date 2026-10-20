@@ -1,0 +1,151 @@
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:strings"
+
+import "agentdoc"
+import "config"
+import "models"
+import "pb"
+import "records"
+
+#[test]
+fn agent_team_prefers_a_team_the_viewer_sees() {
+  let teams = [RailTeamVM { key: "AAA", .. }, RailTeamVM { key: "BBB", .. }]
+  assert agent_team(teams, "ZZZ") == "AAA"
+  assert agent_team(teams, "BBB") == "BBB"
+  assert agent_team([], "BBB") == ""
+}
+
+fn llms_get(router: http.Handler, cookie: string) -> (int, string, string) {
+  let mut req = httptest.NewRequest(
+    "GET",
+    "http://127.0.0.1:8100/llms.txt",
+    None,
+  )
+  if cookie != "" {
+    let mut h = req.Header.unwrap_or(http.Header { .. })
+    h.Set("Cookie", "lll_board=" + cookie)
+  }
+  let mut rec = httptest.NewRecorder()
+  router.ServeHTTP(rec, req)
+  let Some(body) = rec.Body else {
+    panic("missing body")
+  }
+  (rec.Code, rec.Header().Get("Content-Type"), body.String())
+}
+
+// LLL-717: /llms.txt answers behind the board gate, as text/plain, naming
+// the teams the server returns and carrying no credential.
+#[test]
+fn llms_txt_is_gated_plain_text_naming_the_teams() {
+  let mut upstream = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else {
+      panic("missing request URL")
+    }
+    if strings.HasPrefix(u.Path, "/api/collections/teams/records") {
+      let _ = w.Write(
+        "{\"items\":[{\"id\":\"t1\",\"key\":\"AAA\",\"name\":\"Alpha\"},{\"id\":\"t2\",\"key\":\"OLD\",\"name\":\"Old\",\"archived\":true}],\"totalPages\":1}".bytes(),
+      )
+      return
+    }
+    let _ = w.Write("{}".bytes())
+  }))
+  defer upstream.Close()
+  let secret = "board-secret-for-llms-test"
+  let ctx = pb.Client.new(config.given(
+    config.Config {
+      url: upstream.URL,
+      token: "process-token-for-llms-test",
+      team: "AAA",
+      ..,
+    },
+    config.Sources { team: Some(config.Source.RepoFile("/test/.lll.toml")), .. },
+    config.Env { board_token: secret, .. },
+  ))
+  let Ok(router) = board_mux(
+    ctx,
+    models.Team { key: "AAA", .. },
+    router_test_hub(),
+    records.Actor { .. },
+    false,
+    None,
+  ) else {
+    panic("router failed")
+  }
+
+  let (status, _, body) = llms_get(router, "")
+  assert status == 401
+  assert !body.contains("AAA")
+
+  let (status, ctype, body) = llms_get(router, secret)
+  assert status == 200
+  assert ctype == "text/plain; charset=utf-8"
+  assert body.contains("- AAA: Alpha\n")
+  assert !body.contains("OLD")
+  assert body.contains("?raw")
+  assert body.contains(f"lll attach --key AAA")
+  assert !body.contains(secret)
+  assert !body.contains("process-token-for-llms-test")
+}
+
+// LLL-718: every page template wears the shell's agent line, hidden from
+// sight and from screen readers, and the ?raw form of a page does not.
+#[test]
+fn every_page_shell_carries_the_hidden_agent_hint() {
+  let rail = RailVM { agent_hint: agentdoc.hint(), .. }
+  let line = "<p class=\"agent-hint\" aria-hidden=\"true\">" + agentdoc.hint() +
+  "</p>"
+  let pages: Slice<(string, Unknown)> = [
+    ("board-page", BoardVM { .. }),
+    ("issue-page", IssueVM { .. }),
+    ("issues-page", IssuesVM { .. }),
+    ("projects-page", ProjectsVM { .. }),
+    ("docs-page", DocsVM { .. }),
+    ("doc-page", DocVM { .. }),
+    ("search-page", SearchVM { .. }),
+    ("settings-page", SettingsVM { .. }),
+  ]
+  for (name, vm) in pages {
+    let assert Ok(html) = render(name, PageVM { rail, page: vm })
+    assert html.contains(line)
+  }
+  assert !board_raw(BoardVM { .. }).contains("Agents:")
+  assert !issue_raw(IssueVM { key: "AAA-1", .. }).contains("Agents:")
+}
+
+// LLL-719: the board and issue pages carry the copy button and the text it
+// copies, scoped to the page's team and issue; a page without text has none.
+#[test]
+fn board_and_issue_pages_carry_the_scoped_copy_button() {
+  let teams = [RailTeamVM { key: "AAA", name: "Alpha", .. }]
+  let r = httptest.NewRequest(
+    "GET",
+    "http://127.0.0.1:8100/t/AAA/issue/AAA-7",
+    None,
+  )
+  let on_issue = with_agent_text(RailVM { teams, .. }, r, "AAA", "AAA-7")
+  assert on_issue.agent_text ==
+  agentdoc.instructions(
+    "http://127.0.0.1:8100",
+    [agentdoc.Team { key: "AAA", name: "Alpha" }],
+    "AAA",
+    "AAA-7",
+  )
+  assert on_issue.agent_text.contains("## Your issue: AAA-7")
+  let on_board = with_agent_text(RailVM { teams, .. }, r, "AAA", "")
+  assert !on_board.agent_text.contains("## Your issue")
+  let button = "data-copy-from=\"agent-text\""
+  let pages: Slice<(string, Unknown)> = [
+    ("board-page", BoardVM { .. }),
+    ("issue-page", IssueVM { .. }),
+  ]
+  for (name, vm) in pages {
+    let assert Ok(html) = render(name, PageVM { rail: on_issue, page: vm })
+    assert html.contains(button)
+    assert html.contains(
+      "<pre id=\"agent-text\" hidden># lll board at http://127.0.0.1:8100\n",
+    )
+    let assert Ok(bare) = render(name, PageVM { rail: RailVM { .. }, page: vm })
+    assert !bare.contains(button)
+  }
+}

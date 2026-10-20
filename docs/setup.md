@@ -20,6 +20,12 @@ server already answers at the API url, `lll up` uses it, unless only a repo
 `.lll.toml` chose that url: then it stops with exit 4. Ctrl-C stops
 everything.
 
+`lll new "Payments rewrite"` is `lll up` with the choices made for you. The key
+comes from the title (`--key` picks your own), and the data lives in
+`~/.config/lll/boards/pay` instead of this directory. Run the same command
+again to reopen the board. A key that another title already holds is refused
+with exit 4. Everything below about `lll up` holds for it too.
+
 `lll up` prints one line per fact:
 
 | Line | Says |
@@ -36,9 +42,16 @@ everything.
 
 With `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot
 generates a password for `admin@local.dev`. Read it with
-`jq -r .password pb/pb_data/.lll-admin.json`. `lll up` logs the CLI in only
+`jq -r .password pb/pb_data/.lll-admin.json` (for `lll new`, in
+`~/.config/lll/boards/<key>/`). `lll up` logs the CLI in only
 when your home config holds no token and names no other server; it never
-replaces a login.
+replaces a login. `lll new` also logs in the directory it ran in, even when
+you are logged in to another server: `.lll.toml` names the board's url, and
+its token goes to `~/.config/lll/logins.toml` (0600), never to `.lll.toml`.
+Commands in that directory reach the new board; everywhere else keeps your
+other login, and `lll logout` there removes only the board's. A `.lll.toml`
+that already attaches the directory to another team or server is refused
+(exit 4) rather than rewritten.
 
 
 ## Join an existing board
@@ -113,11 +126,16 @@ machine; see [Share a board](#share-a-board-on-a-lan-or-tailscale).
 
 <!-- example-check: skip: needs a LAN or Tailscale address -->
 ```sh
-mkdir hack-board && cd hack-board
-LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>
-# in a second terminal, in hack-board:
+lll new "Hack night" --share   # prints a sign-in link per LAN and Tailscale address
+# in a second terminal, in the same directory:
 lll member passes --count 10 --prefix hack
 ```
+
+`--share` listens on this machine's LAN address and, when Tailscale is
+connected, its Tailscale address; it never listens on every interface. Without
+Tailscale it says so and shares on the LAN only. The board token is kept in the
+board's directory, so the links survive a restart. To pick one address
+yourself: `LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>`.
 
 `lll member passes` writes a private handoff file (mode 0600) with ten member
 tokens, the API address and a board login link. Send each teammate only their
@@ -147,3 +165,18 @@ Run `lll upgrade`. On Homebrew it runs `brew upgrade lll`; other installs
 print the appropriate command. If you run a server, stop it and back up its
 data before upgrading. See [the upgrade guide](upgrading.md) for server-first
 rollout, migration checks and restoring a backup.
+
+A Homebrew install updates itself. Once a day per server, lll checks the
+server's version. When the server is newer, lll starts `brew upgrade lll` in
+the background, prints one line on stderr and finishes your command
+unchanged:
+
+    lll: updating 1.2.0 -> 1.3.0 in the background (log: ~/.config/lll/auto-update.log). Disable: LLL_AUTO_UPDATE=0
+
+To switch this off, set `LLL_AUTO_UPDATE=0` or put `auto_update = false` in
+`~/.config/lll/lll.toml`. It is off when `CI` is set. It is also off on a
+machine that runs the server: where `lll up` has run (it leaves
+`board-login-url` beside the config) or where a Homebrew `lll up` is running.
+There, and on every install that is not Homebrew, lll prints the warning
+`... Upgrade: lll upgrade` instead. A machine that starts `lll up` with
+another config directory should set `auto_update = false`.

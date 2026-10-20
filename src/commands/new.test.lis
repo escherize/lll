@@ -1,0 +1,159 @@
+import "config"
+import "records"
+
+// LLL-722: `lll new "Title"` derives the team key from the title. Every
+// derived key must pass the server's key rule, or the boot fails after the
+// board directory was made.
+
+#[test]
+fn a_title_derives_its_team_key() {
+  assert derive_board_key("Payments rewrite") == "PAY"
+  assert derive_board_key("Payments") == "PAY"
+  assert derive_board_key("Big new launch plan") == "BNLP"
+  assert derive_board_key("one two three four five six seven") == "OTTFF"
+  // Short words borrow from the next one rather than giving a 2-letter key.
+  assert derive_board_key("My app") == "MYA"
+  // A key starts with a letter; leading digits and punctuation are skipped.
+  assert derive_board_key("2026 roadmap") == "ROA"
+  assert derive_board_key("  web-2 launch ") == "WEB"
+  assert derive_board_key("Q3") == "Q3"
+}
+
+#[test]
+fn a_title_with_nothing_to_key_on_derives_nothing() {
+  assert derive_board_key("") == ""
+  assert derive_board_key("!!! ???") == ""
+  assert derive_board_key("2026") == ""
+}
+
+#[test]
+fn every_derived_key_passes_the_team_key_rule() {
+  for title in [
+    "Payments rewrite",
+    "Big new launch plan",
+    "My app",
+    "2026 roadmap",
+    "Q3",
+    "Équipe café",
+    "a b c d e f g h",
+  ] {
+    let key = derive_board_key(title)
+    assert key != ""
+    assert records.team_key_problem(key).is_none()
+  }
+}
+
+// Same title reopens its board; another title on the same key is refused,
+// and the refusal names the board that holds the key and both ways out.
+#[test]
+fn a_new_key_or_the_same_title_opens_the_board() {
+  assert board_refusal("PAY", "/h/boards/pay", None, "Payments rewrite").is_none()
+  assert board_refusal(
+    "PAY",
+    "/h/boards/pay",
+    Some("Payments rewrite"),
+    "Payments rewrite",
+  ).is_none()
+  assert board_refusal(
+    "PAY",
+    "/h/boards/pay",
+    Some("Payments rewrite"),
+    "payments REWRITE",
+  ).is_none()
+}
+
+#[test]
+fn another_title_on_a_held_key_is_refused_by_name() {
+  let Some(why) = board_refusal(
+    "PAY",
+    "/h/boards/pay",
+    Some("Payments rewrite"),
+    "Payroll",
+  ) else {
+    assert false
+    return
+  }
+  assert why.contains("PAY")
+  assert why.contains("'Payments rewrite'")
+  assert why.contains("/h/boards/pay")
+  assert why.contains("--key")
+  // A directory with no title is held too: something else put it there.
+  assert board_refusal("PAY", "/h/boards/pay", Some(""), "Payments rewrite").is_some()
+}
+
+#[test]
+fn the_lan_address_is_the_first_private_ipv4() {
+  let cidrs = [
+    "127.0.0.1/8",
+    "::1/128",
+    "fe80::1/64",
+    "169.254.10.2/16",
+    "100.89.101.60/32",
+    "203.0.113.9/24",
+    "192.168.68.82/22",
+    "10.0.0.5/8",
+  ]
+  assert lan_ip(cidrs) == Some("192.168.68.82")
+  // Loopback, link-local, public and Tailscale's CGNAT range never qualify.
+  assert lan_ip(["127.0.0.1/8", "100.89.101.60/32", "203.0.113.9/24"]).is_none()
+  assert lan_ip([]).is_none()
+}
+
+#[test]
+fn the_magic_dns_name_drops_its_trailing_dot() {
+  let status = "{\"BackendState\":\"Running\",\"Self\":{\"DNSName\":\"box.tail1234.ts.net.\"}}"
+  assert magic_dns_name(status as Slice<byte>) == Some("box.tail1234.ts.net")
+  assert magic_dns_name("{\"Self\":{\"DNSName\":\"\"}}" as Slice<byte>).is_none()
+  assert magic_dns_name("not json" as Slice<byte>).is_none()
+}
+
+#[test]
+fn each_reachable_address_gets_a_sign_in_link() {
+  let lines = share_lines(
+    [("LAN", "192.168.1.5"), ("Tailscale", "box.ts.net")],
+    8100,
+    "TOK",
+  )
+  assert lines.length() == 2
+  assert lines[0] == "share  LAN: http://192.168.1.5:8100/?board_token=TOK"
+  assert lines[1] == "share  Tailscale: http://box.ts.net:8100/?board_token=TOK"
+}
+
+// LLL-726: a named board's shared boot saves a home login only into an
+// empty slot; another server's login stays.
+#[test]
+fn home_login_free_only_without_another_login() {
+  assert home_login_free(config.Config { .. })
+  assert home_login_free(config.Config { url: "http://127.0.0.1:8090", .. })
+  assert !home_login_free(config.Config { url: "https://lll.example.com", .. })
+  assert !home_login_free(config.Config { url: "http://127.0.0.1:8090", token: "tok", .. })
+}
+
+// LLL-726: lll new rewrites .lll.toml only when it already belongs to this
+// board, or names nothing.
+#[test]
+fn attach_refusal_keeps_another_teams_or_servers_file() {
+  let path = "/r/.lll.toml"
+  let title = "Payments rewrite"
+  assert attach_refusal(path, config.Config { .. }, "PAY", title).is_none()
+  assert attach_refusal(path, config.Config { team: "PAY", .. }, "PAY", title).is_none()
+  assert attach_refusal(path, config.Config { team: "PAY", url: "http://127.0.0.1:8091", .. }, "PAY", title).is_none()
+  let Some(why) = attach_refusal(path, config.Config { team: "LLL", url: "https://lll.example.com", .. }, "PAY", title) else {
+    panic("expected a refusal")
+  };
+  assert why.contains(path)
+  assert why.contains("team LLL at https://lll.example.com")
+  assert attach_refusal(path, config.Config { team: "LLL", .. }, "PAY", title).is_some()
+  assert attach_refusal(path, config.Config { team: "PAY", url: "https://lll.example.com", .. }, "PAY", title).is_some()
+  assert attach_refusal(path, config.Config { url: "http://127.0.0.1:8091", .. }, "PAY", title).is_some()
+}
+
+// A stopped Tailscale still prints its IP; listening on it would fail the
+// boot, so the IP counts only while an interface holds it.
+#[test]
+fn a_tailscale_ip_counts_only_while_an_interface_holds_it() {
+  let up = ["127.0.0.1/8", "192.168.68.82/22", "100.89.101.60/32"]
+  assert holds_address(up, "100.89.101.60")
+  assert !holds_address(["127.0.0.1/8", "192.168.68.82/22"], "100.89.101.60")
+  assert !holds_address(up, "100.89.101.6")
+}

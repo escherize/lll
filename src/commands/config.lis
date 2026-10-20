@@ -146,6 +146,57 @@ pub fn set_home_key(settings: config.Settings, key: string, value: string) -> Re
   Ok(path)
 }
 
+/// Save `token` as the login for the server at `server` in logins.toml beside
+/// the home config (LLL-726), replacing an earlier one for that url and
+/// touching no other. Private (0600), like the home config. Returns the
+/// path written.
+pub fn save_login(settings: config.Settings, server: string, token: string) -> Result<string, pb.CliError> {
+  let path = settings.logins_path().map_err(pb.failed)?
+  let dir = filepath.Dir(path)
+  if let Err(e) = os.MkdirAll(dir, 0o755) {
+    return Err(pb.failed(f"creating {dir}: {e}"))
+  }
+  // A quoted key: a url is not a bare TOML key.
+  let Ok(key) = json.Marshal(strings.TrimRight(server, "/")) else {
+    return Err(pb.failed("could not encode the server url"))
+  }
+  set_key_in(path, key as string, token, true)?
+  Ok(path)
+}
+
+/// Remove the login saved in logins.toml for `server` (LLL-726), the
+/// inverse of save_login, keeping every other server's. Returns the file's
+/// path when a line was removed.
+pub fn clear_login(settings: config.Settings, server: string) -> Result<Option<string>, pb.CliError> {
+  let path = settings.logins_path().map_err(pb.failed)?
+  let Ok(data) = os.ReadFile(path) else {
+    return Ok(None)
+  }
+  let mut lines: Slice<string> = []
+  let mut removed = false
+  for l in (data as string).split("\n") {
+    if login_line_for(l, server) {
+      removed = true
+    } else {
+      lines = lines.append(l)
+    }
+  }
+  if !removed { return Ok(None) }
+  write_home_config(path, strings.Join(lines, "\n"))?
+  Ok(Some(path))
+}
+
+/// Pure. Whether a logins.toml line assigns the token for `server`, a
+/// trailing slash aside on either side.
+fn login_line_for(line: string, server: string) -> bool {
+  let trimmed = strings.TrimSpace(line)
+  if !strings.HasPrefix(trimmed, "\"") { return false }
+  let parts = strings.SplitN(trimmed, "\"", 3)
+  if parts.length() < 3 { return false }
+  if !strings.HasPrefix(strings.TrimSpace(parts[2]), "=") { return false }
+  config.same_url(parts[1], server)
+}
+
 /// Remove every `key = ...` line from the home config — the inverse of
 /// set_home_key, and exactly as narrow: `lll logout` clears the token and
 /// unsets nothing else. Returns true when a line was removed. Only the home
