@@ -23,5 +23,18 @@ async page => {
     await page.locator('pre').filter({hasText: cookie.value}).evaluate(el => { el.textContent = '[private login token]'; });
     await page.screenshot({path: `__EVIDENCE__/setup-${viewport.width}.png`, fullPage: true});
   }
+  for (const viewport of [{width: 1280, height: 900}, {width: 390, height: 844}]) {
+    await page.setViewportSize(viewport);
+    await page.goto(web + '__EXISTING_INVITE__');
+    if (await page.locator('input[name="name"]').count()) throw new Error('existing person asked to create a new identity');
+    if (!(await page.locator('body').innerText()).includes('Browser Guest')) throw new Error('acceptance does not name current person');
+    await page.screenshot({path: `__EVIDENCE__/existing-${viewport.width}.png`, fullPage: true});
+  }
+  await page.getByRole('button', {name: 'Accept invite', exact: true}).click();
+  await page.waitForURL(web + '/t/BETA/');
+  const after = (await page.context().cookies()).find(c => c.name === 'lll_board');
+  if (after.value !== cookie.value) throw new Error('acceptance replaced login');
+  const previous = await page.goto(web + '/t/ALPHA/');
+  if (previous.status() !== 200) throw new Error('acceptance lost prior team');
   return 'invite setup browser passed';
 }

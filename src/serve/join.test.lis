@@ -19,16 +19,17 @@ fn the_join_page_escapes_its_message() {
   assert strings.Contains(join_html("", true, ""), "<form method='post'")
 }
 
-// LLL-632: the form warns a browser that already holds a login, and escapes
-// the words it names that login with.
+// An authenticated person accepts into its own account; names stay escaped.
 #[test]
-fn the_join_form_warns_before_replacing_a_login() {
+fn the_join_form_accepts_into_the_existing_login() {
   let page = join_html("", true, "Ada <b> (read-only, ALPHA)")
   assert strings.Contains(
     page,
-    "signed in to this board as <strong>Ada &lt;b&gt; (read-only, ALPHA)</strong>",
+    "Accept this invitation as <strong>Ada &lt;b&gt; (read-only, ALPHA)</strong>",
   )
-  assert !strings.Contains(join_html("", true, ""), "signed in to this board")
+  assert !strings.Contains(page, "name='name'")
+  assert strings.Contains(page, "Accept invite")
+  assert !strings.Contains(join_html("", true, ""), "Accept this invitation")
   // A refusal page has no form to warn about.
   assert !strings.Contains(join_html("gone", false, "Ada"), "signed in to this board")
 }

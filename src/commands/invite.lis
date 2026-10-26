@@ -31,8 +31,8 @@ pub fn invite_commands() -> Slice<flags.Command> {
 
 fn invite_intro() -> string {
   "An invite link lets one person join this board. Opening it shows a name
-form; submitting it creates a member with exactly the invite's teams and mode
-and signs that browser in. The link works once and expires after 7 days.
+form for new visitors; a signed-in person accepts into their existing account.
+Acceptance adds the invited teams while keeping their current login and teams. The link works once and expires after 7 days.
 
 Only a person with read-write access to every team, or a superuser, can
 create invites. A team-scoped or read-only member, a bot, and a member with
@@ -259,7 +259,7 @@ fn group_invites_output(
   } else {
     "The page will guide you through connecting your terminal and setting up your own agent."
   }
-  text += f"\nOpen your link and pick a name. {next} Keep your login token private.\n"
+  text += f"\nOpen your link to accept the invite (new visitors choose a name). {next} Keep your login token private.\n"
   if !pending.is_empty() {
     text += f"\nNo link returned for: {strings.Join(pending, ", ")}. Keep the links above; retry only these names.\n"
   }

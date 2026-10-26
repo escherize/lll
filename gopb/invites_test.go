@@ -455,3 +455,72 @@ func TestARedemptionLosingTheNameRaceKeepsTheCode(t *testing.T) {
 		t.Fatalf("the code died with a lost name race: %v", err)
 	}
 }
+
+func TestInviteAddsTeamToExistingPersonWithoutChangingIdentityOrTokens(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	originalKey := f.scoped.GetString(core.FieldNameTokenKey)
+	code := f.mint(t, f.full, inviteGrant{teams: []string{f.beta}, rw: true}, now)
+	m, err := redeemInviteFor(f.app, code, "ignored rename", f.scoped.Id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Id != f.scoped.Id || m.GetString("name") != "guest" || m.GetString(core.FieldNameTokenKey) != originalKey {
+		t.Fatal("identity or credential changed")
+	}
+	if got := m.GetStringSlice("teams"); !slices.Equal(got, []string{f.alpha, f.beta}) {
+		t.Fatal(got)
+	}
+	if _, err := redeemInviteFor(f.app, code, "", f.reader.Id, now); !errors.Is(err, errInviteUsed) {
+		t.Fatal(err)
+	}
+	invite, _ := f.app.FindFirstRecordByData("invites", "code_hash", inviteCodeHash(code))
+	if invite.GetString("redeemed_by") != m.Id {
+		t.Fatal("wrong redemption identity")
+	}
+}
+
+func TestExistingInviteCannotWidenOtherTeamsOrConsumeOnRefusal(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	code := f.mint(t, f.full, inviteGrant{teams: []string{f.beta}, rw: true}, now)
+	if _, err := redeemInviteFor(f.app, code, "", f.reader.Id, now); !errors.Is(err, errInviteModes) {
+		t.Fatal(err)
+	}
+	if _, err := redeemInviteFor(f.app, code, "", f.scoped.Id, now, "revoked-token-key"); !errors.Is(err, errInviteIdentity) {
+		t.Fatal(err)
+	}
+	if _, err := redeemInviteFor(f.app, code, "", f.scoped.Id, now); err != nil {
+		t.Fatal(err)
+	}
+	ro := f.mint(t, f.full, inviteGrant{teams: []string{f.beta}}, now)
+	fresh, _ := f.app.FindRecordById("members", f.reader.Id)
+	if ownAccess(fresh).rw {
+		t.Fatal("refused upgrade changed reader")
+	}
+	if _, err := redeemInviteFor(f.app, ro, "", f.reader.Id, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentExistingInvitesKeepBothTeamGrants(t *testing.T) {
+	f := newInviteFixture(t)
+	now := time.Now()
+	codes := []string{f.mint(t, f.full, inviteGrant{teams: []string{f.beta}, rw: true}, now), f.mint(t, f.full, inviteGrant{teams: []string{f.alpha}, rw: true}, now)}
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range codes {
+		wg.Add(1)
+		go func(i int) { defer wg.Done(); _, errs[i] = redeemInviteFor(f.app, codes[i], "", f.scoped.Id, now) }(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, _ := f.app.FindRecordById("members", f.scoped.Id)
+	if !slices.Contains(m.GetStringSlice("teams"), f.alpha) || !slices.Contains(m.GetStringSlice("teams"), f.beta) {
+		t.Fatal("lost team")
+	}
+}

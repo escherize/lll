@@ -12,8 +12,9 @@ after seven days. Add `--read-only` for readers. Repeat `--team` for more
 teams. The `--for` labels help you send the right link to each person; they
 do not reserve an account name or bind the link to an email address.
 
-Send the message as printed. The recipient opens their link, chooses a name,
-and lands on their own setup page. Merely opening a link does not spend it:
+Send the message as printed. A signed-in person accepts the invite into their existing account and opens
+the invited team. Their other teams and login stay intact. A new visitor
+chooses a name and lands on their own setup page. Merely opening a link does not spend it:
 submitting the join form does. A GET showing the form is not a validity
 check; expiry and prior use are checked when the form is submitted.
 
@@ -65,3 +66,14 @@ Only a full read-write person member without an owner, or a superuser, can
 create invites. The command does not send messages or create the recipients'
 bots. Invite links and the tokens on the setup page are credentials; send
 each person only their link, and keep tokens out of shared drafts.
+
+## Existing members
+
+Acceptance uses the member authenticated in the browser, never a name or member
+ID from the form. It adds the invited teams without creating a second account
+or replacing the current token. Existing CLI logins keep working.
+
+Access mode is currently member-wide. An invite that would widen or downgrade
+unrelated teams is refused without being spent; ask an administrator to resolve
+that combination. Bots and owned identities cannot accept grants outside their
+owner relationship. Existing bots are not automatically granted extra teams.
