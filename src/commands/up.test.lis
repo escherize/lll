@@ -1,4 +1,37 @@
 import "config"
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:time"
+
+#[test]
+fn startup_wait_allows_readiness_after_the_old_five_second_limit() {
+  let started = time.Now()
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| {
+    let status = if time.Since(started) >= 6 * time.Second { 200 } else { 503 }
+    w.WriteHeader(status)
+  }))
+  defer server.Close()
+  assert wait_for_server(server.URL, 10 * time.Second)
+  assert time.Since(started) >= 6 * time.Second
+}
+
+#[test]
+fn startup_wait_has_a_ceiling_when_the_server_never_becomes_ready() {
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| { w.WriteHeader(503) }))
+  defer server.Close()
+  let started = time.Now()
+  assert !wait_for_server(server.URL, 50 * time.Millisecond)
+  assert time.Since(started) < 2 * time.Second
+}
+
+#[test]
+fn startup_wait_returns_immediately_for_a_ready_server() {
+  let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| { w.WriteHeader(200) }))
+  defer server.Close()
+  let started = time.Now()
+  assert wait_for_server(server.URL, 2 * time.Minute)
+  assert time.Since(started) < 2 * time.Second
+}
 
 // Unit cover for TASK-218's predicate. `is_loopback` is what stands between a
 // throwaway `lll up --pb-dir` and a write to production: the old code asked
