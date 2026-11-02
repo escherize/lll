@@ -133,3 +133,18 @@ id/name/kind and agent label. A claim's holder is separate from its releasing
 actor. Scope rules apply to subscriptions; shared webhook names use the team's
 shared roster. Delivery is live-only, with no replay or durable outbox claim.
 See the CLI contract and `watch --help` for reconciling reconnect gaps.
+
+### Accepting an invite as an existing person
+
+`POST /api/lll/invites/redeem` with a valid member Authorization token applies
+its `code` to that authenticated person; any supplied name is ignored. The
+transaction unions authorized teams, consumes the code and records the same
+member as `redeemed_by`. No new token is minted (`token` is empty and
+`existing` is true); existing tokens retain the account's updated access.
+`joined_teams` identifies the invitation's teams for navigation. Anonymous
+redemption continues creating a new person and returns its token.
+
+Bots, owned identities and incompatible member-wide access modes are refused
+without consuming the code. Identity comes from authentication, never an ID
+in the request body. Invite validity and creator access are rechecked in the
+same transaction as for a new person.

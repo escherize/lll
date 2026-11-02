@@ -6,6 +6,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Fixed
+
+- A team invite accepted by a signed-in person adds access to that account,
+  keeping its identity, token and existing teams. The form no longer asks
+  existing users to create another person, and acceptance opens the invited
+  team. Mixed read/write grants that would change unrelated teams are refused
+  without spending the invite (LLL-731).
+
 ### Added
 
 - `lll invite create --team ENG --for Sloan --for Maksym` prints a ready-to-send

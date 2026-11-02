@@ -168,9 +168,9 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         # joining replaces that login in this browser.
         warned = invite('--team', 'ALPHA', '--ro')
         code, page, _ = call(board, warned, headers=ada)
-        assert code == 200 and 'signed in to this board as <strong>Ada Reader (read-only, ALPHA)</strong>' in page, page
+        assert code == 200 and 'Accept this invitation as <strong>Ada Reader</strong>' in page, page
         code, page, _ = call(board, warned, headers={'Cookie': f"lll_board={env['LLL_BOARD_TOKEN']}"})
-        assert 'signed in to this board as <strong>the board token' in page, page
+        assert 'Accept this invitation as' not in page, page
         code, page, _ = call(board, warned)
         assert code == 200 and 'signed in to this board' not in page, page
 
@@ -454,11 +454,33 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
                 open_session(session, board + path)
                 driver = (Path(__file__).parent / 'browser_invite_setup.js').read_text()
                 driver = driver.replace('__WEB__', board).replace('__EVIDENCE__', str(evidence))
+                driver = driver.replace('__EXISTING_INVITE__', invite('--team', 'BETA'))
                 driven = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', driver],
                                         text=True, capture_output=True, timeout=90)
                 require_result(driven, 'invite setup browser passed', board)
             finally:
                 subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=20)
+        existing = member('ExistingPerson', scope='teams', teams=[alpha['id']], mode='rw')
+        old_members = call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+        existing_id = next(m['id'] for m in old_members if m['name'] == 'ExistingPerson')
+        add_team = invite('--team', 'BETA')
+        code_value = add_team.rsplit('/', 1)[1]
+        assert call(api, '/api/lll/invites/redeem', {'code': code_value}, token=ownedp_tok)[0] == 403
+        assert call(api, '/api/lll/invites/redeem', {'code': code_value, 'member': existing_id}, token='invalid-token')[0] == 401
+
+        status, page, _ = call(board, add_team, headers={'Cookie': 'lll_board='+existing})
+        assert status == 200 and 'Accept this invitation as <strong>ExistingPerson</strong>' in page
+        assert "name='name'" not in page
+        status, _, headers = redeem(add_team, 'must not rename', {'Cookie': 'lll_board='+existing, 'Origin': board})
+        assert status == 303 and headers['Location'] == '/t/BETA/' and 'Set-Cookie' not in headers
+        after_members = call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items']
+        assert len(after_members) == len(old_members)
+        kept = next(m for m in after_members if m['id'] == existing_id)
+        assert kept['name'] == 'ExistingPerson' and set(kept['teams']) == {alpha['id'], beta['id']}
+        assert call(board, '/t/BETA/', headers={'Cookie': 'lll_board='+existing})[0] == 200
+        assert lll('issue', 'list', '--team', 'BETA', token=existing).returncode == 0
+        assert redeem(add_team, '', {'Cookie': 'lll_board='+existing, 'Origin': board})[0] == 410
+        print('invites: existing identity gains invited team; old token and teams preserved; no duplicate account')
         print('invites: group output, stale URL, single use, human CLI login and scoped owned agents passed')
     finally:
         child.terminate()

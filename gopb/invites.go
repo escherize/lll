@@ -167,11 +167,18 @@ func modeName(rw bool) string {
 // named name with exactly the invite's grants. Either both happen or
 // neither: a refused name leaves the code alive.
 func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record, error) {
+	return redeemInviteFor(app, code, name, "", now)
+}
+
+var errInviteIdentity = errors.New("accept this invite with an independent person account, not a bot or owned identity")
+var errInviteModes = errors.New("this invite mixes read-only and read-write access across teams; ask an administrator to adjust your access without changing your other teams")
+
+func redeemInviteFor(app core.App, code, name, memberID string, now time.Time, expectedTokenKey ...string) (*core.Record, error) {
 	name = strings.TrimSpace(name)
-	if strings.HasPrefix(strings.ToLower(name), botPrefix) {
+	if memberID == "" && strings.HasPrefix(strings.ToLower(name), botPrefix) {
 		return nil, errNameBot
 	}
-	if len(name) > 40 || !joinName.MatchString(name) {
+	if memberID == "" && (len(name) > 40 || !joinName.MatchString(name)) {
 		return nil, errNameInvalid
 	}
 	if !wellFormedCode(code) {
@@ -219,23 +226,46 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 		if n, _ := res.RowsAffected(); n != 1 {
 			return errInviteUsed
 		}
-		taken, err := nameTaken(tx, name, "")
-		if err != nil {
-			return err
+		if memberID != "" {
+			member, err = tx.FindRecordById("members", memberID)
+			if err != nil {
+				return errInviteIdentity
+			}
+			if len(expectedTokenKey) > 0 && member.GetString(core.FieldNameTokenKey) != expectedTokenKey[0] {
+				return errInviteIdentity
+			}
+			if member.GetString("kind") != "person" || member.GetString("owner") != "" {
+				return errInviteIdentity
+			}
+			before := ownAccess(member)
+			merged, mergeErr := mergeInviteAccess(before, grant)
+			if mergeErr != nil {
+				return mergeErr
+			}
+			setAccess(member, merged)
+			if err = tx.Save(member); err != nil {
+				return err
+			}
+		} else {
+			taken, err := nameTaken(tx, name, "")
+			if err != nil {
+				return err
+			}
+			if taken {
+				return nameTakenError(name)
+			}
+			member, err = newJoinedMember(tx, name, grant)
+			if nameClash(err) {
+				// A rename or create committed between the check above and
+				// this save; idx_members_name_nocase refused it. Returning an
+				// error rolls back the kill, so the code stays alive.
+				return nameTakenError(name)
+			}
+			if err != nil {
+				return err
+			}
 		}
-		if taken {
-			return nameTakenError(name)
-		}
-		member, err = newJoinedMember(tx, name, grant)
-		if nameClash(err) {
-			// A rename or create committed between the check above and
-			// this save; idx_members_name_nocase refused it. Returning an
-			// error rolls back the kill, so the code stays alive.
-			return nameTakenError(name)
-		}
-		if err != nil {
-			return err
-		}
+
 		_, err = tx.DB().NewQuery("UPDATE invites SET redeemed_by = {:member} WHERE id = {:id}").
 			Bind(dbx.Params{"member": member.Id, "id": invite.Id}).Execute()
 		return err
@@ -244,6 +274,38 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 		return nil, err
 	}
 	return member, nil
+}
+
+// mergeInviteAccess never removes an existing grant or upgrades a team the
+// invite did not grant. The current schema has one mode for all teams.
+func mergeInviteAccess(before access, grant inviteGrant) (access, error) {
+	covered := true
+	for _, team := range grant.teams {
+		covered = covered && before.sees(team)
+	}
+	if covered && (before.rw || !grant.rw) {
+		return before, nil
+	}
+	if before.all {
+		return access{}, errInviteModes
+	}
+	if len(before.teams) > 0 && before.rw != grant.rw {
+		if before.rw {
+			return access{}, errInviteModes
+		}
+		for _, team := range before.teams {
+			if !slices.Contains(grant.teams, team) {
+				return access{}, errInviteModes
+			}
+		}
+	}
+	teams := slices.Clone(before.teams)
+	for _, team := range grant.teams {
+		if !slices.Contains(teams, team) {
+			teams = append(teams, team)
+		}
+	}
+	return access{teams: teams, rw: grant.rw}, nil
 }
 
 // nameTaken compares without case: "Bryan" must not join beside "bryan".
@@ -370,7 +432,20 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("send {\"code\": ..., \"name\": ...}", nil)
 		}
-		member, err := redeemInvite(re.App, body.Code, body.Name, time.Now())
+		memberID := ""
+		if re.Auth != nil {
+			if re.Auth.Collection().Name != "members" {
+				return re.ForbiddenError(errInviteIdentity.Error(), nil)
+			}
+			memberID = re.Auth.Id
+		} else if re.Request.Header.Get("Authorization") != "" {
+			return re.UnauthorizedError("sign in again before accepting the invite", nil)
+		}
+		expectedKey := []string{}
+		if re.Auth != nil {
+			expectedKey = append(expectedKey, re.Auth.GetString(core.FieldNameTokenKey))
+		}
+		member, err := redeemInviteFor(re.App, body.Code, body.Name, memberID, time.Now(), expectedKey...)
 		var apiErr *router.ApiError
 		switch {
 		case err == nil:
@@ -378,6 +453,8 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 			return re.NotFoundError(err.Error(), nil)
 		case errors.Is(err, errInviteUsed), errors.Is(err, errInviteExpired), errors.Is(err, errInviteVoid):
 			return re.Error(http.StatusGone, err.Error(), nil)
+		case errors.Is(err, errInviteIdentity), errors.Is(err, errInviteModes):
+			return re.ForbiddenError(err.Error(), nil)
 		case errors.Is(err, errNameWriteBusy):
 			return re.Error(http.StatusServiceUnavailable, err.Error(), nil)
 		case errors.Is(err, errNameInvalid), errors.Is(err, errNameBot):
@@ -387,7 +464,10 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 		default:
 			return re.InternalServerError("failed to redeem the invite", err)
 		}
-		token, err := member.NewStaticAuthToken(joinedTokenLifetime)
+		token := ""
+		if memberID == "" {
+			token, err = member.NewStaticAuthToken(joinedTokenLifetime)
+		}
 		if err != nil {
 			return re.InternalServerError("the member was created but its token was not; ask whoever invited you to run 'lll token create "+member.GetString("name")+"'", err)
 		}
@@ -397,7 +477,16 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 				keys = append(keys, team.GetString("key"))
 			}
 		}
+		joinedKeys := []string{}
+		if invite, err := re.App.FindFirstRecordByData("invites", "code_hash", inviteCodeHash(body.Code)); err == nil {
+			for _, id := range invite.GetStringSlice("teams") {
+				if team, err := re.App.FindRecordById("teams", id); err == nil {
+					joinedKeys = append(joinedKeys, team.GetString("key"))
+				}
+			}
+		}
 		return re.JSON(http.StatusOK, map[string]any{
+			"existing": memberID != "", "joined_teams": joinedKeys,
 			"token": token,
 			"name":  member.GetString("name"),
 			"teams": keys,

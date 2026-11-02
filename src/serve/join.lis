@@ -39,11 +39,15 @@ pub fn join_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
 /// holds no board cookie that still resolves (LLL-632). Joining replaces
 /// that cookie, so the form warns before it does.
 fn signed_in_as(ctx: pb.Client, r: Ref<http.Request>) -> string {
-  let want = ctx.settings.board_token()
-  let Some(cookie) = cookie_named(r, "lll_board") else { return "" }
-  if is_board_token(cookie, want) { return "the board token, which opens every team" }
-  let Some(viewer) = cookie_viewer(ctx, cookie, want) else { return "" }
-  viewer_words(viewer)
+  let Some(m) = joining_member(ctx, r) else { return "" }
+  m.name
+}
+
+fn joining_member(ctx: pb.Client, r: Ref<http.Request>) -> Option<ViewerMember> {
+  let Some(cookie) = cookie_named(r, "lll_board") else { return None }
+  if is_board_token(cookie, ctx.settings.board_token()) { return None }
+  let Some(viewer) = cookie_viewer(ctx, cookie, ctx.settings.board_token()) else { return None }
+  viewer.member
 }
 
 /// A scoped viewer in words: a member's name, mode and teams, or the team a
@@ -60,7 +64,7 @@ fn viewer_words(v: ScopedViewer) -> string {
 struct JoinRequest { code: string, name: string }
 
 #[json]
-struct JoinResponse { token: string, teams: Slice<string> }
+struct JoinResponse { token: string, teams: Slice<string>, joined_teams: Slice<string>, existing: bool }
 
 /// Redeem the code in the path for the name in the form.
 pub fn join_redeem(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
@@ -98,7 +102,12 @@ pub fn join_redeem(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>)
       return
     },
   }
-  let body = match ctx.post_anon("/api/lll/invites/redeem", payload as string) {
+  let member = joining_member(ctx, r)
+  let redeemed = match member {
+    Some(m) => ctx.post_as("/api/lll/invites/redeem", payload as string, m.token),
+    None => ctx.post_anon("/api/lll/invites/redeem", payload as string),
+  }
+  let body = match redeemed {
     Ok(b) => b,
     Err(e) => {
       let status = e.status
@@ -128,7 +137,7 @@ pub fn join_redeem(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>)
   }
   let mut joined = JoinResponse { .. }
   let unreadable = json.Unmarshal(body.bytes(), &joined).is_err()
-  if unreadable || joined.token == "" {
+  if unreadable || (member.is_none() && joined.token == "") || (member.is_some() && !joined.existing) {
     join_respond(
       w,
       502,
@@ -138,6 +147,10 @@ pub fn join_redeem(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>)
         "",
       ),
     )
+    return
+  }
+  if member.is_some() {
+    http.Redirect(w, r, join_target(joined.joined_teams), 303)
     return
   }
   let cookie = http.Cookie {
@@ -202,13 +215,13 @@ pub fn join_html(message: string, form: bool, signed_in: string) -> string {
   } else {
     f"<p role='alert' style='margin: 1.5rem 0 0; padding: .6rem .8rem; border-left: 3px solid #b3261e; background: #fdeded; color: #7f1d1b;'>{template.HTMLEscapeString(message)}</p>"
   }
-  let replaces = if !form || signed_in == "" {
-    ""
-  } else {
-    f"<p role='status' style='margin: 1.5rem 0 0; padding: .6rem .8rem; border-left: 3px solid #b26a00; background: #fff4e0; color: #5c3700;'>This browser is signed in to this board as <strong>{template.HTMLEscapeString(signed_in)}</strong>. Joining signs it in as the new member instead: that login keeps working elsewhere, but this browser stops using it. To keep it here, open this invite link in a private window or another browser.</p>"
-  }
+  let replaces = if form && signed_in != "" {
+    f"<p>Accept this invitation as <strong>{template.HTMLEscapeString(signed_in)}</strong>. Your existing login and teams are kept. This invitation adds access to its teams.</p>"
+  } else { "" }
   let fields = if !form {
     ""
+  } else if signed_in != "" {
+    "<form method='post' style='margin: 1.5rem 0;'><button type='submit' style='padding: .55rem 1rem; font: inherit; cursor: pointer;'>Accept invite</button></form><p>Not your account? Sign out or open this link in a private window.</p>"
   } else {
     "<form method='post' style='margin: 1.5rem 0; display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end;'>
 <label for='name' style='flex: 1 1 20rem; display: flex; flex-direction: column; gap: .3rem;'>
@@ -221,7 +234,7 @@ style='padding: .5rem .6rem; font: inherit; color: inherit; border: 1px solid #b
 </form>
 <p style='color: #666;'>The link works once. This browser stays signed in for a year; if you lose it, ask whoever invited you for a new link.</p>"
   }
-  let lead = if form {
+  let lead = if form && signed_in == "" {
     "<p>You were invited to this lll board. Pick a name to join.</p>"
   } else {
     ""

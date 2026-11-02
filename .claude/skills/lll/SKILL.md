@@ -139,8 +139,9 @@ returns `invites`, `pending` and `complete` for a named group; without `--for`,
 the single-invite format stays the same. A lost response can still leave an
 unused invite: do not claim that a retry recovers the same link.
 
-Opening a join page does not redeem or validate a link. Submitting its form
-creates the person; their setup page shows the token-based CLI login when
+Opening a join page does not redeem or validate a link. A signed-in person
+accepts into their existing account; an anonymous visitor creates a person.
+Their setup page shows the token-based CLI login when
 asked, then a command for creating their own bot. They do not need a password.
 Skip attachment when the repo already names the correct team and server.
 Do not create their bots with the inviter's broader token or copy their personal
