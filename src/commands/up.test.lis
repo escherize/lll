@@ -11,8 +11,11 @@ fn startup_wait_allows_readiness_after_the_old_five_second_limit() {
     w.WriteHeader(status)
   }))
   defer server.Close()
-  assert wait_for_server(server.URL, 10 * time.Second)
+  let mut notices = 0
+  let mut count = &notices
+  assert wait_for_server(server.URL, 10 * time.Second, || { count.* += 1 })
   assert time.Since(started) >= 6 * time.Second
+  assert notices == 1
 }
 
 #[test]
@@ -20,7 +23,7 @@ fn startup_wait_has_a_ceiling_when_the_server_never_becomes_ready() {
   let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| { w.WriteHeader(503) }))
   defer server.Close()
   let started = time.Now()
-  assert !wait_for_server(server.URL, 50 * time.Millisecond)
+  assert !wait_for_server(server.URL, 50 * time.Millisecond, || {})
   assert time.Since(started) < 2 * time.Second
 }
 
@@ -29,7 +32,7 @@ fn startup_wait_returns_immediately_for_a_ready_server() {
   let mut server = httptest.NewServer(http.HandlerFunc(|w, _r| { w.WriteHeader(200) }))
   defer server.Close()
   let started = time.Now()
-  assert wait_for_server(server.URL, 2 * time.Minute)
+  assert wait_for_server(server.URL, 2 * time.Minute, || {})
   assert time.Since(started) < 2 * time.Second
 }
 

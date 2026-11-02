@@ -261,7 +261,10 @@ check what is configured with 'lll config list'"),
 
     // Serve exits the process on failure above. While it is still running,
     // allow migrations to finish instead of killing them after five seconds.
-    if !wait_for_server(db_url, 2 * time.Minute) {
+    let waiting = || {
+      let _ = fmt.Fprintln(os.Stderr, "waiting for the server (migrations may still be running)")
+    }
+    if !wait_for_server(db_url, 2 * time.Minute, waiting) {
       return Err(
         pb.failed(f"lll server did not come up on {db_url} within 2 minutes; check its output above"),
       )
@@ -527,7 +530,7 @@ password in its own data directory's .lll-admin.json."),
 /// Wait for readiness with a wall-clock ceiling, not a fixed number of probes
 /// (each health request can itself take two seconds). Serve's task retains
 /// responsibility for immediate startup errors and graceful shutdown.
-fn wait_for_server(base_url: string, ceiling: time.Duration) -> bool {
+fn wait_for_server(base_url: string, ceiling: time.Duration, waiting: fn()) -> bool {
   let started = time.Now()
   let mut announced = false
   loop {
@@ -535,7 +538,7 @@ fn wait_for_server(base_url: string, ceiling: time.Duration) -> bool {
     let elapsed = time.Since(started)
     if elapsed >= ceiling { return false }
     if !announced && elapsed >= 5 * time.Second {
-      let _ = fmt.Fprintln(os.Stderr, "waiting for the server (migrations may still be running)")
+      waiting()
       announced = true
     }
     let remaining = ceiling - elapsed
