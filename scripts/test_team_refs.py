@@ -187,6 +187,49 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         loose = create('issues', team=alpha['id'], title='moves cleanly', state='todo')
         code, moved = patch('issues', loose['id'], 'full', team=beta['id'])
         assert code == 200 and moved['team'] == beta['id'], moved
+        # LLL-668: source and destination may be different accessible teams.
+        member('multi', scope='teams', teams=[alpha['id'], beta['id']], mode='rw')
+        member('bot-multi', kind='bot', owner=ids['multi'], scope='teams',
+               teams=[alpha['id'], beta['id']], mode='rw')
+        gamma = create('teams', key='GAMMA', name='Gamma')
+        for collection in ('labels', 'projects'):
+            fields = {'status': 'planned'} if collection == 'projects' else {}
+            unused = create(collection, name='scoped move', team=alpha['id'], **fields)
+
+            def move(who, destination, expected=200):
+                previous = call(api, f"/api/collections/{collection}/records/{unused['id']}", token=su)[1]['team']
+                code, body = patch(collection, unused['id'], who, team=destination)
+                assert code == expected, (collection, who, destination, code, body)
+                stored = call(api, f"/api/collections/{collection}/records/{unused['id']}", token=su)[1]
+                assert stored['team'] == (destination if expected == 200 else previous), stored
+
+            move('multi', beta['id'])
+            move('multi', beta['id'])  # unchanged team still works
+            move('multi', alpha['id'])
+            move('multi', gamma['id'], 404)  # destination is inaccessible
+            move('allro', beta['id'], 404)
+            move('multi', beta['id'])
+            move('guest', alpha['id'], 404)  # destination visible, source hidden
+            move('bot-multi', alpha['id'])
+            move('bot-multi', beta['id'])
+            assert patch('members', ids['multi'], 'su', teams=[beta['id']])[0] == 200
+            move('bot-multi', alpha['id'], 404)  # owner's destination cap
+            assert patch('members', ids['multi'], 'su', teams=[alpha['id']])[0] == 200
+            move('bot-multi', alpha['id'], 404)  # owner's source cap
+            assert patch('members', ids['multi'], 'su', teams=[alpha['id'], beta['id']])[0] == 200
+            assert patch('members', ids['bot-multi'], 'su', teams=[beta['id']])[0] == 200
+            move('bot-multi', alpha['id'], 404)  # bot's destination cap
+            assert patch('members', ids['bot-multi'], 'su', teams=[alpha['id']])[0] == 200
+            move('bot-multi', alpha['id'], 404)  # bot's source cap
+            assert patch('members', ids['bot-multi'], 'su', teams=[alpha['id'], beta['id']])[0] == 200
+            assert patch('members', ids['multi'], 'su', mode='ro')[0] == 200
+            move('bot-multi', alpha['id'], 404)  # owner read-only
+            assert patch('members', ids['multi'], 'su', mode='rw')[0] == 200
+            move('bot-multi', alpha['id'])
+            # Being able to see both teams does not permit dangling references.
+            ref = ae if collection == 'labels' else aproj
+            refused(patch(collection, ref['id'], 'multi', team=beta['id']), 'ALPHA-1')
+
         loose_label = create('labels', name='unused', team=alpha['id'])
         assert patch('labels', loose_label['id'], 'full', team=beta['id'])[0] == 200
         # CLI: the LLL-100 move verbs still refuse with their own message.
