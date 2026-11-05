@@ -28,6 +28,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   they can access, while source, destination and owner limits still apply
   (LLL-668).
 
+- Unknown-command recovery prints the declared one-line usage when its
+  suggestion selects a single command, including aliases and nested verbs;
+  ambiguous and noun-only suggestions remain concise (LLL-555).
+
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).

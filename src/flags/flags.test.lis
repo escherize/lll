@@ -727,3 +727,60 @@ fn reading_an_undeclared_flag_is_an_internal_error() {
   let assert Err(pv) = read
   assert pv.message().contains("which its spec does not declare")
 }
+
+/// LLL-555: recovery names one operation, so its declaration supplies one
+/// usage line without requiring a second help call or running a handler.
+#[test]
+fn a_suggested_leaf_prints_its_declared_usage() {
+  let invite = Command {
+    name: "invite", alias: "add", positional: "NAME", access: Access.Write,
+    spec: [Flag { name: "--email", value: true, hint: "EMAIL", .. }],
+    run: |_| Err(pb.failed("recovery must not run a command")), ..
+  }
+  let nouns = table("member", [invite])
+  for spelling in ["invite", "add"] {
+    let assert Err(e) = parse_command_line(nouns, ["lll", "members", spelling])
+    assert pb.exit_code(e.kind) == 2
+    assert e.message.ends_with("\nusage: lll member invite NAME [--email EMAIL]")
+    assert !e.message.contains("Flags:")
+  }
+  let assert Err(group) = parse_command_line(nouns, ["lll", "members"])
+  assert !group.message.contains("usage:")
+  let assert Err(unknown) = parse_command_line(nouns, ["lll", "members", "frob"])
+  assert !unknown.message.contains("usage:")
+}
+
+#[test]
+fn curated_recovery_uses_targets_without_guessing_from_prose() {
+  let view = Command { name: "view", positional: "KEY", access: Access.Read, run: |_| Ok(output.none()), .. }
+  let update = Command { name: "update", positional: "KEY", access: Access.Write, run: |_| Ok(output.none()), .. }
+  let nouns = table("issue", [view, update])
+  let assert Err(one) = parse_command_line(nouns, ["lll", "issue", "get"])
+  assert one.message.ends_with("\nusage: lll issue view KEY")
+  let assert Err(two) = parse_command_line(nouns, ["lll", "issue", "assign"])
+  assert !two.message.contains("usage:")
+  let assert Err(field) = parse_command_line(table("issue", [Command {
+    name: "update", positional: "KEY", access: Access.Write,
+    spec: [Flag { name: "--priority", value: true, hint: "P", .. }],
+    run: |_| Ok(output.none()), ..
+  }]), ["lll", "issue", "priority"])
+  assert field.message.ends_with("\nusage: lll issue update KEY [--priority P]")
+}
+
+#[test]
+fn a_suggested_nested_leaf_uses_the_nested_declaration() {
+  let edit = Command { name: "edit", positional: "KEY N", access: Access.Write, run: |_| Ok(output.none()), .. }
+  let comment = Command {
+    name: "comment", positional: "KEY [BODY]", access: Access.Write,
+    verbs: [edit], run: |_| Ok(output.none()), ..
+  }
+  let nouns = table("issue", [comment])
+  let assert Err(root) = parse_command_line(nouns, ["lll", "comment", "edit", "DEMO-1"])
+  assert root.message.ends_with("\nusage: lll issue comment edit KEY N")
+  let assert Err(plural) = parse_command_line(nouns, ["lll", "issues", "comment", "edit"])
+  assert plural.message.ends_with("\nusage: lll issue comment edit KEY N")
+  let assert Err(defaulted) = parse_command_line(nouns, ["lll", "issue", "comment", "list", "DEMO-1"])
+  assert defaulted.message.ends_with("\nusage: lll issue comment KEY [BODY]")
+  let assert Err(ambiguous) = parse_command_line(nouns, ["lll", "issue", "comment", "rm", "DEMO-1"])
+  assert !ambiguous.message.contains("usage:")
+}
