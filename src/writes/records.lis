@@ -343,6 +343,10 @@ pub fn delete_favorite(
   remove(ctx, caller, "favorites", id)
 }
 
+pub fn delete_view(ctx: pb.Client, caller: pb.Caller, id: string) -> Result<(), pb.CliError> {
+  remove(ctx, caller, "views", id)
+}
+
 pub fn create_view(
   ctx: pb.Client,
   caller: pb.Caller,

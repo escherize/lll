@@ -17,6 +17,42 @@ if (navigationToggle && navigationRail) {
   });
 }
 
+// Delegation survives live rail morphs and works on non-Datastar pages too.
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest('form[data-delete-view]');
+  if (!form) return;
+  event.preventDefault();
+  const button = form.querySelector('button');
+  if (button.disabled || !confirm(`Delete saved view “${form.dataset.deleteView}” for everyone? Issues and your current filters are kept.`)) return;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  button.title = 'Deleting…';
+  const flash = () => document.getElementById('rail-views-flash');
+  if (flash()) flash().hidden = true;
+  try {
+    const response = await fetch(form.action, {method: 'POST', body: new URLSearchParams(new FormData(form))});
+    if (!response.ok) throw new Error((await response.text()).trim() || 'Could not delete the saved view. Reload and try again.');
+    // Remove only this row, never replace newer rail state with a POST snapshot.
+    // The live stream may already have removed it, so look up the current node.
+    const rail = document.getElementById('rail-views');
+    const row = document.getElementById('saved-view-' + new FormData(form).get('id'));
+    // Disabling a focused button (or an SSE deletion) can leave focus on body.
+    const restoreFocus = document.activeElement === button || document.activeElement === document.body;
+    if (row) row.remove();
+    rail.querySelector('.rg-empty').hidden = !!rail.querySelector('.rv-row');
+    if (restoreFocus) document.getElementById('rail-views-title').focus();
+  } catch (error) {
+    if (flash()) {
+      flash().textContent = error.message || 'Could not delete the saved view. Check your connection and try again.';
+      flash().hidden = false;
+    }
+  } finally {
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    button.title = button.getAttribute('aria-label');
+  }
+});
+
 // LLL-447: the ⌘K palette's keyboard half. The markup is rendered with every
 // rail (shell.html) and the search half arrives from the server; what is left
 // is opening, filtering the static Go-to rows, and moving a selection. Plain

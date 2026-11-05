@@ -51,6 +51,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- The workspace board login can delete shared saved views from the sidebar.
+  Project views offer List/Board links that retain filters, and Projects groups
+  rows by status with per-team browser collapse preferences (LLL-738; PR #387).
+
 - The shipped workflow skills describe concise interruption handoffs, relevant
   findings and decisions before edits, and evidence marked passed, failed or
   untested against acceptance cases. Recording guidance distinguishes progress

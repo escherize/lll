@@ -1,0 +1,60 @@
+import "go:net/http"
+import "go:net/http/httptest"
+import "go:strings"
+
+import "models"
+
+fn project_position(text: string, needle: string) -> int {
+  let Some(index) = strings.Index(text, needle) else { panic(f"missing project text: {needle}") }
+  index
+}
+
+#[test]
+fn projects_render_in_nonempty_status_groups_without_changing_raw_order() {
+  let mut upstream = httptest.NewServer(http.HandlerFunc(|w, r| {
+    let Some(u) = r.URL else { panic("missing request URL") }
+    if u.Path == "/api/collections/projects/records" {
+      let _ = w.Write("{\"items\":[
+        {\"id\":\"p-a\",\"team\":\"team-a\",\"name\":\"Alpha\",\"description\":\"Finished project\",\"status\":\"completed\"},
+        {\"id\":\"p-b\",\"team\":\"team-a\",\"name\":\"Beta\",\"description\":\"\",\"status\":\"planned\"},
+        {\"id\":\"p-c\",\"team\":\"team-a\",\"name\":\"Charlie\",\"description\":\"\",\"status\":\"started\"},
+        {\"id\":\"p-d\",\"team\":\"team-a\",\"name\":\"Delta\",\"description\":\"\",\"status\":\"planned\"},
+        {\"id\":\"p-e\",\"team\":\"team-a\",\"name\":\"Echo\",\"description\":\"\",\"status\":\"future-phase\"}
+      ],\"totalItems\":5,\"totalPages\":1}".bytes())
+    } else if u.Path == "/api/collections/issues/records" {
+      let _ = w.Write("{\"items\":[],\"totalItems\":0,\"totalPages\":1}".bytes())
+    } else {
+      w.WriteHeader(404)
+    }
+  }))
+  defer upstream.Close()
+  let ctx = test_client(upstream.URL, "fixture-token", "AAA")
+  let Ok(vm) = projects_vm(ctx, models.TeamId("team-a"), "AAA") else { panic("project read failed") }
+  let Ok(html) = render("projects-list", vm) else { panic("project rendering failed") }
+  assert strings.Count(html, "<details ") == 4
+  assert strings.Count(html, "class=\"pj-row\"") == 5
+  assert html.contains("data-project-groups-key=\"lll.project-groups.team-a\"")
+  let planned = project_position(html, "data-project-status=\"planned\"")
+  let started = project_position(html, "data-project-status=\"started\"")
+  let completed = project_position(html, "data-project-status=\"completed\"")
+  let future = project_position(html, "data-project-status=\"future-phase\"")
+  assert planned >= 0 && planned < started && started < completed && completed < future
+  assert !html.contains("data-project-status=\"paused\"")
+  assert project_position(html, "Beta") < project_position(html, "Delta")
+  assert project_position(html, "Delta") < started
+  assert html.contains("/t/AAA/issues?project=Alpha")
+  assert html.contains("Finished project")
+  let raw = projects_raw(vm, "AAA")
+  assert raw.starts_with("# Projects (5)\nTeam: AAA")
+  assert project_position(raw, "Alpha") < project_position(raw, "Beta")
+  assert project_position(raw, "Beta") < project_position(raw, "Charlie")
+  assert project_position(raw, "Charlie") < project_position(raw, "Delta")
+}
+
+#[test]
+fn projects_with_no_rows_keep_the_actionable_empty_state() {
+  let Ok(html) = render("projects-list", ProjectsVM { .. }) else { panic("project rendering failed") }
+  assert html.contains("No projects yet.")
+  assert html.contains("href=\"settings\"")
+  assert !html.contains("<details ")
+}

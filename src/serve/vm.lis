@@ -163,6 +163,7 @@ pub struct OrderOptVM {
 /// holds only the last view's query string to restore on a param-less
 /// arrival. The broadcast path fills only `states` and `columns`.
 pub struct BoardVM {
+  pub layout: ProjectLayoutVM,
   pub states: Slice<StateOpt>,
   pub columns: Slice<ColumnVM>,
   pub filter_groups: Slice<FilterGroupVM>,
@@ -326,6 +327,7 @@ pub struct FavVM {
 /// One saved view row in the rail. `href` is the board URL the view
 /// navigates to; a view is a name plus a query string, nothing more.
 pub struct ViewVM {
+  pub id: string,
   pub name: string,
   pub href: string,
 }
@@ -463,6 +465,7 @@ pub struct IssueColVM {
 /// asked for 200 rows and reports how many matched, so the page can say
 /// "showing 200 of 340" instead of silently ending at 200.
 pub struct IssuesVM {
+  pub layout: ProjectLayoutVM,
   // This team's table path (LLL-426): the filter form submits here, so a
   // filter keeps the reader in the team they were looking at.
   pub base: string,
@@ -588,9 +591,20 @@ pub struct ProjectVM {
   pub href: string,
 }
 
+/// One nonempty project-status section, in lifecycle order.
+pub struct ProjectGroupVM {
+  pub status: string,
+  pub label: string,
+  pub tone: string,
+  pub projects: Slice<ProjectVM>,
+}
+
 /// View model for /projects.
 pub struct ProjectsVM {
+  // Keep the alphabetical flat list for totals and the existing raw contract.
   pub projects: Slice<ProjectVM>,
+  pub groups: Slice<ProjectGroupVM>,
+  pub preference_key: string,
 }
 
 /// View model for /t/KEY/doc/SLUG (LLL-405). `body` is what a browser gets

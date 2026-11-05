@@ -1,0 +1,22 @@
+import "go:net/http"
+import "go:strings"
+
+import "pb"
+import "writes"
+
+/// The shell removes only the deleted row, including on non-Datastar pages.
+/// Do not return a rail snapshot: it can race another write or a live refresh.
+fn views_delete(w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing) {
+  let mut wr = r.Clone(r.Context())
+  match delete_saved_view(v, wr) {
+    Ok(_) => w.WriteHeader(204),
+    Err(e) => http.Error(w, e.message, 400),
+  }
+}
+
+fn delete_saved_view(v: Viewing, r: mut Ref<http.Request>) -> Result<(), pb.CliError> {
+  let caller = workspace_writer(v)?
+  let id = strings.TrimSpace(r.PostFormValue("id"))
+  if id == "" { return Err(pb.failed("nothing to delete; reload and choose a saved view")) }
+  writes.delete_view(v.reads, caller, id)
+}

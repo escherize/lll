@@ -538,6 +538,7 @@ fn board_mux(
   mux.HandleFunc("POST /comment", gated(ctx, flashing(ctx, comment_write)))
   mux.HandleFunc("POST /bot", gated(ctx, flashing_with(ctx, bot_write)))
   mux.HandleFunc("POST /views/save", gated(ctx, flashing_with(ctx, views_save)))
+  mux.HandleFunc("POST /views/delete", gated(ctx, views_delete))
   // The embedded tree keeps its repo paths, so "/static/theme.css" resolves to
   // "static/theme.css" with no prefix surgery.
   let assets = http.FileServerFS(web.Assets())
