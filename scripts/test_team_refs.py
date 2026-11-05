@@ -192,9 +192,14 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
         member('bot-multi', kind='bot', owner=ids['multi'], scope='teams',
                teams=[alpha['id'], beta['id']], mode='rw')
         gamma = create('teams', key='GAMMA', name='Gamma')
-        for collection in ('labels', 'projects'):
-            fields = {'status': 'planned'} if collection == 'projects' else {}
-            unused = create(collection, name='scoped move', team=alpha['id'], **fields)
+        move_records = {
+            'labels': {'name': 'scoped move'},
+            'projects': {'name': 'scoped move', 'status': 'planned'},
+            'issues': {'title': 'scoped move', 'state': 'todo'},
+            'docs': {'slug': 'scoped-move', 'title': 'scoped move', 'kind': 'note', 'body': 'b'},
+        }
+        for collection, fields in move_records.items():
+            unused = create(collection, team=alpha['id'], **fields)
 
             def move(who, destination, expected=200):
                 previous = call(api, f"/api/collections/{collection}/records/{unused['id']}", token=su)[1]['team']
@@ -207,7 +212,7 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
             move('multi', beta['id'])  # unchanged team still works
             move('multi', alpha['id'])
             move('multi', gamma['id'], 404)  # destination is inaccessible
-            move('allro', beta['id'], 404)
+            move('allro', beta['id'], 403)
             move('multi', beta['id'])
             move('guest', alpha['id'], 404)  # destination visible, source hidden
             move('bot-multi', alpha['id'])
@@ -223,12 +228,29 @@ with tempfile.TemporaryDirectory(prefix='lll-631-') as directory:
             move('bot-multi', alpha['id'], 404)  # bot's source cap
             assert patch('members', ids['bot-multi'], 'su', teams=[alpha['id'], beta['id']])[0] == 200
             assert patch('members', ids['multi'], 'su', mode='ro')[0] == 200
-            move('bot-multi', alpha['id'], 404)  # owner read-only
+            move('bot-multi', alpha['id'], 403)  # owner read-only
             assert patch('members', ids['multi'], 'su', mode='rw')[0] == 200
             move('bot-multi', alpha['id'])
+            assert patch('members', ids['multi'], 'su', scope='all', teams=[])[0] == 200
+            assert patch('members', ids['bot-multi'], 'su', scope='all', teams=[])[0] == 200
+            assert patch('members', ids['multi'], 'su', scope='teams', teams=[alpha['id'], beta['id']])[0] == 200
+            move('bot-multi', beta['id'])
+            move('bot-multi', gamma['id'], 404)  # all-scope bot is still owner-capped
+            move('bot-multi', alpha['id'])
+            assert patch('members', ids['bot-multi'], 'su', scope='teams', teams=[alpha['id'], beta['id']])[0] == 200
+            assert patch('members', ids['multi'], 'su', scope='all', teams=[])[0] == 200
+            move('bot-multi', beta['id'])
+            move('bot-multi', gamma['id'], 404)  # all-scope owner cannot widen the bot
+            move('bot-multi', alpha['id'])
+            assert patch('members', ids['multi'], 'su', scope='teams', teams=[alpha['id'], beta['id']])[0] == 200
+            assert patch('members', ids['bot-multi'], 'su', mode='ro')[0] == 200
+            move('bot-multi', beta['id'], 403)
+            assert patch('members', ids['bot-multi'], 'su', mode='rw')[0] == 200
             # Being able to see both teams does not permit dangling references.
-            ref = ae if collection == 'labels' else aproj
-            refused(patch(collection, ref['id'], 'multi', team=beta['id']), 'ALPHA-1')
+            if collection in ('labels', 'projects'):
+                ref = ae if collection == 'labels' else aproj
+                refused(patch(collection, ref['id'], 'multi', team=beta['id']), 'ALPHA-1')
+            assert call(api, f"/api/collections/{collection}/records/{unused['id']}", token=su, method='DELETE')[0] == 204
 
         loose_label = create('labels', name='unused', team=alpha['id'])
         assert patch('labels', loose_label['id'], 'full', team=beta['id'])[0] == 200
