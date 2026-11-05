@@ -1,27 +1,29 @@
 # lll
 
-**An issue tracker for you and your coding agents.**
+**Your next agent shouldn't start from scratch.**
 
-Give the work a home beyond the chat. lll keeps tasks, progress and decisions
-on a shared board, so you can see what your agents are doing and the next
-session can pick up where the last one stopped.
+lll keeps work, decisions and discoveries on a shared board. When a new
+agent arrives, it can find the task, read what previous agents learned about
+the code, and leave the reasoning behind its own changes.
 
-Use the web board to plan and review. Use the CLI to work from your terminal
-or give an agent access to the same backlog. Changes appear live in both.
+You follow the work in a browser. Your agents use the CLI. One server keeps
+the record available across sessions and machines.
 
 ![The lll board showing issues grouped by status](docs/board.png)
 
 ## Why lll?
 
-- **Know who's working on what.** People and agents claim tasks before
-  starting, so another worker can see the task is taken.
-- **Keep the context with the work.** Comments, findings and decisions stay
-  searchable alongside the issues they explain, across sessions and handoffs.
-- **Move between planning and doing.** Drag cards on the board; create,
-  update and comment on the same issues from the terminal. Scripts and agents
-  can read structured JSON.
-- **Run it yourself.** One binary includes the server, database and web board.
-  Start locally, or host a shared board for your team.
+- **Keep the lessons with the work.** Findings are linked to the
+  files they concern; decisions keep the reasoning with the work. An agent can
+  check `lll finding near PATH` before repeating an investigation.
+- **Hand out work without collisions.** People and agents claim tasks so
+  another worker can see what is taken.
+- **See what happened.** Follow progress, comments and changes on the live
+  board, then read the same record from the terminal.
+- **Keep it yours.** One self-hosted binary includes the server, database and
+  web board. Export the record as Markdown when you need it elsewhere.
+
+[How the record helps your next agent](docs/working-with-agents.md).
 
 ## Install
 
@@ -33,46 +35,47 @@ Other platforms: [download a release](https://github.com/escherize/lll/releases)
 
 ## Quickstart
 
-Start a board for a project:
+Start a board in a project directory:
 
 ```sh
 mkdir my-project && cd my-project
-LLL_TEAM=APP lll up
+lll new "Payments rewrite"
 ```
 
-On a fresh setup, lll creates your board and logs your CLI in. Open the
-sign-in link it prints. Keep this terminal running; in a second terminal,
-in the same directory, add some work:
+Open the sign-in link it prints. Keep this terminal running; in a second
+terminal, in the same directory, add a task:
 
 ```sh
 lll issue create -t "Make sign-in errors easier to understand"
-lll issue claim APP-1
-lll issue comment APP-1 -b "Checking what happens with an expired link."
 lll board -w
 ```
 
-You'll see the task, its claim and your comment on the board. `APP` is the
-project's team key; its issues are `APP-1`, `APP-2`, and so on. lll saves that
-association in `.lll.toml`, so later commands know which backlog to use.
+The board's data is saved, and this directory remembers where it belongs.
+Run `lll new "Payments rewrite"` again to reopen it after stopping the server.
 
-Already use lll on another server? [Connect to that board](docs/setup.md)
-instead of starting a new one.
+Already invited to a board, or connecting another machine or repository?
+[Use that existing board](docs/setup.md#join-an-existing-board).
 
 ## Bring an agent
 
 Give your agent its own identity on the board:
 
 ```sh
-lll bot create bot-my-project
+lll bot create bot-payments
 ```
 
 The command prints a prompt to paste into your coding agent, including its
-access token. Keep that prompt private. Your agent can then read the backlog,
-claim a task, leave progress notes and record what it learned. You follow the
-work on the same board.
+access token. Keep that prompt private. The agent can read and claim the task,
+check what is already known about the code, then record what it changed and
+learned. You follow the work on the same board.
 
-lll also includes agent instructions for that workflow: ask the agent to run
-`lll skill get lll` to read them.
+Invite teammates as people, then let each person connect their own agents.
+They can also follow a view-only board link in a browser without installing
+anything. [Inviting and sharing](docs/inviting.md) explains the access choices.
+
+For a fuller optional workflow, `lll skill get software-factory` describes
+claiming, isolating, building, verifying, merging and recording. Use it as a
+starting point for your own process.
 
 ## Go further
 
