@@ -1,7 +1,8 @@
 // Fixtures: Grouping Alpha/Beta (planned), Started/Paused/Completed/Cancelled;
 // PGP has a started project, and PG0 is empty. No project writes in this driver.
 async page => {
-  const base = new URL(page.url()).origin;
+  // The CI run-code VM has no URL host global; URL reads belong to the page.
+  const base = await page.evaluate(() => location.origin);
   const teamPath = page.url().match(/\/t\/[^/]+\//)?.[0];
   if (!teamPath) throw new Error('expected a team-routed page');
   const path = base + teamPath + 'projects';
@@ -49,7 +50,7 @@ async page => {
   const raw = await page.request.get(path + '?raw');
   if (!raw.ok() || !(await raw.text()).includes('Grouping Started')) throw new Error('collapse hid projects from raw output');
   await group('planned').locator('.pj-row').filter({hasText: 'Grouping Alpha'}).click();
-  if (new URL(page.url()).searchParams.get('project') !== 'Grouping Alpha') throw new Error('grouping broke the project drilldown');
+  if ((await page.evaluate(() => new URLSearchParams(location.search).get('project'))) !== 'Grouping Alpha') throw new Error('grouping broke the project drilldown');
   await page.goto(path);
   await expectOpen('started', false);
   const secondTab = await page.context().newPage();

@@ -1557,6 +1557,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   LAYOUT_PROBE=$("$LIN" issue create -t "Layout browser issue" --project "Layout browser project" --json)
   LAYOUT_KEY=$(printf '%s' "$LAYOUT_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
   seq_goto "$WEB/t/ENG/issues"
+  python3 "$REPO_ROOT/scripts/browser_saved_view_dialogs.py" "$BROWSER_SESSION" "$WEB/t/ENG/"
   saved_views_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_saved_views.js)" 2>&1)
   assert_not_contains "$saved_views_browser" "### Error" "saved views browser errors"
   assert_contains "$saved_views_browser" 'saved view deletion and project layouts browser passed' "browser: saved view deletion and project layouts"

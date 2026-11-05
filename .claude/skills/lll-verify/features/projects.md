@@ -29,3 +29,8 @@ There is no new SSE connection; status changes appear on the next page load.
 Native collapse works without JavaScript, but remembering it requires JavaScript
 and available browser storage. Storage failures display a notice instead of
 breaking the controls or silently pretending the preference was saved.
+
+Run the drivers with the CI-pinned Playwright CLI. Browser URL APIs belong
+inside `page.evaluate`; the run-code VM does not guarantee Node URL globals.
+Native confirmations use separate CLI `dialog-dismiss` / `dialog-accept` calls
+(`browser_saved_view_dialogs.py`); a run-code callback can suspend at a modal.

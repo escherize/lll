@@ -1,7 +1,8 @@
 // Fixtures: a project named "Layout browser project" with one issue.
 // Exercise the shared shell on both static pages and the live board.
 async page => {
-  const base = new URL(page.url()).origin;
+  // The CI run-code VM has no URL host global; URL reads belong to the page.
+  const base = await page.evaluate(() => location.origin);
   const teamPath = page.url().match(/\/t\/[^/]+\//)?.[0];
   if (!teamPath) throw new Error('expected a team-routed page');
   const project = 'Layout browser project';
@@ -36,10 +37,12 @@ async page => {
   if (await page.locator('#issues tbody tr').count() !== 1) throw new Error('project list lost its filter');
   await projectHeadingFits();
   await compactDelete(names[0]);
+  // Native dialog behavior is covered by browser_saved_view_dialogs.py.
+  // Keep these longer concurrency checks inside one uninterrupted callback.
   let writes = 0;
   const countWrite = req => { if (req.url().endsWith('/views/delete')) writes++; };
   page.on('request', countWrite);
-  page.once('dialog', dialog => dialog.dismiss());
+  await page.evaluate(() => { window.confirm = () => false; });
   await button(names[0]).click();
   if (writes !== 0 || await button(names[0]).count() !== 1) throw new Error('cancel deleted a saved view');
   page.off('request', countWrite);
@@ -56,12 +59,12 @@ async page => {
   };
   await page.route('**/views/delete', delayFirst);
   try {
-    page.once('dialog', dialog => dialog.accept());
+    await page.evaluate(() => { window.confirm = () => true; });
     await button(names[0]).click();
     await fetched;
     await compactDelete(names[0]);
     if (await button(names[0]).getAttribute('aria-busy') !== 'true') throw new Error('pending deletion is not announced');
-    page.once('dialog', dialog => dialog.accept());
+    await page.evaluate(() => { window.confirm = () => true; });
     await button(names[1]).click();
     await button(names[1]).waitFor({state: 'detached'});
     releaseFirst();
@@ -73,28 +76,28 @@ async page => {
   }
   const refuse = route => route.fulfill({status: 503, body: 'Temporary deletion failure'});
   await page.route('**/views/delete', refuse);
-  page.once('dialog', dialog => dialog.accept());
+  await page.evaluate(() => { window.confirm = () => true; });
   await button(names[2]).click();
   await page.locator('#rail-views-flash').getByText('Temporary deletion failure').waitFor();
   if (!await button(names[2]).isEnabled()) throw new Error('failed delete cannot be retried');
   await compactDelete(names[2]);
   if (await button(names[2]).getAttribute('aria-busy') !== null) throw new Error('failed deletion remained busy');
   await page.unroute('**/views/delete', refuse);
-  page.once('dialog', dialog => dialog.accept());
+  await page.evaluate(() => { window.confirm = () => true; });
   await button(names[2]).focus();
   await page.keyboard.press('Enter');
   await button(names[2]).waitFor({state: 'detached'});
   await page.waitForFunction(() => document.activeElement?.id === 'rail-views-title');
   await layout().getByRole('link', {name: 'Board view', exact: true}).click();
-  if (new URL(page.url()).searchParams.get('project') !== project) throw new Error('board lost its project');
+  if ((await page.evaluate(() => new URLSearchParams(location.search).get('project'))) !== project) throw new Error('board lost its project');
   await projectHeadingFits();
   await page.waitForFunction(() => [...document.querySelectorAll('#board .card')].filter(el => el.checkVisibility()).length === 1);
   if (await layout().getByRole('link', {name: 'Board view', exact: true}).getAttribute('aria-current') !== 'page') throw new Error('board is not selected');
-  page.once('dialog', dialog => dialog.accept());
+  await page.evaluate(() => { window.confirm = () => true; });
   await button(names[3]).click();
   await button(names[3]).waitFor({state: 'detached'});
   await layout().getByRole('link', {name: 'List view', exact: true}).click();
-  if (new URL(page.url()).searchParams.get('project') !== project) throw new Error('list lost its project');
+  if ((await page.evaluate(() => new URLSearchParams(location.search).get('project'))) !== project) throw new Error('list lost its project');
   await page.reload();
   for (const name of names) {
     if (await button(name).count()) throw new Error('deleted view returned after reload');
