@@ -177,6 +177,7 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
 
         time.sleep(3)
         before = access_calls()
+        assert page('/t/GAMMA/', gamma_tok)[0] == 200  # unrelated viewer activity
         assert page('/t/ALPHA/issue/ALPHA-1', guest_tok)[0] == 200
         deadline = time.monotonic() + 10
         while access_calls() == before and time.monotonic() < deadline:
