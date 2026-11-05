@@ -92,6 +92,15 @@ section covering your change still exits 0.
 
 ## Evidence - what a proof needs
 
+Map each acceptance case on the issue to **passed**, **failed** or **untested**,
+with the command and result or other evidence that supports that status. Keep
+the original criteria visible; explain a correction rather than silently
+redefining success. A green gate does not turn untested cases into passed ones.
+
+Match the evidence to the change and its user path. For documentation, review
+the instructions and check affected examples or links as appropriate; a prose
+edit does not by itself require a new runtime test. Record any remaining gap.
+
 Write it under a per-issue directory inside your build output (already ignored
 by version control, and per-issue so two agents do not overwrite each other).
 

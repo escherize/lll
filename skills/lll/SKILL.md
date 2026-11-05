@@ -27,6 +27,15 @@ Your repository's own instructions (AGENTS.md, CLAUDE.md, a repo skill) may
 add specifics: the gate command, local skills, a scratch board. Where they are
 more specific than this skill, they win.
 
+## Before nontrivial edits
+
+Read the issue and its comments, then consult findings for the paths you plan
+to touch (`lll finding near PATH`) and decisions relevant to the change
+(`lll doc list -k decision --search TOPIC`, then `lll doc view SLUG`). Record
+the applicable constraints briefly on the issue before editing. Select context
+for this task rather than loading the whole board. If there are no relevant
+records, proceed without inventing one.
+
 ## The loop
 
 ```sh
@@ -300,6 +309,10 @@ record, and they are not interchangeable:
 | **decision** | a choice with alternatives and consequences, immutable | when a choice constrains future work |
 | **finding** | a trap, learned the hard way, tied to an area | the moment it costs you time |
 
+Keep the record proportional to the work. Ordinary progress belongs in issue
+comments; findings preserve reusable learning, and decisions preserve choices
+whose alternatives and consequences matter. A change does not need all three.
+
 **Write the decision when you make it, not when you ship it.** A decision
 recorded after the fact is a rationalisation: it remembers what you did and
 forgets what you rejected. The rejected options are the valuable half, because
@@ -307,6 +320,19 @@ the next person will think of them too.
 
 Good decisions name what was NOT chosen and why. "Used X" is worthless. "Used X
 because Y needs a reconciler and two writable copies" is worth the file.
+
+## Hand off unfinished work
+
+When stopping or transferring unfinished work, leave one concise issue comment
+with the branch and commit, current state, remaining work, checks run and their
+results, known failures, and the next useful action. Mark uncommitted work and
+unrun checks explicitly. A commit or an open PR does not mean the work landed;
+say whether it merged and reached the intended artifact.
+
+Use the issue's existing record rather than creating a duplicate progress file.
+Link existing evidence instead of repeating it. This is for interruptions and
+transfers, not a ceremony after every small task. Follow the repo's isolation
+and claim rules when returning the work to the queue or another worker.
 
 ## Side projects: attach, work, archive
 
