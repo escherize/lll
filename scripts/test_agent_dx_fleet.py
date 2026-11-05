@@ -54,11 +54,13 @@ def harness_checks():
                         'assert os.environ["LLL_TOKEN"]=="throwaway-test-token"\n'
                         'assert os.environ["LLL_TEAM"]=="FLEET"\n'
                         'assert "LLL_POISON" not in os.environ and "XDG_POISON" not in os.environ\n'
+                        'assert "LLL_AGENT" not in os.environ\n'
                         'assert Path(os.environ["HOME"])==Path.cwd()/"home"\n'
                         'print("isolated wrapper: "+os.environ["LLL_TOKEN"])\n')
         fake.chmod(0o700)
         env = dict(os.environ, LLL_URL='https://hosted.invalid', LLL_TEAM='REAL',
-                   LLL_TOKEN='not-real-controller-token', LLL_POISON='bad', XDG_POISON='bad')
+                   LLL_TOKEN='not-real-controller-token', LLL_POISON='bad', XDG_POISON='bad',
+                   LLL_AGENT='controller-label')
         result = subprocess.run([sys.executable, str(HERE / 'agent_dx_fleet.py'),
                                  'wrapper', str(worker), str(fake), 'env', '--help'],
                                 env=env, text=True, capture_output=True, timeout=10)
@@ -84,7 +86,11 @@ def harness_checks():
         # Wrapper modes: what each case's workers get from conn.txt and their own shell.
         worker = worker.resolve()
         hostile = {'LLL_URL': 'https://hosted.invalid', 'LLL_TOKEN': 'worker-set-token',
-                   'LLL_TEAM': 'REAL', 'LLL_CONFIG_HOME': str(worker / 'colleague')}
+                   'LLL_TEAM': 'REAL', 'LLL_CONFIG_HOME': str(worker / 'colleague'),
+                   'LLL_AGENT': 'controller-label'}
+        for mode in ('env', 'noteam', 'config', 'override'):
+            scoped, _ = wrapper_env(worker, mode, hostile)
+            assert 'LLL_AGENT' not in scoped, f'{mode}: wrapper guessed or inherited an agent label'
         noteam, _ = wrapper_env(worker, 'noteam', hostile)
         assert noteam['LLL_TOKEN'] == 'throwaway-test-token' and 'LLL_TEAM' not in noteam
         config, _ = wrapper_env(worker, 'config', hostile)
