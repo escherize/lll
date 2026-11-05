@@ -14,6 +14,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - The DX fleet controller refuses a second live case with an error reply,
   preserving the active case and its audit evidence instead of exiting. Its
   run guide no longer refers to an absent tally script (LLL-729).
+
+- First-boot team answers are normalized before being used or saved, keeping
+  the board, repository config and CLI on the same key without shortening
+  explicit identifiers (LLL-669).
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).
