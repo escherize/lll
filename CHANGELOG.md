@@ -8,6 +8,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Identity recovery explains an unreachable server before an expired token,
+  leads saved-token recovery with token-stdin login, and labels a missing
+  board endpoint as optional. Credential precedence and exit codes stay the
+  same (LLL-728).
+
 - CI and release builds use the supported macOS 15 runner after GitHub retired
   macOS 14, preserving the arm64 Go-emission and Linux/browser checks (LLL-737).
 

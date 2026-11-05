@@ -18,7 +18,10 @@ class Healthy(http.server.BaseHTTPRequestHandler):
     calls = 0
 
     def do_GET(self):
-        assert self.path == '/api/health'
+        if self.path != '/api/health':
+            self.send_response(404)
+            self.end_headers()
+            return
         type(self).calls += 1
         self.send_response(200)
         self.end_headers()
