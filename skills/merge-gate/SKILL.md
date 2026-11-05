@@ -52,35 +52,10 @@ summary line.
 
 ## Updating PR metadata
 
-Older GitHub CLI versions can fail `gh pr edit --body-file` with the
-classic-project GraphQL deprecation at `repository.pullRequest.projectCards`
-(reproduced with 2.65.0; 2.95.0 succeeds). If you hit that error, use this REST
-fallback. Do not apply it to an unrelated permission or
-network failure. The fallback needs `python3` for the JSON encoding.
-
-Keep the exact Markdown in a file and encode it as JSON; shell interpolation
-can change newlines or execute characters from the body. For an existing PR:
-
-```sh
-pr_repo=OWNER/REPO
-pr_number=123
-pr_body=/tmp/pr-body.md
-pr_payload=$(mktemp /tmp/pr-metadata.XXXXXX)
-python3 - "$pr_body" "$pr_payload" <<'PY'
-import json
-import sys
-from pathlib import Path
-Path(sys.argv[2]).write_text(json.dumps({"body": Path(sys.argv[1]).read_text()}))
-PY
-gh api --method PATCH "repos/$pr_repo/pulls/$pr_number" \
-  --input "$pr_payload" --jq .html_url
-gh pr view "$pr_number" --repo "$pr_repo" --json title,body
-rm "$pr_payload"
-```
-
-Confirm the PATCH succeeded and the returned body matches the file before
-recording the edit as complete. A title change can use the same JSON payload's
-`title` field. This updates metadata; it does not replace the merge checks.
+Use a body file or a structured API argument for exact Markdown. Re-read the
+saved title and body before treating the update as complete. Diagnose an API
+or CLI error before choosing a fallback; a metadata workaround does not waive
+permissions, merge checks or the repository's workflow.
 
 ## Merging
 
@@ -245,9 +220,9 @@ Stopping is a result. Report which PRs landed, which did not, and why.
 
 Of the PRs an agent opened, what share landed **without a human commit**? That
 single ratio is the field's one durable measure of a factory. Label each
-issue's outcome before you close it (`lll skill get software-factory` says
-how) so the board answers it instead of a transcript. If you find yourself
-merging a stack, count it and write it on the issue.
+issue's outcome before you close it (`lll skill get lll` says how) so the
+board answers it instead of a transcript. If you find yourself merging a stack,
+count it and write it on the issue.
 
 ## What this skill is not
 

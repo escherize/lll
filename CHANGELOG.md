@@ -65,6 +65,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- Make the shipped factory guides portable across repositories, clarify labelled claim continuation and PR handoff, and cover protocol/access races without prescribing writes into generated build output.
+
 - `lll issue next --claim` hands back the caller's own held ready issue, exit
   0 with the key on stdout and `Resuming KEY: already claimed by ...` on
   stderr, when it has nothing new to offer, instead of exiting 5. A loop that

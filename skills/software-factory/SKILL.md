@@ -68,8 +68,9 @@ one token are one member; `lll skill get lll` says what to do instead (an
 Skills loaded only when the work touches their area. Do not read them
 speculatively; they are reference, not process.
 
-**This stage can never be shipped**, because it is made of things that are
-only true in one repo. No skill named on this page belongs to it.
+**The repo-specific knowledge in this stage does not ship with lll.** The
+generic `codebase-skills` fallback helps discover and write that knowledge;
+it does not supply your repo's implementation rules.
 
 **Find this repo's stage-3 skills where the repo lists them**: its AGENTS.md
 or CLAUDE.md, or a repo-local index skill that one of those names. That list
@@ -101,7 +102,8 @@ It does not say you fixed anything. That skill is the other half: reproduce
 the failure the issue describes, fix it, then reproduce the fix under the
 issue's conditions rather than the gate's, and record the evidence.
 
-Hands to stage 5: a green gate, and evidence from the path a user takes.
+Hands to stage 5: a pushed branch, an open PR linked to its issue, a green
+gate and evidence from the user path. `verify-gate` owns that handoff.
 
 ## 5. Merge - land it
 
@@ -134,33 +136,9 @@ the ones that go unrecorded get hit again at full cost by the next one.
 Of the issues you took, what share landed without a human having to intervene?
 That ratio is the field's one durable measure of a setup like this.
 
-**Make it countable by labelling the outcome before you close.** A number you
-can only get by rereading a transcript is prose; a number the board answers is
-a measurement. Every issue closes carrying exactly one outcome label:
-
-- `outcome:clean` - landed, nothing else needed
-- `outcome:changed` - landed, but a human had to touch it
-- `outcome:blocked` - handed back, and the issue says why
-
-`lll issue close` takes no `--label`, so the label goes on in the update
-immediately before it. Create the three once per team with `lll label create`;
-run `lll label list` first and reuse rather than minting near-duplicates.
-
-**Use `--add-label`, not `--label`.** `--label` REPLACES the set: `lll issue
-update KEY-123 --label outcome:clean` writes that one label and drops every
-other label the issue was carrying. `--add-label` adds one label and keeps the
-rest:
-
-```sh
-lll issue update KEY-123 --add-label outcome:clean
-lll issue close KEY-123
-```
-
-`--add-label` and `--remove-label` repeat. Each changes only the labels it
-names, so a label another agent adds at the same time with `--add-label` is
-kept. `--label` and the board's label picker still write the whole
-set from an earlier read, so either can drop a concurrent add. The two flags
-cannot be combined with `--label`.
+Label the outcome before closing: `outcome:clean` (no human intervention),
+`outcome:changed` (a human had to touch it), or `outcome:blocked` (handed back
+with the reason). `lll skill get lll` owns the label mechanics.
 
 Then the ratio is a query rather than an archaeology project:
 

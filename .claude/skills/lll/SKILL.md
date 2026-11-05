@@ -41,11 +41,11 @@ records, proceed without inventing one.
 ```sh
 lll issue list --state todo            # what is open
 lll issue view KEY-12                  # read it FULLY before you touch anything
-lll issue claim KEY-12                 # exits non-zero if someone got there first
-lll issue update KEY-12 --state in-progress
+lll issue claim KEY-12 --agent YOUR-SESSION  # refuses another session
+lll issue start KEY-12 --agent YOUR-SESSION
 # ... work ...
-lll issue comment KEY-12 -b "what changed and why"
-lll issue close KEY-12                 # when the change is on main; releases your claim too
+lll issue comment KEY-12 --agent YOUR-SESSION -b "what changed and why"
+lll issue close KEY-12 --agent YOUR-SESSION  # after delivery; releases your claim
 ```
 
 `claim` atomically acquires an issue for the member authenticated by your token.
@@ -111,9 +111,15 @@ name; it changes nothing. Once you
 are on an issue branch, commands can infer the issue from it:
 `lll issue view` with no argument is the issue you are on.
 
+If an orchestrator already claimed the issue for this member and session label,
+read the full issue and verify that hold; do not claim it again. Keep the same
+label on comments and other work (`--agent YOUR-SESSION` or `LLL_AGENT`). Renew
+before the 24-hour limit when continuing a long run. A different label is a
+different session: do not take its hold.
+
 ## Record it
 
-The commands an agent reaches for most, in the 0.8 spellings. Each has
+The commands an agent reaches for most. Each has
 `--help` with the full flag list.
 
 ```sh
@@ -276,9 +282,8 @@ CLI checks server support before writing and refuses on an older server.
 
 **This is not optional and it is not a nicety.** Every agent hits the same walls,
 and the ones that go unrecorded get hit again by the next agent, at full cost.
-Real examples from lll's own development: a shell-working-directory trap was
-recorded after two occurrences and happened twice more; a byte-offset versus
-rune-index bug was in a finding before it panicked in five places.
+A shell working-directory trap or an offset bug can cost every later agent the
+same investigation unless the first one records it.
 
 File work in your project's team, using the CLI:
 `lll issue create -t "Title" --emoji 🐛 -b -`. When a tool you use is tracked
@@ -379,6 +384,36 @@ record that uncertainty before assigning a file list.
 Recipients should verify that evidence against their checkout before editing.
 If a symbol moved, search for it again and record the corrected path on the
 issue; an outdated file list does not prove there is no work to do.
+
+## Label the outcome before closing
+
+**Make it countable by labelling the outcome before you close.** A number you
+can only get by rereading a transcript is prose; a number the board answers is
+a measurement. Every issue closes carrying exactly one outcome label:
+
+- `outcome:clean` - landed, nothing else needed
+- `outcome:changed` - landed, but a human had to touch it
+- `outcome:blocked` - handed back, and the issue says why
+
+`lll issue close` takes no `--label`, so the label goes on in the update
+immediately before it. Create the three once per team with `lll label create`;
+run `lll label list` first and reuse rather than minting near-duplicates.
+
+**Use `--add-label`, not `--label`.** `--label` REPLACES the set: `lll issue
+update KEY-123 --label outcome:clean` writes that one label and drops every
+other label the issue was carrying. `--add-label` adds one label and keeps the
+rest:
+
+```sh
+lll issue update KEY-123 --add-label outcome:clean
+lll issue close KEY-123
+```
+
+`--add-label` and `--remove-label` repeat. Each changes only the labels it
+names, so a label another agent adds at the same time with `--add-label` is
+kept. `--label` and the board's label picker still write the whole
+set from an earlier read, so either can drop a concurrent add. The two flags
+cannot be combined with `--label`.
 
 ## Group work by outcome
 
