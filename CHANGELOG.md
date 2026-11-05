@@ -18,6 +18,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 - First-boot team answers are normalized before being used or saved, keeping
   the board, repository config and CLI on the same key without shortening
   explicit identifiers (LLL-669).
+
+- Identity recovery explains an unreachable server before an expired token,
+  leads saved-token recovery with token-stdin login, and labels a missing
+  board endpoint as optional. Credential precedence and exit codes stay the
+  same (LLL-728).
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).

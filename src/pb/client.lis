@@ -869,7 +869,7 @@ fn token_fix(origin: Option<config.Source>, login: string) -> string {
     // LLL-687: this used to send a repo file's token down the login path too,
     // and the login landed in the home file the repo file outranks.
     Some(config.Source.RepoFile(path)) => f"remove the token line from {path}, which outranks the saved token; then '{login}' saves a new one to the home config. Then 'lll config check' to verify",
-    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => f"'lll token create <member>' (an agent's, minted by a superuser) or '{login} --email <your email>' (a person); or, if you hold a valid token: '{login} --token -' (reads it from stdin). Then 'lll config check' to verify",
+    Some(config.Source.HomeFile(_)) | Some(config.Source.Flag(_)) | Some(config.Source.Default) | None => f"'{login} --token -' (paste a fresh agent token on stdin), or '{login} --email <your email>' (a person). To mint an agent token, ask a superuser to run 'lll token create <member>'. Then 'lll config check' to verify",
   }
 }
 
