@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Viewer-read tests count access checks for a fresh viewer identity, so
+  unrelated page and live-stream activity cannot trigger a false duplicate
+  assertion; a genuine duplicate still fails (LLL-708).
+
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).
