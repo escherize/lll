@@ -27,7 +27,7 @@
   {{template "rail" .Rail}}
   <div class="main">
     <header class="topbar">
-      <div class="crumbs">{{if .Page.Project}}<a href="{{.Rail.BoardBase}}projects">Projects</a><span class="sep">›</span><span class="here">{{.Page.Project}}</span>{{else}}<span class="here">All issues</span>{{end}}</div>
+      <div class="crumbs{{if .Page.Project}} project-crumbs{{end}}">{{if .Page.Project}}<a href="{{.Rail.BoardBase}}projects">Projects</a><span class="sep">›</span><span class="here" title="{{.Page.Project}}">{{.Page.Project}}</span>{{else}}<span class="here">All issues</span>{{end}}</div>
       <div class="spacer"></div>
       {{template "project-layout" .Page.Layout}}
       {{/* Honest about the ceiling: PB reports how many records matched, so a

@@ -220,6 +220,12 @@ html, body {
 .crumbs a:hover { color: var(--text); }
 .crumbs .here { color: var(--text); }
 .crumbs .sep { color: var(--text-3); }
+/* Project names share a fixed-height header with layout and write controls.
+   Truncate only the project label; its full text stays in the accessible name
+   and title, while the Projects link and separator remain visible. */
+.project-crumbs { min-width: 0; }
+.project-crumbs > a, .project-crumbs > .sep { flex: none; }
+.project-crumbs .here { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar .spacer { flex: 1; }
 
 /* Topbar star. A control, so its "on" state may spend the ember accent —
