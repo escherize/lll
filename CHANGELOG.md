@@ -10,6 +10,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 - Fleet wrappers leave the agent label unset instead of attributing every
   worker to Codex, and still discard inherited controller labels (LLL-727).
+
+- The DX fleet controller refuses a second live case with an error reply,
+  preserving the active case and its audit evidence instead of exiting. Its
+  run guide no longer refers to an absent tally script (LLL-729).
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).

@@ -1101,7 +1101,10 @@ def serve(args):
             command = json.loads(line)
             action = command['action']
             if action == 'provision':
-                assert not boards, 'stop previous case before provisioning'
+                if boards:
+                    print(json.dumps({'error': 'stop previous case before provisioning',
+                                      'case': live_case}), flush=True)
+                    continue
                 live_case = command['case']
                 assert live_case in CASES, 'unknown case'
                 pair = CASES[live_case]['pair']
