@@ -1553,6 +1553,33 @@ if command -v playwright-cli >/dev/null 2>&1; then
     "$LIN" project delete "$prefix project $suffix" >/dev/null
   done
 
+  "$LIN" project create -n "Layout browser project" >/dev/null
+  LAYOUT_PROBE=$("$LIN" issue create -t "Layout browser issue" --project "Layout browser project" --json)
+  LAYOUT_KEY=$(printf '%s' "$LAYOUT_PROBE" | jq -r '.expand.team.key + "-" + (.number | tostring)')
+  seq_goto "$WEB/t/ENG/issues"
+  saved_views_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_saved_views.js)" 2>&1)
+  assert_not_contains "$saved_views_browser" "### Error" "saved views browser errors"
+  assert_contains "$saved_views_browser" 'saved view deletion and project layouts browser passed' "browser: saved view deletion and project layouts"
+  "$LIN" issue delete "$LAYOUT_KEY" --yes >/dev/null
+  "$LIN" project delete "Layout browser project" --yes >/dev/null
+
+  for entry in 'Alpha planned' 'Beta planned' 'Started started' 'Paused paused' 'Completed completed' 'Cancelled cancelled'; do
+    read -r name status <<< "$entry"
+    "$LIN" project create -n "Grouping $name" --status "$status" >/dev/null
+  done
+  "$LIN" team create --key PGP -n "Grouping other team" >/dev/null
+  "$LIN" project create --team PGP -n "Grouping Other team" --status started >/dev/null
+  "$LIN" team create --key PG0 -n "Grouping empty team" >/dev/null
+  seq_goto "$WEB/t/ENG/projects"
+  project_groups_browser=$(playwright-cli -s="$BROWSER_SESSION" run-code "$(cat "$REPO_ROOT"/scripts/browser_project_groups.js)" 2>&1)
+  assert_not_contains "$project_groups_browser" "### Error" "project grouping browser errors"
+  assert_contains "$project_groups_browser" 'project grouping passed:' "browser: project grouping and remembered collapse state"
+  for name in Alpha Beta Started Paused Completed Cancelled; do
+    "$LIN" project delete "Grouping $name" --yes >/dev/null
+  done
+  "$LIN" team delete PGP --yes >/dev/null
+  "$LIN" team delete PG0 --yes >/dev/null
+
   # LLL-233: exercise the actual row morph, cancellation and confirmation.
   "$LIN" project create -n "Deletion browser project" >/dev/null
   "$LIN" member add -n "Deletion browser member" >/dev/null

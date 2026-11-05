@@ -53,8 +53,9 @@ provenance.
        know nothing of this request's view. -->
   <div class="main{{range .Page.Hidden}} hc-{{.}}{{end}}" data-signals:vhide="'{{.Page.HideCsv}}'" data-signals:vck="'{{.Page.ViewCookieName}}'" data-init="{{if and (eq .Page.QueryStr "") (not .Page.ViewRestored)}}const v = localStorage.getItem('lllView'); if (v) { const h = new URLSearchParams(v).get('hide') || ''; if (h) location.replace(location.pathname + '?hide=' + encodeURIComponent(h)); else localStorage.removeItem('lllView'); } {{end}}{{.Page.HideSeed}}" data-class="{ {{range $i, $c := .Page.Columns}}{{if $i}}, {{end}}'hc-{{$c.State}}': $hide_{{$c.Sig}}{{end}} }">
     <header class="topbar">
-      <div class="crumbs"><span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span></div>
+      <div class="crumbs">{{if .Page.Layout.Project}}<a href="{{.Rail.BoardBase}}projects">Projects</a><span class="sep">›</span><span class="here">{{.Page.Layout.Project}}</span>{{else}}<span class="here">{{if eq .Rail.Active "mine"}}My issues{{else}}Board{{end}}</span>{{end}}</div>
       <div class="spacer"></div>
+      {{template "project-layout" .Page.Layout}}
       {{template "agent-copy" .Rail}}
       <div id="board-search" class="board-search">
         <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><use href="#ic-search"/></svg>

@@ -224,8 +224,8 @@ fn issue_raw(vm: IssueVM) -> string {
   strings.Join(lines, "\n")
 }
 
-/// GET /projects?raw — one line per project, the same fields the HTML row
-/// shows, in the same order.
+/// GET /projects?raw — one line per project, with the HTML row's fields.
+/// Preserve its alphabetical order independently of the HTML status groups.
 fn projects_raw(vm: ProjectsVM, team_key: string) -> string {
   let mut lines: Slice<string> = [f"# Projects ({vm.projects.length()})"]
   if team_key != "" { lines = lines.append(f"Team: {team_key}") }

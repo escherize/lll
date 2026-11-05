@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"html"
 	"html/template"
 	"strings"
 	"sync"
@@ -63,6 +64,40 @@ func TestTeamTitlePrefix(t *testing.T) {
 		got, err := Render("team-title-prefix", struct{ TeamKey string }{tc.key})
 		if err != nil || got != tc.want {
 			t.Errorf("team %q: got %q, %v; want %q", tc.key, got, err, tc.want)
+		}
+	}
+}
+
+func TestSavedViewsHaveSeparateDeleteForms(t *testing.T) {
+	got, err := Render("rail-views", []struct{ Id, Name, Href string }{
+		{"view123", `Bob's <view>`, "/?state=todo"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`action="/views/delete"`, `method="post"`, `name="id" value="view123"`, `aria-label="Delete saved view Bob&#39;s &lt;view&gt;"`, `href="/?state=todo"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("saved-view navigation is missing %s", want)
+		}
+	}
+	if strings.Contains(got, `<view>`) {
+		t.Fatal("view name was rendered as markup")
+	}
+}
+
+func TestProjectLayoutNavigation(t *testing.T) {
+	for _, active := range []string{"list", "board"} {
+		got, err := Render("project-layout", struct{ Project, ListHref, BoardHref, Active string }{
+			"Release & QA", "/t/ENG/issues?project=Release+%26+QA", "/t/ENG/?project=Release+%26+QA", active,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = html.UnescapeString(got)
+		for _, want := range []string{`aria-label="Issue layout"`, `href="/t/ENG/issues?project=Release+%26+QA"`, `href="/t/ENG/?project=Release+%26+QA"`, `title="List view"`, `title="Board view"`, `href="#ic-issues"`, `href="#ic-board"`, `title="` + map[string]string{"list": "List", "board": "Board"}[active] + ` view" aria-current="page"`} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s navigation is missing %s", active, want)
+			}
 		}
 	}
 }

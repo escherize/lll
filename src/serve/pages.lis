@@ -108,7 +108,7 @@ fn fetch_view_vms(ctx: pb.Client) -> Result<Slice<ViewVM>, pb.CliError> {
   Ok(list.items.map(|v| {
     let mut href = "/"
     if v.query != "" { href = f"/?{v.query}" }
-    ViewVM { name: v.name, href }
+    ViewVM { id: v.id, name: v.name, href }
   }))
 }
 
@@ -353,6 +353,7 @@ fn board_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, team
     Err(e) => { http.Error(w, e.message, 500); return },
   }
   let vm = BoardVM {
+    layout: project_layout(team.key, q, "board"),
     states: state_opts(),
     columns: board_columns(issues, flt, held, order),
     filter_groups: filter_groups(

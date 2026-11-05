@@ -1,0 +1,19 @@
+/// One navigation shared by the project-filtered list and board. These are
+/// links, not tabs: both layouts keep their existing bookmarkable URLs.
+pub struct ProjectLayoutVM {
+  pub project: string,
+  pub list_href: string,
+  pub board_href: string,
+  pub active: string,
+}
+
+fn project_layout(team_key: string, q: ViewQuery, active: string) -> ProjectLayoutVM {
+  // The table cannot represent a multi-project board filter.
+  let project = if csv(q.project).length() == 1 { q.project } else { "" }
+  ProjectLayoutVM {
+    project,
+    list_href: view_query_href(issues_base(team_key), q),
+    board_href: view_query_href(board_base(team_key), q),
+    active,
+  }
+}

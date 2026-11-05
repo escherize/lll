@@ -27,8 +27,9 @@
   {{template "rail" .Rail}}
   <div class="main">
     <header class="topbar">
-      <div class="crumbs"><span class="here">All issues</span></div>
+      <div class="crumbs">{{if .Page.Project}}<a href="{{.Rail.BoardBase}}projects">Projects</a><span class="sep">›</span><span class="here">{{.Page.Project}}</span>{{else}}<span class="here">All issues</span>{{end}}</div>
       <div class="spacer"></div>
+      {{template "project-layout" .Page.Layout}}
       {{/* Honest about the ceiling: PB reports how many records matched, so a
            truncated page says so instead of ending quietly at the limit. */}}
       <span class="itbl-count">{{if .Page.Truncated}}Showing {{.Page.Shown}} of {{.Page.Total}} · {{.Page.Limit}}-row limit{{else}}{{.Page.Total}} issue{{if ne .Page.Total 1}}s{{end}}{{end}}</span>
