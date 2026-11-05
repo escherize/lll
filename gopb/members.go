@@ -70,10 +70,13 @@ func registerMemberGuards(app core.App) {
 	})
 }
 
-// registerMemberUpdateTx runs a member update through the records API in
-// one transaction (LLL-709 review F5, LLL-713). PocketBase saves outside
-// one, and reads outside the write, so keepCommitted's re-read of the
-// stored row could itself be stale by the time the row is written. In a
+// registerMemberUpdateTx runs member creates and updates through the records
+// API in one transaction (LLL-622, LLL-709 review F5, LLL-713). Creation
+// must hold the writer across checkOwner and INSERT: otherwise an update
+// can give its proposed owner an owner after the check, forming a chain.
+// PocketBase otherwise saves and reads outside the transaction, so
+// keepCommitted's re-read of the stored row could itself be stale by the
+// time the row is written. In a
 // transaction the read and the write hold the one write connection
 // together.
 //
@@ -84,12 +87,16 @@ func registerMemberGuards(app core.App) {
 // lock while it waited for the connection, stalled every write for the
 // lock's 5s timeout.
 func registerMemberUpdateTx(app core.App) {
-	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
-		return e.App.RunInTransaction(func(tx core.App) error {
+	write := func(e *core.RecordRequestEvent) error {
+		original := e.App
+		defer func() { e.App = original }()
+		return original.RunInTransaction(func(tx core.App) error {
 			e.App = tx
 			return e.Next()
 		})
-	})
+	}
+	app.OnRecordCreateRequest("members").BindFunc(write)
+	app.OnRecordUpdateRequest("members").BindFunc(write)
 }
 
 // checkMemberKind enforces the reserved bot- prefix, in both directions:
