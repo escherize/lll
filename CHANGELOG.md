@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- First-boot team answers are normalized before being used or saved, keeping
+  the board, repository config and CLI on the same key without shortening
+  explicit identifiers (LLL-669).
+
 - CI and release builds use the supported macOS 15 runner after GitHub retired
   macOS 14, preserving the arm64 Go-emission and Linux/browser checks (LLL-737).
 
