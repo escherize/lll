@@ -8,6 +8,17 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Browser-poll observation-retention tests use controlled time and responses,
+  avoiding false failures when subprocess startup exceeds 0.2 seconds under
+  load; real process timeout and descendant cleanup coverage stays (LLL-724).
+
+- CI and release builds use the supported macOS 15 runner after GitHub retired
+  macOS 14, preserving the arm64 Go-emission and Linux/browser checks (LLL-737).
+
+- `lll up` allows up to two minutes for server startup, so slow migrations
+  are not interrupted after five seconds. It reports when it is still waiting;
+  PocketBase startup failures continue to exit immediately.
+
 - A team invite accepted by a signed-in person adds access to that account,
   keeping its identity, token and existing teams. The form no longer asks
   existing users to create another person, and acceptance opens the invited
@@ -15,6 +26,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   without spending the invite (LLL-731).
 
 ### Added
+
+- The shipped workflow skills describe concise interruption handoffs, relevant
+  findings and decisions before edits, and evidence marked passed, failed or
+  untested against acceptance cases. Recording guidance distinguishes progress
+  comments from reusable findings and consequential decisions (LLL-736).
 
 - `lll invite create --team ENG --for Sloan --for Maksym` prints a ready-to-send
   group message with one labelled single-use link per person. Partial failures
