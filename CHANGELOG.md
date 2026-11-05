@@ -23,6 +23,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   leads saved-token recovery with token-stdin login, and labels a missing
   board endpoint as optional. Credential precedence and exit codes stay the
   same (LLL-728).
+
+- Scoped members and their bots can move unreferenced records between teams
+  they can access, while source, destination and owner limits still apply
+  (LLL-668).
+
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).
