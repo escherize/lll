@@ -16,6 +16,11 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- The shipped workflow skills describe concise interruption handoffs, relevant
+  findings and decisions before edits, and evidence marked passed, failed or
+  untested against acceptance cases. Recording guidance distinguishes progress
+  comments from reusable findings and consequential decisions (LLL-736).
+
 - `lll invite create --team ENG --for Sloan --for Maksym` prints a ready-to-send
   group message with one labelled single-use link per person. Partial failures
   retain completed links and name pending recipients; JSON reports completion
