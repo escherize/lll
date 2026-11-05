@@ -2404,7 +2404,8 @@ assert_contains "$out" "lll issue claim ENG-1" "a synonym verb is pointed at the
 out=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" doc new --slug long-forms --title "Long forms" --kind finding --area pb --paths "src/pb" --body "every short flag has a long one")
 assert_contains "$out" "Created doc long-forms" "doc new takes the long form of every flag, --paths included"
 out=$("$LIN" --help)
-assert_contains "$out" "There is no 'lll list' or 'lll comment'" "top-level help states the noun-verb shape (fleet replay: 5/30)"
+assert_contains "$out" "'lll issue list'" "top-level help teaches a noun-verb example (fleet replay: 5/30)"
+assert_contains "$out" "'lll doc view'" "top-level help teaches a second noun-verb example"
 
 # a sub-verb where the ID goes is told the ID comes first (fleet task 4: 3/30)
 set +e
