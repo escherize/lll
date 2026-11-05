@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- `lll up` allows up to two minutes for server startup, so slow migrations
+  are not interrupted after five seconds. It reports when it is still waiting;
+  PocketBase startup failures continue to exit immediately.
+
 - A team invite accepted by a signed-in person adds access to that account,
   keeping its identity, token and existing teams. The form no longer asks
   existing users to create another person, and acceptance opens the invited
