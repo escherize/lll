@@ -1,4 +1,4 @@
-# Release binaries on tag push (v*). Runs on macos-14 for the same reason as
+# Release binaries on tag push (v*). Runs on macos-15 for the same reason as
 # gate.yml: lis cannot bindgen on linux. darwin-arm64 is a native `lis build`;
 # the linux binaries are `GOOS=linux go build` over a darwin `lis emit`
 # (scripts/emit-relative.sh) — the same pipeline scripts/fly-deploy.sh proves
@@ -29,7 +29,7 @@ permissions:
 jobs:
   release:
     name: release
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:

@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- CI and release builds use the supported macOS 15 runner after GitHub retired
+  macOS 14, preserving the arm64 Go-emission and Linux/browser checks (LLL-737).
+
 - `lll up` allows up to two minutes for server startup, so slow migrations
   are not interrupted after five seconds. It reports when it is still waiting;
   PocketBase startup failures continue to exit immediately.
