@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Fleet wrappers leave the agent label unset instead of attributing every
+  worker to Codex, and still discard inherited controller labels (LLL-727).
+
 - CI and release builds use the supported macOS 15 runner after GitHub retired
   macOS 14, preserving the arm64 Go-emission and Linux/browser checks (LLL-737).
 
