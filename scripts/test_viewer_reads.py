@@ -171,18 +171,33 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
         assert code == 200 and minted['token'], (code, minted)
 
         # --- one access check per page load ---
-        def access_calls():
-            q = urllib.parse.quote("data.url~'/api/lll/access'")
-            return call(api, f'/api/logs?perPage=1&filter={q}', token=su)[1]['totalItems']
+        # Other pages and SSE viewers are outside this measurement. Use a
+        # fresh identity for this one page and enable its id in this fixture's
+        # request logs, rather than attributing every board request to it.
+        settings = call(api, '/api/settings', token=su)[1]['logs']
+        settings['logAuthId'] = True
+        assert call(api, '/api/settings', {'logs': settings}, su, 'PATCH')[0] == 200
+        probe, probe_tok = member('access-count-probe', scope='teams', teams=[alpha['id']], mode='rw')
 
-        time.sleep(3)
-        before = access_calls()
-        assert page('/t/ALPHA/issue/ALPHA-1', guest_tok)[0] == 200
-        deadline = time.monotonic() + 10
-        while access_calls() == before and time.monotonic() < deadline:
-            time.sleep(.5)
-        time.sleep(2)
-        assert access_calls() - before == 1, f'one issue page asked /api/lll/access {access_calls() - before} times'
+        def access_calls(member_id):
+            q = urllib.parse.quote(f"data.url='/api/lll/access' && data.authId='{member_id}'")
+            code, body, _ = call(api, f'/api/logs?perPage=1&filter={q}', token=su)
+            assert code == 200, body
+            return body['totalItems']
+
+        assert access_calls(probe['id']) == 0
+        assert page('/t/GAMMA/', gamma_tok)[0] == 200  # unrelated viewer activity
+        assert page('/t/ALPHA/issue/ALPHA-1', probe_tok)[0] == 200
+        deadline = time.monotonic() + 12
+        while (access_calls(probe['id']) == 0 or access_calls(gamma_rec['id']) == 0) and time.monotonic() < deadline:
+            time.sleep(.2)
+        # PocketBase flushes request logs every three seconds. Include a full
+        # further flush to observe a second access queued after the first
+        # one's batch; no other page or stream uses this identity.
+        time.sleep(3.2)
+        count = access_calls(probe['id'])
+        assert count == 1, f'one issue page asked /api/lll/access {count} times'
+        assert access_calls(gamma_rec['id']) == 1, 'unrelated viewer activity was not observed'
     finally:
         for proc in streams:
             proc.terminate()
