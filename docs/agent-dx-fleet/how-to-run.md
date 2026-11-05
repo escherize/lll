@@ -57,7 +57,9 @@ watch log. Pair cases are judged per board. In case 20 a missing
 `error_rating` is reported but does not fail the artifact.
 Durable snapshots redact webhook secrets. A fresh reviewer writes review.json,
 review.md and summaries.json. Assemble run.json with summaries, review,
-checker results and fingerprint, then run the shared tally.py and save stdout.
+checker results and fingerprint. Record the closing tally from the judge's
+artifact totals and the reviewer's classification of failed calls in the
+captured audits, including the number of workers with tool-owned failures.
 The owner uses the audits and ground truth, not worker done claims.
 
 Pass requires every provisioned artifact and fewer than two workers with a tool-owned
@@ -73,6 +75,10 @@ listener is gone, removes connections and private controller data. Scan
 sanitized evidence for credentials, remove disposable worker HOME/cache, and
 retain only reports, audits, snapshots, reviews, tally, fingerprints and cleanup
 receipts. Attach the evidence bundle and closing table to the run’s tracking issue.
+
+A provision request while a case is live returns an error and leaves that case
+and its private audit copies intact. Review it and send `stop` before asking
+for the next case; a refused request does not end the controller.
 
 ## Wrapper modes
 
