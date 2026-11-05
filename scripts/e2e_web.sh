@@ -1577,6 +1577,7 @@ if command -v playwright-cli >/dev/null 2>&1; then
   for name in Alpha Beta Started Paused Completed Cancelled; do
     "$LIN" project delete "Grouping $name" --yes >/dev/null
   done
+  "$LIN" project delete --team PGP "Grouping Other team" --yes >/dev/null
   "$LIN" team delete PGP --yes >/dev/null
   "$LIN" team delete PG0 --yes >/dev/null
 
