@@ -259,17 +259,14 @@ check what is configured with 'lll config list'"),
       }
     }
 
-    let mut ok = false
-    for _ in 0..50 {
-      if healthy(db_url) {
-        ok = true
-        break
-      }
-      time.Sleep(100 * time.Millisecond)
+    // Serve exits the process on failure above. While it is still running,
+    // allow migrations to finish instead of killing them after five seconds.
+    let waiting = || {
+      let _ = fmt.Fprintln(os.Stderr, "waiting for the server (migrations may still be running)")
     }
-    if !ok {
+    if !wait_for_server(db_url, 2 * time.Minute, waiting) {
       return Err(
-        pb.failed(f"lll server did not come up on {db_url}; check its output above"),
+        pb.failed(f"lll server did not come up on {db_url} within 2 minutes; check its output above"),
       )
     }
     api_line = f"api    {db_url}"
@@ -528,6 +525,26 @@ password in its own data directory's .lll-admin.json."),
     None => ([], []),
   }
   streamed(serve.run_server(ctx, chosen, also, refresh, p.given("--admin-ui"), capabilities, shared.append(agent...)))
+}
+
+/// Wait for readiness with a wall-clock ceiling, not a fixed number of probes
+/// (each health request can itself take two seconds). Serve's task retains
+/// responsibility for immediate startup errors and graceful shutdown.
+fn wait_for_server(base_url: string, ceiling: time.Duration, waiting: fn()) -> bool {
+  let started = time.Now()
+  let mut announced = false
+  loop {
+    if healthy(base_url) { return true }
+    let elapsed = time.Since(started)
+    if elapsed >= ceiling { return false }
+    if !announced && elapsed >= 5 * time.Second {
+      waiting()
+      announced = true
+    }
+    let remaining = ceiling - elapsed
+    let pause = if remaining < 100 * time.Millisecond { remaining } else { 100 * time.Millisecond }
+    time.Sleep(pause)
+  }
 }
 
 /// The banner's administrator line (LLL-648), or None. A boot with no
