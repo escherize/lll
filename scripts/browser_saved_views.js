@@ -12,6 +12,16 @@ async page => {
     const box = await control.boundingBox();
     if (!box || box.width < 24 || box.height < 24 || box.width > 26 || box.height > 26) throw new Error('saved-view deletion is not a compact accessible target');
   };
+  const projectHeadingFits = async () => {
+    const fits = await page.locator('.topbar .crumbs').evaluate(el => {
+      const text = el.querySelector('.here');
+      const box = text.getBoundingClientRect();
+      const header = el.closest('.topbar').getBoundingClientRect();
+      return box.height <= parseFloat(getComputedStyle(text).lineHeight) + 1 &&
+        box.top >= header.top && box.bottom <= header.bottom;
+    });
+    if (!fits) throw new Error('project breadcrumb wraps or clips outside its header');
+  };
   const names = ['Delete browser first', 'Delete browser second', 'Delete browser retry', 'Delete browser live'];
   await page.goto(base + teamPath + '?state=todo');
   await page.getByRole('button', {name: 'Save view', exact: true}).click();
@@ -24,6 +34,7 @@ async page => {
   const layout = () => page.getByRole('navigation', {name: 'Issue layout'});
   if (await layout().getByRole('link', {name: 'List view', exact: true}).getAttribute('aria-current') !== 'page') throw new Error('list is not selected');
   if (await page.locator('#issues tbody tr').count() !== 1) throw new Error('project list lost its filter');
+  await projectHeadingFits();
   await compactDelete(names[0]);
   let writes = 0;
   const countWrite = req => { if (req.url().endsWith('/views/delete')) writes++; };
@@ -76,6 +87,7 @@ async page => {
   await page.waitForFunction(() => document.activeElement?.id === 'rail-views-title');
   await layout().getByRole('link', {name: 'Board view', exact: true}).click();
   if (new URL(page.url()).searchParams.get('project') !== project) throw new Error('board lost its project');
+  await projectHeadingFits();
   await page.waitForFunction(() => [...document.querySelectorAll('#board .card')].filter(el => el.checkVisibility()).length === 1);
   if (await layout().getByRole('link', {name: 'Board view', exact: true}).getAttribute('aria-current') !== 'page') throw new Error('board is not selected');
   page.once('dialog', dialog => dialog.accept());
