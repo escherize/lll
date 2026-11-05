@@ -8,6 +8,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Fleet wrappers leave the agent label unset instead of attributing every
+  worker to Codex, and still discard inherited controller labels (LLL-727).
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).

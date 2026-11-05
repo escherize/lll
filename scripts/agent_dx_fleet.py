@@ -167,7 +167,6 @@ def wrapper_env(worker, mode, inherited):
         if inherited.get('LLL_TOKEN'):
             env['LLL_TOKEN'] = inherited['LLL_TOKEN']
             secrets_seen.append(inherited['LLL_TOKEN'])
-    env['LLL_AGENT'] = 'codex'
     refuse_real_config(env, 'agent_dx_fleet')
     return env, secrets_seen
 

@@ -43,6 +43,10 @@ report.json and report.md. Never print `conn.txt` or paste a
 token into a prompt. The wrapper permits the CLI only; task rules prohibit
 source, raw HTTP, the UI, identity changes and server/config operations.
 
+Wrappers leave `LLL_AGENT` unset rather than guessing the worker's runtime or
+inheriting the controller's label. CLI `--agent` remains available when the
+case permits an explicit session label.
+
 After every worker has written report.json and report.md, send
 `{"action":"judge"}`. It validates and publishes the authoritative audits into
 worker evidence directories, preserving any worker-supplied file separately.
