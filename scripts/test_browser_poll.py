@@ -3,8 +3,19 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from browser_poll import poll, result_line
+
+
+class Clock:
+    now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
 
 
 class BrowserPollTest(unittest.TestCase):
@@ -38,11 +49,25 @@ class BrowserPollTest(unittest.TestCase):
             self.assertFalse(marker.exists())
 
     def test_timeout_retains_last_observation(self):
-        command = [sys.executable, '-c', 'print("### Result\\nnot yet")']
-        value, error = poll(command, 'probe', 'ready', .2)
-        self.assertEqual(value, 'not yet')
-        self.assertIn("waiting for 'ready'", error)
-        self.assertIn('not yet', error)
+        # Observation retention must not depend on how quickly Python starts.
+        # The real process/descendant deadline is exercised above.
+        for final in (None, (1, '', 'navigation interrupted')):
+            with self.subTest(final=final):
+                clock = Clock()
+                attempts = iter(((0, '### Result\nnot yet', ''), final))
+
+                def evaluate(command, deadline):
+                    result = next(attempts)
+                    clock.now = deadline if result is None or result[0] != 0 else .1
+                    return result
+
+                with patch('browser_poll.time', clock), \
+                     patch('browser_poll.run_before', side_effect=evaluate):
+                    value, error = poll(['fixture-browser'], 'probe', 'ready', 1)
+                self.assertEqual(value, 'not yet')
+                self.assertIn("waiting for 'ready'", error)
+                self.assertIn('not yet', error)
+                self.assertIn('last error:', error)
 
 
 if __name__ == '__main__':
