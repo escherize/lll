@@ -1,0 +1,22 @@
+title: lll documentation
+url: https://escherize.com
+baseurl: /lll
+repository: escherize/lll
+markdown: kramdown
+kramdown:
+  input: GFM
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-titles-from-headings
+  - jekyll-relative-links
+titles_from_headings:
+  strip_title: false
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: docs
+exclude:
+  - contract.go
+  - go.mod
+  - go.sum

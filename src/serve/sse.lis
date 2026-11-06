@@ -238,6 +238,7 @@ fn events_stream(
     order = q.Get("order")
   }
   if team == "" { team = boot_key }
+  team = records.normalize_team_key(team)
   if board_orders().find(|o| o == order).is_none() { order = "manual" }
   let mut scope = f"board:{team}:{order}"
   if page == "issue" && key != "" { scope = f"issue:{key}" }

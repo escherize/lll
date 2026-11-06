@@ -1,0 +1,10 @@
+<nav aria-label="Documentation">
+{% for section in site.data.docs %}
+  <section class="nav-group">
+    <h2>{{ section.title | escape }}</h2>
+    <ul>{% for entry in section.pages %}
+      <li><a href="{{ entry.url | relative_url }}"{% if page.url == entry.url %} aria-current="page"{% endif %}>{{ entry.title | escape }}</a></li>
+    {% endfor %}</ul>
+  </section>
+{% endfor %}
+</nav>

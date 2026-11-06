@@ -61,9 +61,13 @@ pub fn gated(
   }
 }
 
+fn is_read_method(method: string) -> bool {
+  method == "GET" || method == "HEAD"
+}
+
 /// The viewer this request may proceed as, or None when the response is
 /// already written: a 401 page naming how to get in, a 403 for a route a
-/// scoped viewer does not get, or (a GET that logged in with the query
+/// scoped viewer does not get, or (a GET/HEAD that logged in with the query
 /// param) the 303 that hands the browser its cookie and cleans the token out
 /// of the address bar.
 ///
@@ -81,7 +85,7 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> Option
   // ?board_token= link (TASK-202: rotated tokens locked out every saved
   // cookie until the browser was cleared).
   if is_board_token(query, want) {
-    if r.Method == "GET" {
+    if is_read_method(r.Method) {
       set_board_cookie(w, want, 7 * 24 * 3600)
       http.Redirect(w, r, without_board_token(r), 303)
       return None
@@ -91,7 +95,7 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> Option
   if is_board_token(cookie, want) {
     // An already signed-in browser may reopen an old login link. Strip its
     // token too, before page rendering can preserve it in a saved view.
-    if r.Method == "GET" && query != "" {
+    if is_read_method(r.Method) && query != "" {
       http.Redirect(w, r, without_board_token(r), 303)
       return None
     }
@@ -102,7 +106,7 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> Option
   // revoking it is deleting or narrowing the member, read on every request.
   if query != "" {
     if let Some(login) = cookie_viewer(ctx, query, want) {
-      if r.Method != "GET" {
+      if !is_read_method(r.Method) {
         refused(w, r)
         return None
       }
@@ -133,7 +137,7 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> Option
     refused(w, r)
     return None
   }
-  if r.Method == "GET" && query != "" {
+  if is_read_method(r.Method) && query != "" {
     http.Redirect(w, r, without_board_token(r), 303)
     return None
   }
@@ -504,7 +508,7 @@ fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -
     http.Error(w, "bad request", 400)
     return false
   }
-  if r.Method == "GET" && u.Path == "/" {
+  if is_read_method(r.Method) && u.Path == "/" {
     match v.teams.get(0) {
       Some(key) => http.Redirect(w, r, f"/t/{key}/", 303),
       None => http.Error(w, "this board login opens no teams; ask the person who invited you", 403),
@@ -553,7 +557,9 @@ pub fn scoped_route(method: string, path: string, writes: bool) -> ScopedVerdict
     return ScopedVerdict.Closed("read-only board login: it can read its teams but not change them")
   }
   let closed = ScopedVerdict.Closed("this page is not open to a team-scoped board login")
-  if method != "GET" { return closed }
+  if !is_read_method(method) { return closed }
+  // A HEAD page read is finite; it must not open the live event stream.
+  if method == "HEAD" && path == "/events" { return closed }
   if strings.HasPrefix(path, "/static/") { return ScopedVerdict.Open }
   // The stream, the attachment download and the bare /issue/KEY address
   // (cards, search rows and doc links use it) each read their issue or team

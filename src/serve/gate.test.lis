@@ -42,7 +42,10 @@ fn scoped_viewer_allowlist() {
   // Read-only: no write is admitted.
   assert route_kind(scoped_route("POST", "/t/AAA/settings/label", false)) == "closed"
   assert route_kind(scoped_route("POST", "/state", false)) == "closed"
-  assert route_kind(scoped_route("HEAD", "/t/AAA/", false)) == "closed"
+  assert route_kind(scoped_route("HEAD", "/t/AAA/", false)) == "open"
+  assert route_kind(scoped_route("HEAD", "/t/AAA/docs", false)) == "open"
+  assert route_kind(scoped_route("HEAD", "/events", false)) == "closed"
+  assert route_kind(scoped_route("HEAD", "/t/AAA/settings", false)) == "closed"
 }
 
 #[test]

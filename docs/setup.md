@@ -1,6 +1,6 @@
 # Setting up lll
 
-Start with [the README](../README.md#quickstart) for a local board. This guide
+Start with [the README](https://github.com/escherize/lll#quickstart) for a local board. This guide
 covers joining an existing board, sharing your own, and choosing where work
 is tracked. For available commands and configuration, see [the CLI guide](cli-guide.md).
 

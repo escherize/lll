@@ -7,13 +7,58 @@ async page => {
   if (!teamPath) throw new Error('expected a team-routed page');
   const path = base + teamPath + 'projects';
   const group = (status, target = page) => target.locator(`.pj-group[data-project-status="${status}"]`);
+  const observedGroups = target => target.evaluate(() => ({
+    path: location.pathname,
+    groups: Array.from(document.querySelectorAll('.pj-group')).map(el => {
+      let saved;
+      try { saved = localStorage.getItem(document.querySelector('#projects').dataset.projectGroupsKey + '.' + el.dataset.projectStatus); }
+      catch { saved = 'storage unavailable'; }
+      return {status: el.dataset.projectStatus, open: el.open, saved};
+    }),
+  }));
   const expectOpen = async (status, open, target = page) => {
-    await target.waitForFunction(({status, open}) => document.querySelector(`.pj-group[data-project-status="${status}"]`)?.open === open, {status, open});
+    try {
+      await target.waitForFunction(({status, open}) => document.querySelector(`.pj-group[data-project-status="${status}"]`)?.open === open, {status, open});
+    } catch (error) {
+      throw new Error(`project group ${status} expected open=${open}: ${JSON.stringify(await observedGroups(target))}; ${error.message}`);
+    }
+  };
+  const expectNotice = async (target = page, phase = 'invalid stored value') => {
+    try { await target.locator('#pj-preference-error').waitFor(); }
+    catch (error) { throw new Error(`project preference notice (${phase}): ${JSON.stringify(await observedGroups(target))}; ${error.message}`); }
   };
   await page.goto(path);
   const statuses = await page.locator('.pj-group').evaluateAll(groups => groups.map(el => el.dataset.projectStatus));
   if (statuses.join(',') !== 'planned,started,paused,completed,cancelled') throw new Error('project status groups are out of lifecycle order');
   for (const status of statuses) await expectOpen(status, true);
+  // A native activation can be followed immediately by navigation. Its
+  // preference must be committed before a queued toggle event can be lost.
+  await group('started').locator('summary').evaluate(async summary => {
+    const detail = summary.closest('details');
+    const toggled = new Promise(resolve => detail.addEventListener('toggle', resolve, {once: true}));
+    summary.click();
+    const root = document.querySelector('#projects');
+    const saved = localStorage.getItem(root.dataset.projectGroupsKey + '.started');
+    if (detail.open) throw new Error('native activation did not close the group');
+    await toggled;
+    const after = localStorage.getItem(root.dataset.projectGroupsKey + '.started');
+    if (saved !== 'closed') throw new Error(`close preference deferred past native activation: ${saved}; after toggle: ${after}`);
+  });
+  await page.reload();
+  await expectOpen('started', false);
+  await group('started').locator('summary').evaluate(async summary => {
+    const detail = summary.closest('details');
+    const toggled = new Promise(resolve => detail.addEventListener('toggle', resolve, {once: true}));
+    summary.click();
+    const root = document.querySelector('#projects');
+    const saved = localStorage.getItem(root.dataset.projectGroupsKey + '.started');
+    if (!detail.open) throw new Error('native activation did not reopen the group');
+    await toggled;
+    const after = localStorage.getItem(root.dataset.projectGroupsKey + '.started');
+    if (saved !== null) throw new Error(`reopen preference deferred past native activation: ${saved}; after toggle: ${after}`);
+  });
+  await page.reload();
+  await expectOpen('started', true);
   for (const [status, name] of [['planned', 'Alpha'], ['planned', 'Beta'], ['started', 'Started'], ['paused', 'Paused'], ['completed', 'Completed'], ['cancelled', 'Cancelled']]) {
     await group(status).getByText('Grouping ' + name, {exact: true}).waitFor();
   }
@@ -62,14 +107,21 @@ async page => {
   const key = await page.locator('#projects').getAttribute('data-project-groups-key');
   await page.evaluate(key => localStorage.setItem(key + '.started', 'invalid'), key);
   await page.reload();
-  await page.locator('#pj-preference-error').waitFor();
+  await expectNotice();
   await expectOpen('started', true);
   await group('started').locator('summary').click();
   await expectOpen('started', false);
   await page.reload();
   await expectOpen('started', false);
 
-  for (const method of ['getItem', 'setItem']) {
+  for (const method of ['getItem', 'setItem', 'removeItem']) {
+    // Each error case must exercise the operation it blocks. The getter
+    // case's successful close must not make the setter case reopen instead.
+    await page.evaluate(method => {
+      const key = document.querySelector('#projects').dataset.projectGroupsKey + '.planned';
+      if (method === 'removeItem') localStorage.setItem(key, 'closed');
+      else localStorage.removeItem(key);
+    }, method);
     const blocked = await page.context().newPage();
     try {
       await blocked.addInitScript(method => {
@@ -77,9 +129,11 @@ async page => {
       }, method);
       await blocked.goto(path);
       const initial = await group('planned', blocked).evaluate(el => el.open);
+      if (initial !== (method !== 'removeItem')) throw new Error(`${method} storage fixture has the wrong initial state`);
+      if (method !== 'getItem' && await blocked.locator('#pj-preference-error').isVisible()) throw new Error(`${method} fixture already has a preference error before activation`);
       await group('planned', blocked).locator('summary').click();
       await expectOpen('planned', !initial, blocked);
-      await blocked.locator('#pj-preference-error').waitFor();
+      await expectNotice(blocked, method);
     } finally { await blocked.close(); }
   }
   const native = await page.context().browser().newContext({javaScriptEnabled: false});
