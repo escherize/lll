@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Invalid assignee ids and members without access to the issue team produce
+  the same refusal, so assignment errors do not expose hidden member existence
+  (LLL-754).
+
 - Claim, release, renewal, assignment and close routes recheck archived-team
   access after waiting for the issue lock, inside their write transaction
   (LLL-752).

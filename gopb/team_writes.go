@@ -125,10 +125,9 @@ func checkAssigneeSeesTeam(app core.App, record *core.Record) error {
 		}
 	}
 	member, err := app.FindRecordById("members", assignee)
-	if err != nil {
-		return nil // the relation validator reports a missing member
-	}
-	if effectiveAccess(app, member).sees(team) {
+	// A missing id must not reach a different relation-validation error:
+	// that would reveal whether an inaccessible member exists (LLL-754).
+	if err == nil && effectiveAccess(app, member).sees(team) {
 		return nil
 	}
 	// The member is not named: a team-scoped caller may not see them.
