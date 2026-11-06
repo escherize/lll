@@ -8,6 +8,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Access prompts verify that the selected identity can read the advertised team, including current bot-owner limits, and explain incompatible selections without widening access.
+
 - Serialize member creation with owner changes so concurrent administrator
   writes cannot form a forbidden ownership chain (LLL-622).
 
