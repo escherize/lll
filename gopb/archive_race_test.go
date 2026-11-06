@@ -151,3 +151,28 @@ func TestNativeArchiveCheckSharesWriteTransaction(t *testing.T) {
 		}
 	}
 }
+
+func TestArchiveGuardReadsCurrentSourceTeam(t *testing.T) {
+	for _, action := range []string{"update", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			f := newTeamWritesFixture(t)
+			issue := f.rec(t, "issues", map[string]any{"team": f.live.Id, "title": "before"})
+			stale, err := f.app.FindRecordById("issues", issue.Id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issue.Set("team", f.frozen.Id)
+			if err = f.app.Save(issue); err != nil {
+				t.Fatal(err)
+			}
+			f.archive(t, f.frozen)
+			// The request still carries a live destination and live Original,
+			// but another writer moved the stored row before the guard ran.
+			reached, err := f.request(t, action, stale, nil)
+			if reached {
+				t.Fatal("stale source team bypassed the archive guard")
+			}
+			refusedAsArchived(t, err, "FROZEN")
+		})
+	}
+}

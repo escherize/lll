@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Native records writes check archived teams in their write transaction, so an
+  archive cannot finish between the check and save; stale source-team reads
+  cannot move or delete records out of an archived team (LLL-751).
+
 - Project groups save collapse/reopen choices during activation, before
   navigation; storage-error checks no longer inherit another case's choice
   (LLL-748).
