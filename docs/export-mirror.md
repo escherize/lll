@@ -46,6 +46,12 @@ the team from what is on disk.
 A malformed file fails the whole import with nothing written — every file is
 parsed before the first record is created.
 
+Parent links use issue keys in front matter (`parent: ENG-7`). They are
+resolved after all issues exist, so forward links and deep trees survive a
+restore. Missing parents, duplicate keys and cycles refuse before any writes,
+including `--replace`; a mirror with parents also requires server support
+before replacement starts. Older files without `parent` restore as roots.
+
 What does come back: numbers, sort order, titles, descriptions, states,
 priorities, emoji, assignees, projects, labels, refs, the original creation
 origin, `blocked_by` dependency links, documents with their kind and retrieval

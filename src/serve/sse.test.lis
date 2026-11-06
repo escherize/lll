@@ -1,6 +1,20 @@
 import "config"
 import "pb"
 import "models"
+import "realtime"
+
+#[test]
+fn tree_events_refresh_both_parents_and_child_views_within_their_team() {
+  let mut changed = models.Issue { id: "child", parent: "new-parent", .. }
+  changed.expand.team.key = "ENG"
+  let event = realtime.RecordEvent { topic: "issues", action: realtime.Action.Update, change: realtime.Change.Issue(changed), data: "" }
+  let jobs = tree_refreshes(event, ["issue:ENG-1", "issue:ENG-2", "issue:ENG-3", "issue:ENG-1", "issue:ENGX-1", "board:ENG:manual", "issue:OPS-1"])
+  assert jobs.map(refresh_key).equals(["issue:ENG-1", "issue:ENG-2", "issue:ENG-3"])
+  let deleted = realtime.RecordEvent { action: realtime.Action.Delete, ..event }
+  assert tree_refreshes(deleted, ["issue:ENG-1"]).length() == 1
+  let comment = realtime.RecordEvent { change: realtime.Change.Comment(models.Comment { .. }), ..event }
+  assert tree_refreshes(comment, ["issue:ENG-1"]).is_empty()
+}
 
 #[test]
 fn description_delivery_tracks_each_connection_and_retries_after_backpressure() {

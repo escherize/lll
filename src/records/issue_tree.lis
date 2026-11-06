@@ -1,0 +1,73 @@
+import "models"
+
+#[json]
+pub struct ChildrenSummary {
+  pub done: int,
+  pub total: int,
+}
+
+/// Index one complete, viewer-visible snapshot once for a list or board.
+/// Children stay in snapshot order; repeated ids never inflate progress.
+pub struct IssueTree {
+  pub nodes: Map<models.IssueId, models.Issue>,
+  children: Map<models.IssueId, Slice<models.IssueId>>,
+}
+
+pub fn index_issue_tree(issues: Slice<models.Issue>) -> IssueTree {
+  let mut nodes = Map.new<models.IssueId, models.Issue>()
+  let mut children = Map.new<models.IssueId, Slice<models.IssueId>>()
+  for issue in issues {
+    if nodes.get(issue.id).is_some() { continue }
+    nodes[issue.id] = issue
+    if !issue.parent.is_empty() {
+      children[issue.parent] = children.get(issue.parent).unwrap_or([]).append(issue.id)
+    }
+  }
+  IssueTree { nodes, children }
+}
+
+impl IssueTree {
+  pub fn direct_children(self, parent: models.IssueId) -> Slice<models.Issue> {
+    let mut found: Slice<models.Issue> = []
+    for id in self.children.get(parent).unwrap_or([]) {
+      if let Some(issue) = self.nodes.get(id) { found = found.append(issue) }
+    }
+    found
+  }
+
+  /// Direct children count by their own state, even if they contain open
+  /// descendants. Unknown/future states remain open rather than inflate done.
+  pub fn summary(self, parent: models.IssueId) -> ChildrenSummary {
+    let children = self.direct_children(parent)
+    ChildrenSummary {
+      total: children.length(),
+      done: children.filter(|i| i.state().map_or(false, |s| s.is_terminal())).length(),
+    }
+  }
+}
+
+/// A subtree includes its root. Iterative traversal has no depth cap and
+/// tolerates repeated/cyclic input from an inconsistent historical snapshot.
+pub fn subtree_ids(links: Slice<models.Issue>, root: models.IssueId) -> Map<models.IssueId, bool> {
+  let mut children = Map.new<models.IssueId, Slice<models.IssueId>>()
+  for issue in links {
+    if !issue.parent.is_empty() {
+      children[issue.parent] = children.get(issue.parent).unwrap_or([]).append(issue.id)
+    }
+  }
+  let mut selected = Map.new<models.IssueId, bool>()
+  selected[root] = true
+  let mut queue = [root]
+  let mut cursor = 0
+  while cursor < queue.length() {
+    let current = queue[cursor]
+    cursor += 1
+    for child in children.get(current).unwrap_or([]) {
+      if !selected.get(child).unwrap_or(false) {
+        selected[child] = true
+        queue = queue.append(child)
+      }
+    }
+  }
+  selected
+}

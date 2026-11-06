@@ -158,6 +158,7 @@ Rules: list @request.auth.id != \"\" && (@request.auth.scope = \"all\" || @reque
 | refs | text |  |  |
 | idempotency_key | text |  |  |
 | idempotency_fingerprint | text |  |  |
+| parent | relation |  | relation to issues |
 
 ## labels (base)
 

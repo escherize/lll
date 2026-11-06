@@ -1,6 +1,22 @@
 import "go:encoding/json"
 import "go:strings"
 import "models"
+import "records"
+
+#[test]
+fn tree_cards_keep_direct_progress_when_the_child_is_in_another_column() {
+  let mut parent = models.Issue { id: "root", number: 1, state_wire: "todo", .. }
+  parent.expand.team.key = "ENG"
+  let mut child = models.Issue { id: "child", parent: "root", number: 2, state_wire: "done", .. }
+  child.expand.team.key = "ENG"
+  let grandchild = models.Issue { id: "leaf", parent: "child", number: 3, state_wire: "todo", .. }
+  let tree = records.index_issue_tree([parent, child, grandchild])
+  let card = tree_card(parent, [], tree)
+  assert card.children_progress == "1/1 done"
+  let child_card = tree_card(child, [], tree)
+  assert child_card.parent.key == "ENG-1"
+  assert child_card.children_progress == "0/1 done"
+}
 
 // The web's two priority orders are derived from display.priorities() rather
 // than written out, so these pin the order and the labels a reader sees.

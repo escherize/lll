@@ -132,14 +132,34 @@ fn collect_board_issues(
   expand: string,
   fetch: fn(string) -> Result<BoardPage, pb.CliError>,
 ) -> Result<Slice<models.Issue>, pb.CliError> {
-  let filter = url.QueryEscape(query.filter(query.IssueFilter.over(query.TeamScope.Only(team_id))))
+  collect_issue_pages(query.TeamScope.Only(team_id), expand, "", fetch)
+}
+
+/// Lightweight, complete containment input. A list's state/search filters must
+/// not cut an intermediate ancestor out of the graph used by --under.
+pub fn fetch_issue_tree(ctx: pb.Client, scope: query.TeamScope) -> Result<Slice<models.Issue>, pb.CliError> {
+  collect_issue_pages(scope, "", "id,parent,state,team,number,title", |path| {
+    let mut page = BoardPage { .. }
+    pb.fetch(ctx, path, "issue tree", &page)?
+    Ok(page)
+  })
+}
+
+fn collect_issue_pages(
+  scope: query.TeamScope,
+  expand: string,
+  fields: string,
+  fetch: fn(string) -> Result<BoardPage, pb.CliError>,
+) -> Result<Slice<models.Issue>, pb.CliError> {
+  let filter = url.QueryEscape(query.filter(query.IssueFilter.over(scope)))
+  let selected = if fields == "" { "" } else { f"&fields={fields}" }
   let mut result: Slice<models.Issue> = []
   let mut seen = Map.new<models.IssueId, bool>()
   let mut expected = -1
   let mut pages = -1
   let mut page = 1
   loop {
-    let batch = fetch(f"/api/collections/issues/records?perPage=200&page={page}&expand={expand}&sort=sort,created,id&filter={filter}")?
+    let batch = fetch(f"/api/collections/issues/records?perPage=200&page={page}&expand={expand}&sort=sort,created,id&filter={filter}{selected}")?
     if page == 1 { expected = batch.total_items; pages = batch.total_pages }
     if batch.total_items != expected || batch.total_pages != pages {
       return Err(pb.failed("the board changed while loading; refresh to retry"))

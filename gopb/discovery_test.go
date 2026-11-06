@@ -8,7 +8,7 @@ import (
 // LLL-652: the API port answers its version whether or not a board is
 // advertised. LLL-710: it lists its capabilities too.
 func TestAPIDiscoveryAlwaysNamesTheVersion(t *testing.T) {
-	caps := []string{"issues.idempotency", "comments.idempotency", "webhooks.activity"}
+	caps := []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents"}
 	cases := []struct {
 		boardURL string
 		want     map[string]any
