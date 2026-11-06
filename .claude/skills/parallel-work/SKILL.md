@@ -66,13 +66,14 @@ else. Claim BEFORE writing code, not before pushing, or two agents discover the
 collision after both have done the work. Release what you abandon
 (`lll issue release KEY-123`) so it returns to the pool rather than looking busy.
 
-**The claim excludes members, not agents.** A second claim by the member that
-already holds the issue succeeds ("already yours"), from any directory or
-session. Agents that share one token are one member, so claim gives them no
-exclusion at all: a fleet run that followed this section on a shared token
-found it with a probe card. Until LLL-525 lands, give each agent its own
-member, or take an external lock before claiming (that fleet used a local
-`mkdir` lock with stale takeover gated on the server state and the lock's age).
+**Label sessions that share a token.** Set a distinct `LLL_AGENT` for each
+session, or pass `--agent NAME` consistently on its claim, renewal, release,
+close and comment operations. If shell calls start fresh environments, supply
+the label on each call. A same-member claim under another label is refused;
+unlabelled holds still match any label, so every sharing session must label.
+Labels coordinate sessions; they do not authenticate them. Separate durable
+bot identities remain an alternative when workers need separate credentials.
+See [lll](../lll/SKILL.md) for the matching and forced-release rules.
 
 One issue per branch, one issue per commit. A commit spanning three issues
 cannot be reverted when one of them was wrong.
@@ -163,10 +164,10 @@ Without it they mint members on the real board. That is not hypothetical:
 68 of 71 members there are synthetic identities left behind by ephemeral runs
 (LLL-374), and members cannot be deleted without the superuser.
 
-The warning is about throwaway runs. A durable member for each long-lived
-worker in a fleet is fine, and it is the only way the claim locks between
-workers: agents sharing one member token share every claim (see the claim
-section of [lll](../lll/SKILL.md)).
+The warning is about throwaway runs. Separate durable bot identities for
+long-lived workers are fine; sessions sharing a token use the labels described
+above. Do not mint a member for every worktree merely to make claims exclude
+other sessions (see the claim section of [lll](../lll/SKILL.md)).
 
 ## Finishing
 
