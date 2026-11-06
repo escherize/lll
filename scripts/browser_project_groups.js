@@ -23,9 +23,9 @@ async page => {
       throw new Error(`project group ${status} expected open=${open}: ${JSON.stringify(await observedGroups(target))}; ${error.message}`);
     }
   };
-  const expectNotice = async (target = page) => {
+  const expectNotice = async (target = page, phase = 'invalid stored value') => {
     try { await target.locator('#pj-preference-error').waitFor(); }
-    catch (error) { throw new Error(`project preference notice: ${JSON.stringify(await observedGroups(target))}; ${error.message}`); }
+    catch (error) { throw new Error(`project preference notice (${phase}): ${JSON.stringify(await observedGroups(target))}; ${error.message}`); }
   };
   await page.goto(path);
   const statuses = await page.locator('.pj-group').evaluateAll(groups => groups.map(el => el.dataset.projectStatus));
@@ -114,7 +114,14 @@ async page => {
   await page.reload();
   await expectOpen('started', false);
 
-  for (const method of ['getItem', 'setItem']) {
+  for (const method of ['getItem', 'setItem', 'removeItem']) {
+    // Each error case must exercise the operation it blocks. The getter
+    // case's successful close must not make the setter case reopen instead.
+    await page.evaluate(method => {
+      const key = document.querySelector('#projects').dataset.projectGroupsKey + '.planned';
+      if (method === 'removeItem') localStorage.setItem(key, 'closed');
+      else localStorage.removeItem(key);
+    }, method);
     const blocked = await page.context().newPage();
     try {
       await blocked.addInitScript(method => {
@@ -122,9 +129,11 @@ async page => {
       }, method);
       await blocked.goto(path);
       const initial = await group('planned', blocked).evaluate(el => el.open);
+      if (initial !== (method !== 'removeItem')) throw new Error(`${method} storage fixture has the wrong initial state`);
+      if (method !== 'getItem' && await blocked.locator('#pj-preference-error').isVisible()) throw new Error(`${method} fixture already has a preference error before activation`);
       await group('planned', blocked).locator('summary').click();
       await expectOpen('planned', !initial, blocked);
-      await expectNotice(blocked);
+      await expectNotice(blocked, method);
     } finally { await blocked.close(); }
   }
   const native = await page.context().browser().newContext({javaScriptEnabled: false});

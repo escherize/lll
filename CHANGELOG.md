@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Project groups save collapse/reopen choices during activation, before
+  navigation; storage-error checks no longer inherit another case's choice
+  (LLL-748).
+
 - Board event subscriptions normalize team keys, so mixed-case URLs receive
   their initial snapshot and later updates without changing visibility checks
   (LLL-741).
