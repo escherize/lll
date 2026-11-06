@@ -55,7 +55,7 @@ fn encode_json(value: Unknown, what: string) -> Result<json.RawMessage, pb.CliEr
 /// The record fields that hold a timestamp. PocketBase stores and sends them
 /// as "2026-10-08 03:02:11.982Z"; the contract prints RFC3339.
 fn timestamp_fields() -> Slice<string> {
-  ["created", "updated", "expires", "redeemed"]
+  ["created", "updated", "expires", "redeemed", "last_activity"]
 }
 
 /// `raw` with every timestamp field, at any depth, rewritten to RFC3339.

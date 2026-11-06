@@ -110,15 +110,19 @@ func appendAudit(e *core.RecordEvent, action string) error {
 	changes := recordChanges(e.Record, action)
 	// A save that changed nothing is not an event, except a claim's: a
 	// renewal moves only its autodate, and is the event.
-	if action == "update" && len(changes) == 0 && e.Record.Collection().Name != "claims" {
-		return e.Next()
-	}
+	noEvent := action == "update" && len(changes) == 0 && e.Record.Collection().Name != "claims"
 	original := e.App
 	defer func() { e.App = original }()
 	return original.RunInTransaction(func(tx core.App) error {
 		e.App = tx
+		if err := preserveIssueActivity(tx, e.Record, action); err != nil {
+			return err
+		}
 		if err := e.Next(); err != nil {
 			return err
+		}
+		if noEvent {
+			return nil
 		}
 		return writeAuditEvent(tx, e.Record, action, changes)
 	})
@@ -136,7 +140,7 @@ func recordChanges(r *core.Record, action string) map[string]fieldChange {
 	out := map[string]fieldChange{}
 	for _, field := range r.Collection().Fields {
 		name := field.GetName()
-		if name == core.FieldNameId || field.GetHidden() || field.Type() == core.FieldTypeAutodate {
+		if name == core.FieldNameId || name == "last_activity" || field.GetHidden() || field.Type() == core.FieldTypeAutodate {
 			continue
 		}
 		var from, to any
@@ -222,5 +226,8 @@ func writeAuditEvent(tx core.App, r *core.Record, action string, changes map[str
 		return err
 	}
 	row.Set("seq", next)
-	return tx.Save(row)
+	if err := tx.Save(row); err != nil {
+		return err
+	}
+	return advanceIssueActivity(tx, r, issueID, row.GetString("created"))
 }

@@ -565,7 +565,8 @@ def untouched(changes, added=None, changed=None):
             errors.append(f'{name} record {row["id"]} was deleted')
         allowed = (changed or {}).get(name, {})
         for key, fields in changes[name]['changed'].items():
-            extra = fields - {'updated'} - allowed.get(key, set())
+            metadata = {'updated', 'last_activity'} if name == 'issues' else {'updated'}
+            extra = fields - metadata - allowed.get(key, set())
             if key not in allowed:
                 extra = fields
             if extra:
@@ -617,7 +618,8 @@ def seed_none(board):
 
 def judge_01(board, changes, after):
     seat = board.seats[0]
-    errors = untouched(changes, added={'comments': 1})
+    # A comment advances only its target's server-owned activity date.
+    errors = untouched(changes, added={'comments': 1}, changed={'issues': {board.target: set()}})
     comment = one_added(changes, 'comments')
     if comment:
         expect(errors, comment, 'comment', issue=board.target, author=seat.member_id,
@@ -1087,7 +1089,8 @@ def seed_18(board):
 
 def judge_18(board, changes, after):
     (a, b), handshake = board.seats, board.fixtures['issue']
-    errors = untouched(changes, added={'issues': 1, 'comments': 2})
+    errors = untouched(changes, added={'issues': 1, 'comments': 2},
+                       changed={'issues': {handshake: set()}})
     created = one_added(changes, 'issues')
     if not created:
         return errors

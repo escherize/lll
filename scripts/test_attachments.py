@@ -43,7 +43,7 @@ def view():
 
 
 def stable(record):
-    return {k: v for k, v in record.items() if k not in ['attachments', 'updated']}
+    return {k: v for k, v in record.items() if k not in ['attachments', 'updated', 'last_activity']}
 
 
 cli('issue', 'claim', key)
@@ -63,6 +63,7 @@ with tempfile.TemporaryDirectory(prefix='lll-35-files-') as directory:
     cli('issue', 'attach', key, '--', report.name, cwd=root)
     saved = view()
     assert len(saved['attachments']) == 2
+    assert saved['last_activity'] >= before['last_activity']
     assert stable(saved) == stable(before)
     for name in saved['attachments']:
         assert name in cli('issue', 'view', key)

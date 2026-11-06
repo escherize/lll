@@ -37,9 +37,9 @@ def view():
 
 
 def without_project(record):
-    # Only the relation, its expansion and the server timestamp may change.
+    # Only the relation, its expansion and server edit/activity dates change.
     record = dict(record)
-    for field in ('project', 'project_name', 'updated'):
+    for field in ('project', 'project_name', 'updated', 'last_activity'):
         record.pop(field, None)
     record['expand'] = dict(record['expand'])
     record['expand'].pop('project', None)
@@ -54,10 +54,13 @@ for spelling in [('--project', ''), ('--project=',)]:
     assert 'project=none' in output
     after = view()
     assert after['project'] == ''
+    assert after['last_activity'] >= before['last_activity']
     assert without_project(after) == without_project(before)
     # Clearing an already empty relation is safe, too.
     run('issue', 'update', key, *spelling)
-    assert without_project(view()) == without_project(before)
+    no_op = view()
+    assert without_project(no_op) == without_project(before)
+    assert no_op['last_activity'] == after['last_activity']
     run('issue', 'update', key, '--project', 'none')
     assert view()['project'] == before['project']
 
