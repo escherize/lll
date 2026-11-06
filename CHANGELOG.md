@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Serialize member creation with owner changes so concurrent administrator
+  writes cannot form a forbidden ownership chain (LLL-622).
+
 - Non-interactive password-login hints show the existing private-file/stdin
   path, keeping passwords out of command arguments and shell history (LLL-732).
 
