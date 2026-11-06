@@ -60,7 +60,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := updateAssignment(re.App, re.Request.PathValue("issue"), *body.ClaimID, fields, by, body.KeepClaim)
+		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
+			return updateAssignment(tx, re.Request.PathValue("issue"), *body.ClaimID, fields, by, body.KeepClaim)
+		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
@@ -95,7 +97,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}
-		outcome, err := acquireClaim(re.App, re.Request.PathValue("issue"), body.Member, body.Agent, by)
+		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
+			return acquireClaim(tx, re.Request.PathValue("issue"), body.Member, body.Agent, by)
+		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
@@ -136,7 +140,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := releaseClaim(re.App, re.Request.PathValue("issue"), body.ClaimID, by)
+		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
+			return releaseClaim(tx, re.Request.PathValue("issue"), body.ClaimID, by)
+		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
@@ -168,7 +174,9 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := closeIssue(re.App, re.Request.PathValue("issue"), *body.ClaimID, by, body.KeepClaim)
+		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
+			return closeIssue(tx, re.Request.PathValue("issue"), *body.ClaimID, by, body.KeepClaim)
+		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
@@ -197,10 +205,33 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := renewClaim(re.App, re.Request.PathValue("issue"), body.ClaimID,
-			releaser{memberID: memberID, agent: body.Agent, origin: originHost(re.Request)})
+		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
+			return renewClaim(tx, re.Request.PathValue("issue"), body.ClaimID,
+				releaser{memberID: memberID, agent: body.Agent, origin: originHost(re.Request)})
+		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
+}
+
+// claimWrite runs after the per-issue lock is acquired. Preflight may have
+// passed before waiting for that lock; recheck under the database writer so
+// archiving cannot commit between authorization and the operation. Serialize
+// before opening this transaction, matching native records lock order.
+// Return the outcome before writing HTTP so a failed commit cannot look OK.
+func claimWrite(re *core.RequestEvent, write func(core.App) (ClaimOutcome, error)) (ClaimOutcome, error) {
+	original := re.App
+	defer func() { re.App = original }()
+	var outcome ClaimOutcome
+	err := original.RunInTransaction(func(tx core.App) error {
+		re.App = tx
+		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
+			return err
+		}
+		var err error
+		outcome, err = write(tx)
+		return err
+	})
+	return outcome, err
 }
 
 func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error {
