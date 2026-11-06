@@ -184,31 +184,33 @@ if (shortcutSheet) {
 // button copies; the board's "Copy agent instructions" is the first. A board
 // opened over plain HTTP on a LAN address has no Clipboard API (it is
 // secure-context only), so a hidden selection and execCommand stand in.
-for (const button of document.querySelectorAll('[data-copy-from]')) {
-  const label = button.textContent;
-  let restore = 0;
-  button.addEventListener('click', async () => {
-    const source = document.getElementById(button.dataset.copyFrom);
-    if (!source) return;
-    const text = source.textContent;
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(text);
-      copied = true;
-    } catch (_) {
-      const area = document.createElement('textarea');
-      area.value = text;
-      area.setAttribute('readonly', '');
-      area.style.position = 'fixed';
-      area.style.opacity = '0';
-      document.body.append(area);
-      area.select();
-      try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
-      area.remove();
-      button.focus();
-    }
-    button.textContent = copied ? 'Copied' : 'Copy failed';
-    clearTimeout(restore);
-    restore = setTimeout(() => { button.textContent = label; }, 1600);
-  });
-}
+// Delegate so one-time response patches get the same LAN-safe copy behavior.
+const copyStates = new WeakMap();
+document.addEventListener('click', async event => {
+  const button = event.target.closest?.('[data-copy-from]');
+  if (!button) return;
+  const state = copyStates.get(button) || {label: button.textContent, restore: 0};
+  copyStates.set(button, state);
+  const source = document.getElementById(button.dataset.copyFrom);
+  if (!source) return;
+  const text = source.textContent;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch (_) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.append(area);
+    area.select();
+    try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+    area.remove();
+    button.focus();
+  }
+  button.textContent = copied ? 'Copied' : 'Copy failed';
+  clearTimeout(state.restore);
+  state.restore = setTimeout(() => { button.textContent = state.label; }, 1600);
+});

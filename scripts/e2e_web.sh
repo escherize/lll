@@ -2128,16 +2128,16 @@ assert_contains "$settings" 'id="access-credential-form"' "settings page carries
 assert_contains "$settings" 'id="access-token-result"' "settings page carries the token result placeholder"
 
 # Refusals first: no admin password, then a wrong one. Neither may answer a token.
-out=$(wcurl -sf -X POST "$WEB/settings/access/token" -d "member=$MEMBER_ID")
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/access/token" -d "member=$MEMBER_ID")
 assert_contains "$out" "admin password is required" "minting without the admin password is refused"
 assert_not_contains "$out" "access-token-value" "a refused mint shows no token"
-out=$(wcurl -sf -X POST "$WEB/settings/access/token" -d "member=$MEMBER_ID" -d 'admin_password=not-the-password')
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/access/token" -d "member=$MEMBER_ID" -d 'admin_password=not-the-password')
 assert_contains "$out" "wrong admin password" "minting with a wrong admin password is refused"
 assert_not_contains "$out" "access-token-value" "a wrong-password mint shows no token"
 
 # The right password mints a working member token: shown once in the response
 # patch, and honored by PocketBase's authenticated-only rules.
-out=$(wcurl -sf -X POST "$WEB/settings/access/token" -d "member=$MEMBER_ID" -d "admin_password=$ADMIN_PASS")
+out=$(wcurl -sf -X POST "$WEB/t/ENG/settings/access/token" -d "member=$MEMBER_ID" -d "admin_password=$ADMIN_PASS")
 assert_contains "$out" 'id="access-token-result"' "a mint answers with the token patch"
 MINTED=$(printf '%s' "$out" | python3 -c '
 import re, sys

@@ -403,6 +403,10 @@ fn board_mux(
     ))),
   )
   mux.HandleFunc(
+    "POST /t/{team}/settings/access/token",
+    gated(ctx, flashing_with(ctx, access_token_write)),
+  )
+  mux.HandleFunc(
     "POST /t/{team}/settings/access/member",
     gated(ctx, flashing(ctx, |_ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>| access_credential_write(ctx,
       r,
@@ -499,12 +503,11 @@ fn board_mux(
   // The Access section's superuser-power actions (TASK-204). Their own
   // routes, not a {kind}: each verifies the form's admin password against
   // the superuser before writing — the board token alone must not suffice.
-  // Minting a token redraws nothing team-shaped, so it stays bare. Member
-  // sign-in and the Teams section's archive lifecycle (TASK-210) run the
-  // same re-auth on their team-routed paths above.
+  // The token prompt names the viewed team, so it follows the same routed
+  // form rule as member sign-in and team archiving above.
   mux.HandleFunc(
     "POST /settings/access/token",
-    gated(ctx, flashing(ctx, access_token_write)),
+    gated(ctx, flashing(ctx, bare_settings_write)),
   )
   mux.HandleFunc(
     "GET /search",

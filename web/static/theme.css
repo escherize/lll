@@ -1633,6 +1633,7 @@ input:focus, textarea:focus, select:focus {
   word-break: break-all;
   user-select: all;
 }
+.access-token pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
 /* LLL-546: the rail's "Add a bot" and its one-time prompt. The prompt is
    too wide for the rail, so it floats over the page until Done empties it. */
 .rail-bot { padding: 4px 8px; color: var(--text-2); }

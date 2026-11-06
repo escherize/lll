@@ -29,6 +29,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- Access-page token minting offers a one-time, copyable agent prompt with the viewed team and actual board address.
+
 - The shipped workflow skills describe concise interruption handoffs, relevant
   findings and decisions before edits, and evidence marked passed, failed or
   untested against acceptance cases. Recording guidance distinguishes progress
