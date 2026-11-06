@@ -24,8 +24,9 @@ Never tag the pre-bump baseline with the new version.
 
 ## 2-4. Automated
 
-Main is green and deployed at the cut, no security work is half-landed, and
-version skew works in both directions. See the table above.
+Run `mise run release-check CUT=<sha>`. It verifies that main is green and
+deployed at the cut, no security work is half-landed, and version skew works
+in both directions. The command prints a results table with one row per check.
 
 ## Client/server compatibility and migration rehearsal
 
