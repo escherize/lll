@@ -46,15 +46,15 @@ with tempfile.TemporaryDirectory(prefix='lll-507-') as directory:
             announced = re.search(r'^api    (http://[^ ]+)$', log.read_text(), re.M)
             assert announced and urllib.parse.urlsplit(announced[1]).hostname in ('127.0.0.1',bind), 'owned API did not announce a local endpoint'
             api, board = announced[1], f'http://{bind}:{web_port}'
-        def call(base,path,body=None,token='',headers=None):
+        def call(base,path,body=None,token='',headers=None,method=None):
             hdr = dict(headers or {})
             if token: hdr['Authorization'] = 'Bearer '+token
             if body is not None: hdr['Content-Type'] = 'application/json'
-            request = urllib.request.Request(base+path,headers=hdr,data=None if body is None else json.dumps(body).encode())
+            request = urllib.request.Request(base+path,headers=hdr,data=None if body is None else json.dumps(body).encode(),method=method)
             with http.open(request,timeout=15) as response: return json.load(response)
         su = call(api,'/api/collections/_superusers/auth-with-password',
                   {'identity':env['LLL_ADMIN_EMAIL'],'password':env['LLL_ADMIN_PASSWORD']})['token']
-        call(api,'/api/collections/teams/records',{'key':'OTHER_TEAM','name':'Other team'},su)
+        other = call(api,'/api/collections/teams/records',{'key':'OTHER_TEAM','name':'Other team'},su)
         name = '<script>window.injected=true</script> & O\'Brien'
         member = call(api,'/api/collections/members/records',
                       {'name':name,'kind':'person','email':'agent@example.invalid','password':'local-agent-password',
@@ -95,6 +95,33 @@ with tempfile.TemporaryDirectory(prefix='lll-507-') as directory:
             assert call(api,'/api/collections/members/auth-refresh',{},token)['record']['id'] == member['id']
         _, bare, _ = page('/settings/access/token',form)
         assert 'this settings form names no team' in bare and 'id="access-agent-prompt"' not in bare
+        # LLL-742: authenticate is not enough; the advertised team must be readable.
+        def make_member(name, **fields):
+            body = {'name':name,'kind':'person','scope':'all','mode':'rw',
+                    'email':name+'@example.invalid','password':'local-scope-password',
+                    'passwordConfirm':'local-scope-password', **fields}
+            return call(api,'/api/collections/members/records',body,su)
+        def mint_for(record):
+            return page('/t/OTHER_TEAM/settings/access/token',urllib.parse.urlencode(
+                {'member':record['id'],'admin_password':env['LLL_ADMIN_PASSWORD']}))[1]
+        visible = make_member('visible-member',scope='teams',teams=[other['id']])
+        visible_out = mint_for(visible)
+        visible_prompt = re.search(r'<pre[^>]*id="access-agent-prompt"[^>]*>(.*?)</pre>',visible_out,re.S)
+        assert visible_prompt, 'visible scoped member was incorrectly refused'
+        visible_token = re.search(r'export LLL_TOKEN=([^\s]+)',html.unescape(visible_prompt.group(1))).group(1)
+        assert [t['id'] for t in call(api,'/api/collections/teams/records',token=visible_token)['items']] == [other['id']]
+        unseen = make_member('unseen-member',scope='teams',teams=[])
+        owner = make_member('scope-owner')
+        bot = make_member('bot-scope-check',kind='bot',owner=owner['id'])
+        call(api,'/api/collections/members/records/'+owner['id'],{'scope':'teams','teams':[]},su,method='PATCH')
+        for incompatible in (unseen,bot):
+            before = call(api,'/api/collections/members/records/'+incompatible['id'],token=su)
+            refused_scope = mint_for(incompatible)
+            assert 'cannot see team OTHER_TEAM' in refused_scope, 'inaccessible selection received no scope recovery'
+            assert 'access-agent-prompt' not in refused_scope and 'access-token-value' not in refused_scope, 'unusable token/prompt was shown'
+            after = call(api,'/api/collections/members/records/'+incompatible['id'],token=su)
+            for field in ('scope','teams','mode','owner'):
+                assert after.get(field) == before.get(field), 'mint widened or changed member access'
         code, reloaded, _ = page('/t/OTHER_TEAM/settings/access')
         assert code == 200 and 'id="access-agent-prompt"' not in reloaded
         assert all(token not in reloaded for token in seen), 'page reload redisclosed a token'
