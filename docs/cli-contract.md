@@ -177,6 +177,28 @@ These counts ignore list filters. A closed child counts done even if it has
 open descendants. Create replies need not include this derived context: a
 saved create does not depend on a second read. Older-server reads omit it.
 
+### Bulk current reads
+
+`comment list --project NAME --json` and `claim list --project NAME --json`
+read current records across the configured team's issues. Project filtering
+is optional. Both use the normal list envelope plus `next_cursor`: a string,
+empty at the end. Pass a non-empty cursor to `--since` with the same list,
+server, team and project. `--limit` is 1-500 (default 100).
+
+| Item | Covered fields |
+|---|---|
+| bulk comment | the comment fields below, plus `key` (issue key) |
+| bulk claim | `id`, `issue`, `key`, `member`, `holder`, `agent`, `claimed`, `renewed` (same meanings as an issue's `claim`) |
+
+Pages are ordered by immutable record id. `page` is 1; `totalItems` and
+`totalPages` count the remaining query after the cursor. Follow `next_cursor`
+for continuation; totals can change between queries. This avoids offset
+shifts, not concurrent state changes: edits/deletes affect subsequent reads,
+and new or newly matching ids behind the cursor require a fresh scan.
+`--since` takes an opaque continuation here, not a date or an activity cursor.
+Use `activity` for ordered write history; these lists are not a change feed
+or an atomic snapshot. Ordinary member visibility rules still apply.
+
 ### Other records
 
 `bot create --json` and `bot rotate --json` print one credential object:

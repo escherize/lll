@@ -1,0 +1,53 @@
+import "go:encoding/base64"
+
+import "pb"
+
+#[test]
+fn bulk_cursors_bind_the_query_and_preserve_the_last_record_id() {
+  let key = bulk_query_key(
+    "comments",
+    "https://board.example/",
+    "team-a",
+    "project-a",
+  )
+  assert key ==
+  bulk_query_key("comments", "https://board.example", "team-a", "project-a")
+  let assert Ok(cursor) = bulk_cursor(key, "a1b2c3d4e5f6g7h")
+  assert bulk_after(cursor, key) == Ok("a1b2c3d4e5f6g7h")
+  assert bulk_after("", key) == Ok("")
+  for other in [
+    bulk_query_key("claims", "https://board.example", "team-a", "project-a"),
+    bulk_query_key("comments", "https://other.example", "team-a", "project-a"),
+    bulk_query_key("comments", "https://board.example", "team-b", "project-a"),
+    bulk_query_key("comments", "https://board.example", "team-a", "project-b"),
+  ] {
+    let assert Err(error) = bulk_after(cursor, other)
+    assert pb.exit_code(error.kind) == 2
+    assert error.message.contains("different list, server, team or project")
+  }
+}
+
+#[test]
+fn bulk_cursors_refuse_malformed_or_unsupported_continuations() {
+  let key = "query-key"
+  for raw in [
+    "not-a-cursor",
+    "2026-11-06T00:00:00Z",
+    "c1_!",
+    "c1_",
+    "c2_anything",
+  ] {
+    let assert Err(error) = bulk_after(raw, key)
+    assert pb.exit_code(error.kind) == 2
+  }
+  for body in [
+    "{}",
+    "{\"version\":2,\"query\":\"query-key\",\"after\":\"record\"}",
+    "{\"version\":1,\"query\":\"query-key\",\"after\":\"\"}",
+    "{\"version\":1,\"query\":\"query-key\",\"after\":42}",
+  ] {
+    let encoded = base64.RawURLEncoding.EncodeToString(body.bytes())
+    let assert Err(error) = bulk_after(f"c1_{encoded}", key)
+    assert pb.exit_code(error.kind) == 2
+  }
+}
