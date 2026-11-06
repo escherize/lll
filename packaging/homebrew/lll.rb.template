@@ -48,13 +48,6 @@ class Lll < Formula
     end
   end
 
-  def caveats
-    <<~EOS
-      lll up (the board server) reads pb/ from disk and wants a checkout.
-      The client commands work from this binary alone.
-    EOS
-  end
-
   test do
     assert_match "lll #{version}", shell_output("#{bin}/lll --version")
   end
