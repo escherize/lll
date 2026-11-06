@@ -6,27 +6,33 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-06
+
 ### Fixed
 
-- Invalid assignee ids and members without access to the issue team produce
-  the same refusal, so assignment errors do not expose hidden member existence
-  (LLL-754).
-
-- Claim, release, renewal, assignment and close routes recheck archived-team
-  access after waiting for the issue lock, inside their write transaction
-  (LLL-752).
-
-- Native records writes check archived teams in their write transaction, so an
-  archive cannot finish between the check and save; stale source-team reads
-  cannot move or delete records out of an archived team (LLL-751).
-
+- Archived-team checks share the native records write transaction and read
+  the current source team. Claim, release, renewal, assignment and close
+  recheck access inside their transaction after waiting for the issue lock
+  (LLL-751, LLL-752).
+- Invalid assignee ids and members without access produce the same refusal,
+  so assignment errors do not expose hidden member existence (LLL-754).
 - Project groups save collapse/reopen choices during activation, before
-  navigation; storage-error checks no longer inherit another case's choice
+  navigation. Storage-error browser checks isolate each case's starting state
   (LLL-748).
+- Board event subscriptions normalize team keys for initial snapshots and
+  live updates while preserving visibility checks (LLL-741).
+- HEAD requests support board login, confirmation and scoped page reads with
+  empty bodies; write and stream restrictions remain enforced (LLL-745).
+- Homebrew no longer says a checkout is needed to run the embedded server
+  (LLL-747).
 
-- Board event subscriptions normalize team keys, so mixed-case URLs receive
-  their initial snapshot and later updates without changing visibility checks
-  (LLL-741).
+### Changed
+
+- Published documentation has a reading layout, navigation and mobile table
+  scrolling at escherize.com/lll/docs/ (LLL-698).
+- Repo guidance explains shared-token session labels, current scoped
+  PocketBase rules, clean fleet launch environments and the Lisette field-doc
+  formatting trap (LLL-749, LLL-750, LLL-744, LLL-725).
 
 ## [1.4.0] - 2026-11-06
 
