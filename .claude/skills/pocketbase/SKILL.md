@@ -73,10 +73,23 @@ In PocketBase, an empty-string rule means **anyone**, and `null` means
 **superuser only**. That inversion is the trap: a collection created with
 default rules is wide open, and it reads like the opposite.
 
-`init.js` did ship every collection at `""`. It no longer stands:
-`1788400000_collection_rules.js` moved them to `AUTH`, which is
-`@request.auth.id != ""` - any authenticated member, no per-record ACLs. Five
-carve-outs, each deliberate:
+`init.js` shipped public rules; `1788400000_collection_rules.js` first
+required authentication. Later migrations added per-team visibility and
+read/write modes, bounded by the member's human owner. AUTH alone is historical,
+not the current authorization policy. Use
+`scripts/fixtures/collection_rules.json` for the complete current rules and
+`lll api --schema` for the collection reference; do not replace scoped clauses
+with a blanket authentication check.
+
+Custom Go routes bypass collection rules when reading through `core.App`, so
+they must enforce equivalent access themselves (`effectiveAccess` and
+`issueWritable` in `gopb/team_scope.go`). Worker creation also respects its
+creating bot: `created_by` is server-owned, and `narrowCreated` cascades a
+creator's narrowing into its workers. Do not assume the owner rule alone
+implements that bound. Projects group records within a team; separate project
+access grants are not implemented.
+
+Some mutations remain server-owned:
 
 - `claims.updateRule` is `null`. A member who could PATCH a claim could set its
   `member` to themselves and steal the hold; claims move through gopb's
@@ -155,8 +168,11 @@ uses admin credentials to bootstrap, then impersonates a member from `$USER`
   lifetime. (Verified in v0.40.1: `apis/record_auth_impersonate.go`,
   `core/record_tokens.go`.) This is the API-key mechanism — do not build a
   key table.
-- Rules ARE `@request.auth.id != ""`. Keep it at that: any authenticated
-  member sees everything, no per-record ACLs, with the five carve-outs above.
+- The native impersonation endpoint above is superuser-only. Member-facing
+  bot creation and rotation use lll's authorized lifecycle; see
+  `gopb/members.go` and its `/api/lll/bots/rotate` route. Do not grant a member
+  superuser credentials to provision a worker. Owner/creator checks, current
+  access and token revocation belong on the server.
 
 `issues.assignee` already relates to `members`, so `@request.auth.id` *is* a
 member id — "my issues" is one filter, and authorship stops being a convention.
@@ -171,8 +187,10 @@ PocketBase emits nothing when an update moves a record *out* of a subscription
 filter, so a filtered column would silently go stale. Filter in the view, not in
 the subscription.
 
-Per-record collection rules would fragment the one shared subscription into one
-per viewer. That is a good reason not to add them.
+The shared subscription carries invalidations, not permission to show its
+records to every browser. Fragment reads use the viewer's credential and the
+current collection rules, as page reads do. Keep viewer authorization at that
+read boundary; a shared bridge does not justify weakening scoped rules.
 
 ## Gotchas
 
