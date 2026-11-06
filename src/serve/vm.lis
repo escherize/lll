@@ -68,6 +68,8 @@ pub struct AvatarVM {
 
 /// View model for one issue: a board card, or one row of the /issues table.
 pub struct CardVM {
+  pub parent: IssueLinkVM,
+  pub children_progress: string,
   pub claim_holder: string,
   pub attachment_count: int,
   pub id: string,
@@ -377,6 +379,9 @@ pub struct FindingVM {
 
 /// View model for the issue page / issue-detail fragment.
 pub struct IssueVM {
+  pub parent: IssueLinkVM,
+  pub children: Slice<IssueLinkVM>,
+  pub children_progress: string,
   pub provenance: Slice<provenance.Field>,
   pub claim_id: string,
   pub claim_holder: string,
@@ -446,6 +451,14 @@ pub struct AttachmentVM {
   pub name: string,
   pub href: string,
   pub preview: bool,
+}
+
+pub struct IssueLinkVM {
+  pub key: string,
+  pub title: string,
+  pub href: string,
+  pub state: string,
+  pub state_label: string,
 }
 
 /// One column heading in the /issues table. `href` empty means the column has
