@@ -50,13 +50,20 @@
 {{define "issue-detail"}}<article id="issue-detail" class="issue-detail">
 {{if .Deleted}}<p class="deleted">{{.Key}} was deleted.</p>
 {{else}}<div class="issue-main">
+{{if .Parent.Key}}<p class="issue-parent">Parent <a href="{{.Parent.Href}}">{{.Parent.Key}} · {{.Parent.Title}}</a></p>{{end}}
 <span class="key">{{.Key}}</span>{{if .Emoji}}<span class="emoji">{{.Emoji}}</span>{{end}}
 <h1 title="Click to edit" data-show="!$edit_title" data-on:click="$title_draft = el.textContent; $edit_title = true"><button type="button" class="title-edit-trigger" aria-label="Edit issue title">{{.Title}}</button></h1>
 <form id="title-form" class="title-edit" style="display:none" data-show="$edit_title"><input type="hidden" name="key" value="{{.Key}}"><input name="title" type="text" autocomplete="off" aria-label="Issue title" data-bind:title_draft data-effect="$edit_title && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_title = false, setTimeout(() => document.querySelector('.title-edit-trigger')?.focus(), 0)) : evt.key === 'Enter' && (evt.preventDefault(), @post('/title', {contentType: 'form'}), evt.target.value.trim() && ($edit_title = false))" data-on:blur="$edit_title && ($edit_title = false, evt.target.value.trim() && @post('/title', {contentType: 'form'}))"></form>
+{{template "issue-children" .}}
 </div>
 {{template "issue-attachments" .}}
 {{template "issue-properties" .}}
 {{end}}</article>{{end}}
+
+{{define "issue-children"}}{{if .Children}}<section class="issue-children" aria-labelledby="children-heading">
+<h2 id="children-heading">Children <span>{{.ChildrenProgress}}</span></h2>
+<ul>{{range .Children}}<li><a href="{{.Href}}"><span class="child-state" role="img" aria-label="{{.StateLabel}}" title="{{.StateLabel}}">{{template "state-icon" .State}}</span><span class="child-key">{{.Key}}</span><span class="child-title">{{.Title}}</span></a></li>{{end}}</ul>
+</section>{{end}}{{end}}
 
 {{define "issue-description"}}<div id="issue-description" class="issue-desc md"{{if not .}} hidden{{end}}>{{.}}</div>{{end}}
 

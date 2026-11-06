@@ -188,8 +188,13 @@ fn issue_raw(vm: IssueVM) -> string {
   let mut labels = strings.Join(vm.labels.map(|l| l.name), ", ")
   if labels == "" { labels = "none" }
   lines = lines.append(f"- Labels: {line_text(labels)}")
+  if vm.parent.key != "" { lines = lines.append(f"- Parent: {vm.parent.key} {line_text(vm.parent.title)}") }
   lines = lines.append(f"- Created: {vm.created}")
   lines = lines.append(f"- Updated: {vm.updated}")
+  if !vm.children.is_empty() {
+    lines = lines.append(f"\n## Children ({vm.children_progress})")
+    for child in vm.children { lines = lines.append(f"- {child.key} [{child.state_label}] {line_text(child.title)}") }
+  }
   if !vm.attachments.is_empty() {
     lines = lines.append("\n## Attachments")
     for attachment in vm.attachments { lines = lines.append(f"- {line_text(attachment.name)}") }

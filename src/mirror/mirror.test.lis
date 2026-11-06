@@ -42,6 +42,7 @@ fn sample() -> Front {
     labels: ["product"],
     attachments: [],
     blocked: ["ENG-3", "ENG-9"],
+    parent: "ENG-2",
     sort: 12.5,
     creator: "bryan.maass",
     refs: "gh#12",
@@ -79,6 +80,19 @@ fn blocked_by_links_survive_as_keys() {
   // issue exists. Losing these loses LLL-175's ordering silently.
   let assert Ok((back, _)) = round_trip(sample(), "b")
   assert joined(back.blocked) == "ENG-3|ENG-9"
+}
+
+#[test]
+fn mirror_parent_links_survive_as_keys_and_old_files_remain_roots() {
+  let assert Ok((back, _)) = round_trip(sample(), "b")
+  assert back.parent == "ENG-2"
+  let assert Ok((old, _)) = parse("---\nkey: ENG-1\nnumber: 1\ntitle: Old issue\nstate: todo\n---\nbody")
+  assert old.parent == ""
+  let mut issues = Map.new<models.IssueId, string>()
+  issues[models.IssueId("parent-id")] = "ENG-7"
+  let names = Names { issues, members: Map.new<models.MemberId, string>() }
+  let front = front_of(models.Issue { parent: "parent-id", .. }, names)
+  assert front.parent == "ENG-7"
 }
 
 #[test]

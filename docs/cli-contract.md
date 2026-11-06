@@ -125,6 +125,7 @@ Every issue `--json` prints the same object: `issue list` per item,
 | `project` | string | project record id, `""` when none |
 | `labels` | array of string | label record ids |
 | `blocked_by` | array of string | issue record ids |
+| `parent` | string | parent issue record id, `""` for a root; older servers omit it |
 | `emoji` | string | |
 | `refs` | string | external references |
 | `attachments` | array of string | stored file names |
@@ -152,6 +153,19 @@ They also add `blocked_by_refs`: an array of `{id, key, title, state}` for
 visible blockers, in `blocked_by` order. Keys use each blocker's own team.
 Hidden or deleted blockers are omitted from refs; their ids remain in
 `blocked_by`, so missing refs do not mean the issue is ready.
+
+Issue reads (`list`, `view`, `next`) and post-update results add tree context
+when the server provides `parent`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `parent_ref` | object or null | visible parent as `{id, key, title, state}`; the raw `parent` id remains if no ref is available |
+| `children_refs` | array | visible direct children as `{id, key, title, state}` |
+| `children_summary` | object | `{done, total}` for direct children; done includes done and cancelled |
+
+These counts ignore list filters. A closed child counts done even if it has
+open descendants. Create replies need not include this derived context: a
+saved create does not depend on a second read. Older-server reads omit it.
 
 ### Other records
 
@@ -284,6 +298,7 @@ A name, once listed, is never removed or renamed.
 | `issues.idempotency` | `issue create --idempotency-key` |
 | `comments.idempotency` | `issue comment --idempotency-key` |
 | `webhooks.activity` | `webhook add --activity` |
+| `issues.parents` | `issue create/update --parent`, `issue list --parent/--under`, and importing a mirror with parent links |
 
 Before such a command writes anything, the CLI reads the list. A capability
 missing from it is refused with exit 1 and a message naming the server's
@@ -291,9 +306,9 @@ version: `this server (1.2.0) does not support --idempotency-key; upgrade the
 server before retrying this comment`. Nothing is sent. The list is absent
 when the server predates it (1.1.0 and older), and from a board that `lll up`
 started over an API it did not start, since that API may be older than the
-board. Without the list, for these three, the CLI asks the feature's own authenticated support route
+board. Without the list, the CLI asks the feature's own authenticated support route
 (`/api/lll/issues/idempotency`, `/api/lll/comments/idempotency`,
-`/api/lll/activity`), as it did before the list existed, and refuses the same
+`/api/lll/activity`, `/api/lll/issues/parents`), and refuses the same
 way when that route answers 404. Discovery is read without credentials, gives
 up after 2 seconds, and any failure reads as an absent list. Commands that need no capability never read
 the list. The version-skew warning is separate and unchanged.

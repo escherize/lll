@@ -151,3 +151,13 @@ fn a_replacement_then_an_append() {
   }
   assert text == "the new line\ntail"
 }
+
+#[test]
+fn parent_edits_preserve_keep_set_and_clear() {
+  let set = IssuePatch { parent: Relation.Set(models.IssueId("p1")), ..IssuePatch.unchanged() }
+  assert !set.is_empty()
+  assert wire(set, "") == "{\"parent\":\"p1\"}"
+  let clear = IssuePatch { parent: Relation.Clear, ..IssuePatch.unchanged() }
+  assert !clear.is_empty()
+  assert wire(clear, "") == "{\"parent\":\"\"}"
+}

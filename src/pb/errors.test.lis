@@ -39,6 +39,8 @@ fn a_server_message_is_text_not_a_kind() {
 fn only_known_codes_are_codes_and_only_claim_codes_refuse() {
   assert code_named("claim_held") == Some(ServerCode.ClaimHeld)
   assert code_named("needs_force") == Some(ServerCode.NeedsForce)
+  assert code_named("open_descendants") == Some(ServerCode.OpenDescendants)
+  assert kind_of_status(409, Some(ServerCode.OpenDescendants), true) == ErrorKind.Refused
   assert code_named("claim_changed") == Some(ServerCode.ClaimChanged)
   assert code_named("not_claimed") == Some(ServerCode.NotClaimed)
   assert code_named("bot_exceeds_owner") == Some(ServerCode.BotExceedsOwner)

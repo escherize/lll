@@ -50,6 +50,10 @@ fn import_dir(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       return Err(pb.failed(f"{front.key}: issue number {front.number} is outside 1-999999999; nothing was changed"))
     }
   }
+  let has_parents = validate_mirror_parents(parsed)?
+  // Refuse unsupported containment before --replace, label creation or any
+  // other mutation. Flat mirrors remain importable into older servers.
+  if has_parents { writes.require_issue_parents(ctx)? }
 
   let existing = records.fetch_board_issues(ctx, team.id)?
   if !existing.is_empty() && !p.given("--replace") {
@@ -83,6 +87,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // numbers only for a superuser's import (LLL-678); a member's issues are
   // numbered by the server, in the mirror's order.
   let mut id_of = Map.new<string, models.IssueId>()
+  let mut made_of = Map.new<string, models.Issue>()
   let mut renumbered: Slice<string> = []
   for front_and_body in by_number(parsed) {
     let (front, body) = front_and_body
@@ -114,6 +119,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       }
     }
     let new_issue = models.NewIssue {
+      parent: None,
       creator: filed_by,
       origin: models.IssueOrigin {
         host: front.origin.host,
@@ -146,6 +152,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       return Err(pb.failed(partial(dir, f"decoding created {front.key}: {e}", deleted, created)))
     }
     id_of[front.key] = made.id
+    if has_parents { made_of[front.key] = made }
     if made.number != front.number { renumbered = renumbered.append(f"{front.key} -> {team.key}-{made.number}") }
 
     if front.refs != "" {
@@ -190,6 +197,20 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   // because a forward reference is normal: ENG-3 can be blocked by ENG-7,
   // and a doc can be filed against an issue created after it. Links name
   // mirror keys, resolved through id_of whatever number each issue got.
+
+  let mut linked_parents = 0
+  for front_and_body in parsed {
+    let (front, _) = front_and_body
+    if front.parent == "" { continue }
+    let Some(parent) = id_of.get(front.parent) else { return Err(pb.failed(partial(dir, f"parent {front.parent} was not restored", deleted, created))) };
+    let Some(issue) = made_of.get(front.key) else { return Err(pb.failed(partial(dir, f"issue {front.key} was not restored", deleted, created))) };
+    let patch = writes.IssuePatch { parent: writes.Relation.Set(parent), ..writes.IssuePatch.unchanged() }
+    if let Err(failure) = writes.update_issue(ctx, issue, patch, writes.UpdateOptions.as_caller(pb.Caller.Process)) {
+      let e = update_failure(front.key, failure, false)
+      return Err(e.with_message(partial(dir, f"linking parent on {front.key}: {e.message}", deleted, created)))
+    }
+    linked_parents += 1
+  }
 
   let mut linked_blocks = 0
   for front_and_body in parsed {
@@ -248,6 +269,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
   let mut docs_note = ""
   if restored_docs > 0 { docs_note = f", {restored_docs} docs" }
   if linked_blocks > 0 { docs_note = f"{docs_note}, {linked_blocks} dependency links" }
+  if linked_parents > 0 { docs_note = f"{docs_note}, {linked_parents} parent links" }
   let mut out = output.line(f"Imported {created} issues{blobs}{docs_note} into {team.key}{note}")
   if !unassigned.is_empty() {
     out = out.line(
@@ -288,6 +310,39 @@ pub fn dir_spec() -> Slice<flags.Flag> {
       ..
     },
   ]
+}
+
+/// Validate the complete containment graph before any restore mutation.
+fn validate_mirror_parents(parsed: Slice<(mirror.Front, string)>) -> Result<bool, pb.CliError> {
+  let mut parents = Map.new<string, string>()
+  let mut has_parents = false
+  for pair in parsed {
+    let (front, _) = pair
+    if parents.get(front.key).is_some() { return Err(pb.failed(f"duplicate mirror key {front.key}; nothing was changed")) }
+    parents[front.key] = front.parent
+    has_parents = has_parents || front.parent != ""
+  }
+  for (key, parent) in parents {
+    if parent != "" && parents.get(parent).is_none() {
+      return Err(pb.failed(f"{key}: parent {parent} is missing from this mirror; nothing was changed"))
+    }
+  }
+  // Completed chains are shared across walks, so a deep tree is linear;
+  // neither the language stack nor an arbitrary depth cap limits restores.
+  let mut checked = Map.new<string, bool>()
+  for (key, _) in parents {
+    let mut chain: Slice<string> = []
+    let mut seen = Map.new<string, bool>()
+    let mut node = key
+    while node != "" && !checked.get(node).unwrap_or(false) {
+      if seen.get(node).unwrap_or(false) { return Err(pb.failed(f"parent cycle at {node} in this mirror; nothing was changed")) }
+      seen[node] = true
+      chain = chain.append(node)
+      node = parents.get(node).unwrap_or("")
+    }
+    for node in chain { checked[node] = true }
+  }
+  Ok(has_parents)
 }
 
 /// Every `issues/*.md` in the mirror, parsed, in ascending file order so the

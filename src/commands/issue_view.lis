@@ -19,6 +19,7 @@ struct IssueViewReads {
   blocks: Channel<Result<Slice<models.Issue>, pb.CliError>>,
   findings: Channel<Result<Slice<models.Doc>, pb.CliError>>,
   comments: Channel<Result<Slice<models.Comment>, pb.CliError>>,
+  tree: Channel<Result<Option<records.IssueTree>, pb.CliError>>,
 }
 
 /// Start only the reads this output mode already uses. Each result has room
@@ -28,6 +29,7 @@ fn begin_issue_view_reads(
   full: models.Issue,
   json_mode: bool,
   raw_mode: bool,
+  record: string,
 ) -> IssueViewReads {
   let reads = IssueViewReads {
     claim: Channel.buffered<Result<Option<models.Claim>, pb.CliError>>(1),
@@ -35,6 +37,7 @@ fn begin_issue_view_reads(
     blocks: Channel.buffered<Result<Slice<models.Issue>, pb.CliError>>(1),
     findings: Channel.buffered<Result<Slice<models.Doc>, pb.CliError>>(1),
     comments: Channel.buffered<Result<Slice<models.Comment>, pb.CliError>>(1),
+    tree: Channel.buffered<Result<Option<records.IssueTree>, pb.CliError>>(1),
   }
   // Every mode shows the claim; --raw too since LLL-638.
   task {
@@ -55,6 +58,9 @@ fn begin_issue_view_reads(
   }
   task {
     let _ = reads.comments.send(records.fetch_comments(ctx, full.id))
+  }
+  task {
+    let _ = reads.tree.send(tree_for_record(ctx, record))
   }
   reads
 }
@@ -103,10 +109,10 @@ fn view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if let Err(e) = json.Unmarshal(record.bytes(), &full) {
     return Err(pb.failed(f"decoding issue: {e}"))
   }
-  let reads = begin_issue_view_reads(ctx, full, json_mode, raw_mode)
+  let reads = begin_issue_view_reads(ctx, full, json_mode, raw_mode, record)
   if json_mode {
     return Ok(output.json(issue_view_json(
-      record,
+      with_issue_tree(record, await_issue_view(reads.tree, "tree")?)?,
       await_issue_view(reads.comments, "comments")?,
       await_issue_view(reads.claim, "claim")?,
       await_issue_view(reads.docs, "docs")?,
@@ -139,6 +145,7 @@ fn view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       if let Some(line) = claim_line { out = out.line(line) }
       if let Some(line) = labels_line { out = out.line(line) }
     }
+    for line in issue_tree_lines(full, await_issue_view(reads.tree, "tree")?, true) { out = out.line(line) }
     if full.description != "" {
       out = out.line("")
       out = out.line(full.description)
@@ -202,6 +209,7 @@ fn view(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   }
   out = out.line(f"Project:   {project}")
   out = out.line(f"Labels:    {labels}")
+  for line in issue_tree_lines(full, await_issue_view(reads.tree, "tree")?, false) { out = out.line(line) }
   if !full.attachments.is_empty() {
     out = out.line("Attachments:")
     for name in full.attachments { out = out.line(f"  {name}") }
@@ -350,7 +358,7 @@ fn issue_after(ctx: pb.Client, key: string) -> Result<output.Output, pb.CliError
   let record = records.fetch_issue_record(ctx, key)?
   let mut full = models.Issue { .. }
   if let Err(e) = json.Unmarshal(record.bytes(), &full) { return Err(pb.failed(f"decoding issue: {e}")) }
-  issue_document(record, fetch_claim(ctx, full.id)?)
+  issue_document(with_issue_tree(record, tree_for_record(ctx, record)?)?, fetch_claim(ctx, full.id)?)
 }
 
 fn doc_context_json(docs: Slice<models.Doc>) -> Result<json.RawMessage, pb.CliError> {

@@ -285,6 +285,8 @@ pub struct Issue {
   pub labels: Slice<LabelId>,
   // LLL-175: the issues that must be done before this one can start.
   pub blocked_by: Slice<IssueId>,
+  // Containment is independent of project grouping and blocker ordering.
+  pub parent: IssueId,
   pub created: string,
   pub updated: string,
   pub expand: IssueExpand,
@@ -312,6 +314,8 @@ pub struct IssueList {
 
 #[json]
 pub struct NewIssue {
+  #[json(omitempty)]
+  pub parent: Option<IssueId>,
   #[json(omitempty)]
   pub creator: Option<MemberId>,
   pub origin: IssueOrigin,
