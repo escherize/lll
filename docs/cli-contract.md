@@ -76,7 +76,7 @@ command prints next to its result go to stderr when `--json` is given.
 
 Every timestamp is RFC3339 in UTC with milliseconds:
 `2026-10-08T03:02:11.982Z`. This covers `created`, `updated`, `expires` and
-`redeemed` at any depth, and the claim's `claimed` and `renewed`.
+`redeemed` and `last_activity` at any depth, and the claim's `claimed` and `renewed`.
 
 Time flags (`issue list --since`, `issue update --if-unchanged-since`) accept
 RFC3339 in any offset and the space form PocketBase stores

@@ -13,6 +13,14 @@ import urllib.request
 binary, api = sys.argv[1:]
 assert urllib.parse.urlsplit(api).hostname == '127.0.0.1', 'requires an isolated board'
 
+def instant(stamp):
+    return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+
+
+def canonical(stamp):
+    assert stamp == instant(stamp).isoformat(timespec='milliseconds').replace('+00:00', 'Z'), stamp
+
+
 with tempfile.TemporaryDirectory(prefix='lll-activity-config-') as home:
     env = dict(os.environ, LLL_URL=api, LLL_TEAM='ACTDATE', LLL_CONFIG_HOME=home)
 
@@ -32,12 +40,13 @@ with tempfile.TemporaryDirectory(prefix='lll-activity-config-') as home:
     cli('team', 'create', '--key', 'ACTDATE', '-n', 'Activity dates')
     issue = cli('issue', 'create', 'Activity fixture', '--json')
     assert issue['last_activity']
+    canonical(issue['last_activity'])
     path = '/api/collections/issues/records/' + issue['id']
     original_updated = issue['updated']
     # A no-op spoof must neither forge the date nor create audit activity.
     request(path, {'last_activity': '2099-01-01T00:00:00Z'}, 'PATCH')
     prior = request(path)
-    assert prior['last_activity'] == issue['last_activity']
+    assert instant(prior['last_activity']) == instant(issue['last_activity'])
     original_updated = prior['updated']
     time.sleep(0.02)
     comment = cli('issue', 'comment', issue['key'], '-b', 'Progress', '--json')
@@ -54,7 +63,8 @@ with tempfile.TemporaryDirectory(prefix='lll-activity-config-') as home:
         assert current['updated'] == original_updated
     # The new materialized field must survive raw-record JSON enrichment.
     listed = cli('issue', 'list', '--json')['items']
-    assert listed[0]['last_activity'] == current['last_activity']
+    canonical(listed[0]['last_activity'])
+    assert instant(listed[0]['last_activity']) == instant(current['last_activity'])
     after_issue_edit = (datetime.datetime.fromisoformat(original_updated.replace('Z', '+00:00'))
                         + datetime.timedelta(milliseconds=1)).isoformat()
     assert cli('issue', 'list', '--since', after_issue_edit, '--json')['items'] == []
@@ -69,6 +79,8 @@ with tempfile.TemporaryDirectory(prefix='lll-activity-config-') as home:
     cli('issue', 'release', issue['key'])
     current = request(path)
     assert current['last_activity'] >= prior['last_activity']
-    assert cli('issue', 'view', issue['key'], '--json')['last_activity'] == current['last_activity']
+    viewed = cli('issue', 'view', issue['key'], '--json')['last_activity']
+    canonical(viewed)
+    assert instant(viewed) == instant(current['last_activity'])
 
 print('Issue activity: native create/list/view, comment edits/deletion, claim renewal/release, spoof protection and unchanged --since semantics passed')
