@@ -391,7 +391,7 @@ pub fn bot_commands() -> Slice<flags.Command> {
     flags.Command {
       name: "create",
       access: flags.Access.Write,
-      summary: "an agent identity in one command: member + token, printed once in a prompt to paste into the agent (--env: only the exports); the name must start with bot-",
+      summary: "an agent identity in one command: member + token, printed once (--env: exports, --json: credentials); the name must start with bot-",
       page: bot_page(false),
       spec: bot_spec(),
       positional: "bot-NAME",
@@ -510,7 +510,7 @@ fn bot_spec() -> Slice<flags.Flag> {
       name: "--team",
       value: true,
       hint: "KEY",
-      help: "team the agent prompt attaches to (default: the configured team)",
+      help: "team the agent prompt attaches to (default: the configured team)\nwith --json: optional explicit context; never changes access",
       ..,
     },
   )
@@ -655,7 +655,7 @@ configured team, which you must be able to see), and where to read the
 workflow. --env prints only the two export lines on stdout:
   "
     + command
-    + " bot-myrepo --env > agent.env"
+    + " bot-myrepo --env > agent.env\n\n--json prints one object with name, url, token and team, without progress lines.\nNo configured team is needed: team is empty unless you pass --team KEY. That\ncontext is checked before writing; it does not restrict or widen bot access.\n--env and --json exclude each other."
     + flags.section(spec)
     + see_rotate
 }
