@@ -95,6 +95,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- README and top-level help lead with shared agent memory and one new-owner
+  path. The owner guide connects tasks, findings and decisions; setup explains
+  invitation-token login and optional agent workflows (LLL-735).
+
 - `lll issue next --claim` hands back the caller's own held ready issue, exit
   0 with the key on stdout and `Resuming KEY: already claimed by ...` on
   stderr, when it has nothing new to offer, instead of exiting 5. A loop that

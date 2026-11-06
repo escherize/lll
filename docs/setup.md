@@ -4,27 +4,36 @@ Start with [the README](../README.md#quickstart) for a local board. This guide
 covers joining an existing board, sharing your own, and choosing where work
 is tracked. For available commands and configuration, see [the CLI guide](cli-guide.md).
 
-## First startup
-
-A team groups issues under a short key: `APP` gives you `APP-1`, `APP-2`,
-and so on. A local board runs while this command is open:
+## Start your own board
 
 ```sh
 mkdir my-project && cd my-project
-LLL_TEAM=APP lll up           # lll server (:8090) + web board (:8100)
+lll new "Payments rewrite"
 ```
 
-The first boot creates the team, writes `.lll.toml` here, and creates a
-member named after `$USER`. A taken port moves to the next free one. If an lll
-server already answers at the API url, `lll up` uses it, unless only a repo
-`.lll.toml` chose that url: then it stops with exit 4. Ctrl-C stops
-everything.
+This starts a local board, attaches the directory and logs its CLI in. Open the
+sign-in link it prints, and keep the command running. In a second terminal in
+this directory, create work with `lll issue create -t "First issue"`.
 
-`lll new "Payments rewrite"` is `lll up` with the choices made for you. The key
-comes from the title (`--key` picks your own), and the data lives in
-`~/.config/lll/boards/pay` instead of this directory. Run the same command
-again to reopen the board. A key that another title already holds is refused
-with exit 4. Everything below about `lll up` holds for it too.
+The team key comes from the title: `PAY` gives you `PAY-1`, `PAY-2`, and so on.
+`--key` picks your own key. Data lives in `~/.config/lll/boards/pay`; run the
+same command again to reopen the board. A key already used by another title
+or a directory already attached to another board is refused rather than
+silently replaced. Ctrl-C stops the server.
+
+### Hosting with explicit server settings
+
+Use `lll up` when you want to choose the server settings yourself:
+
+```sh
+LLL_TEAM=APP lll up
+```
+
+On a fresh setup it creates the team, writes `.lll.toml` here, and creates a
+member named after `$USER`. A taken port moves to the next free one. If an lll
+server already answers at the API URL, `lll up` uses it, unless only a repo
+`.lll.toml` chose that URL: then it stops with exit 4. A named board started by
+`lll new` keeps its own data directory and does not adopt an existing server.
 
 `lll up` prints one line per fact:
 
@@ -56,15 +65,22 @@ that already attaches the directory to another team or server is refused
 
 ## Join an existing board
 
+If someone sent you an invite, open it and follow the setup page's exact CLI
+login command. It uses the token shown there; you do not need to create a
+password. Skip attachment when your repository already names the correct team
+and server.
+
 | Actor | Once | Writes |
 |---|---|---|
 | Server | `lll up` with server settings in env (on a host: secrets) | the database |
-| Your machine | `lll login --url https://your-host --email you@example.com` | `url`, `token`, `team` in the home config |
-| Each repo or directory | `lll attach` | `team` in `.lll.toml` |
+| Your machine | `lll login --url https://your-host --token -`, then paste your token | your local login |
+| Each repo or directory | `lll attach --key KEY` | the attachment in `.lll.toml` |
 | Each agent | a member runs `lll bot create bot-NAME` | a private prompt with the agent's identity and token |
 
-Humans log in with email and password; agents use minted tokens. Plain
-`lll login` needs an existing member, and without `--url` it refuses (exit 2)
+An existing email-and-password account can instead use
+`lll login --url https://your-host --email you@example.com`.
+
+Plain `lll login` needs an existing member, and without `--url` it refuses (exit 2)
 a url that only a repo `.lll.toml` or `LLL_URL` chose. The superuser is not
 a member.
 
