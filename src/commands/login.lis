@@ -13,6 +13,7 @@ import "models"
 import "output"
 import "pb"
 import "secret"
+import "tokens"
 
 // `lll login` / `lll logout` (TASK-183) — the human entry point for auth.
 // A human authenticates with email + password through PocketBase's own
@@ -147,10 +148,11 @@ fn login(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // refusal per flag. Scripts, CI and agents are exactly the callers with no
   // terminal, and they are the ones who cannot answer a prompt.
   let interactive = term.IsTerminal(os.Stdin.Fd() as int)
+  let password_url = if target != "" { target } else { before_login.url }
   if !interactive && p.one("--email") == "" && !p.given("--password") {
     return Err(
-      pb.failed("no email and no password, and no terminal to prompt at; pass both:
-  lll login --url <server> --email <your email> --password <pw>"),
+      pb.failed(f"no email and no password, and no terminal to prompt at; set your email and read a private password file:
+  {password_file_login(password_url, "you@example.com", p.given("--create"))}"),
     )
   }
   let mut email = p.one("--email")
@@ -175,7 +177,9 @@ fn login(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       "no password"
     }
     return Err(
-      pb.failed(f"{whose}; pass --password <pw>, or pipe it: printf '%s\\n' \"$PW\" | lll login ..."),
+      pb.failed(f"{whose}; read it from a private password file:
+  {password_file_login(password_url, email, p.given("--create"))}
+Or run login in a terminal to enter it with echo off."),
     )
   }
 
@@ -278,6 +282,13 @@ fn token_identity(ctx: pb.Client, tok: string) -> Result<(string, bool), pb.CliE
     return Err(pb.failed("the server answered, but not with a member: is --url this board's address?"))
   }
   Ok((reply.name, !reply.access().mode.writes()))
+}
+
+/// FD 0 is already the shared secret reader's safe non-interactive path.
+/// Keep the account mode and quote only non-secret values in the recovery.
+fn password_file_login(url: string, email: string, create: bool) -> string {
+  let mode = if create { " --create" } else { "" }
+  f"lll login --url {tokens.shell_word(url)} --email {tokens.shell_word(email)}{mode} --password - < /path/to/private-password"
 }
 
 /// Pure. Why a login without --url must name its server, or None (LLL-688).
@@ -739,7 +750,14 @@ Usage:
 
 Prompts for the email (unless --email) and the password (unless
 --password), reading it with echo off when stdin is a terminal; piped
-input is read as a plain line. --password is what scripts, CI and agents use. On success
+input is read as a plain line. For a non-interactive password login, redirect
+an existing private password file into stdin; the password stays out of argv,
+shell history and the agent conversation:
+
+  lll login --url https://tracker.example.com --email you@example.com --password - < /path/to/private-password
+
+Keep that file readable only by you, or pipe it from your password manager.
+On success
 the auth token is stored in ~/.config/lll/lll.toml, never in the
 repo's shareable .lll.toml, and every later lll call rides it.
 An LLL_TOKEN in the environment still wins (see 'lll config list').

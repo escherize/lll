@@ -8,6 +8,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Non-interactive password-login hints show the existing private-file/stdin
+  path, keeping passwords out of command arguments and shell history (LLL-732).
+
 - Fleet wrappers leave the agent label unset instead of attributing every
   worker to Codex, and still discard inherited controller labels (LLL-727).
 

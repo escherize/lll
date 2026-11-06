@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise login discovery against the web suite's isolated API and board."""
+"""Exercise discovery and safe password input against the isolated API and board."""
 import http.server
 import json
 import os
@@ -16,11 +16,19 @@ with tempfile.TemporaryDirectory() as directory:
     home = Path(directory)
     env = {key: value for key, value in os.environ.items() if not key.startswith('LLL_')}
     env['HOME'] = directory
+    password = 'web-e2e-pass-123'
+    password_file = home / 'private-password'
+    password_file.write_text(password + '\n')
+    password_file.chmod(0o600)
     def login(url, *flags):
-        result = subprocess.run([binary, 'login', '--url', url, '--email', 'e2e@members.invalid',
-                                 '--password', 'web-e2e-pass-123', *flags],
-                                cwd=directory, env=env, capture_output=True, text=True, timeout=12)
+        args = [binary, 'login', '--url', url, '--email', 'e2e@members.invalid', '--password', '-', *flags]
+        with password_file.open('rb') as source:
+            result = subprocess.run(args, stdin=source, cwd=directory, env=env,
+                                    capture_output=True, text=True, timeout=12)
         assert result.returncode == 0, result.stderr
+        assert password not in result.stdout + result.stderr, 'login printed the password'
+        assert password not in args, 'password was put in argv'
+        assert password not in (home / '.config/lll/lll.toml').read_text(), 'login saved the password'
         return result.stdout
     def saved_board():
         for line in (home / '.config/lll/lll.toml').read_text().splitlines():
@@ -33,6 +41,12 @@ with tempfile.TemporaryDirectory() as directory:
     # Switching to a distinct API listener obtains the advertised board URL.
     assert 'board endpoint discovered' in login(api)
     assert saved_board() == board
+    for flags in ([], ['--email', 'e2e@members.invalid']):
+        missing = subprocess.run([binary, 'login', '--url', api, *flags], stdin=subprocess.DEVNULL,
+                                 cwd=directory, env=env, capture_output=True, text=True, timeout=12)
+        assert missing.returncode == 1, missing.stderr
+        assert '--password - < /path/to/private-password' in missing.stderr, missing.stderr
+        assert '--password <pw>' not in missing.stderr and 'printf' not in missing.stderr, missing.stderr
     override = 'https://explicit.example.test/board'
     login(api, '--web-url', override)
     assert saved_board() == override
@@ -99,4 +113,4 @@ with tempfile.TemporaryDirectory() as directory:
         server.shutdown()
         server.server_close()
         worker.join()
-print('login discovery: same-origin, split-origin, overrides, switching and optional fallback passed')
+print('login discovery: private password input, same-origin, split-origin, overrides, switching and optional fallback passed')
