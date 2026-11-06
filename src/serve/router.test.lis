@@ -146,6 +146,7 @@ fn every_non_get_request_must_come_from_the_boards_own_origin() {
     "/state",
     "/t/AAA/settings/label",
     "/settings/access/token",
+    "/t/AAA/settings/access/token",
     "/bot",
     "/comment",
     "/create",

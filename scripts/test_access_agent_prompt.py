@@ -93,6 +93,8 @@ with tempfile.TemporaryDirectory(prefix='lll-507-') as directory:
             assert '<script>' not in body and '&lt;script&gt;' in body, 'member name escaped incorrectly'
             assert response_headers.get('Cache-Control') == 'no-store'
             assert call(api,'/api/collections/members/auth-refresh',{},token)['record']['id'] == member['id']
+        _, bare, _ = page('/settings/access/token',form)
+        assert 'this settings form names no team' in bare and 'id="access-agent-prompt"' not in bare
         code, reloaded, _ = page('/t/OTHER_TEAM/settings/access')
         assert code == 200 and 'id="access-agent-prompt"' not in reloaded
         assert all(token not in reloaded for token in seen), 'page reload redisclosed a token'

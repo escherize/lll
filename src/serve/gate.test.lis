@@ -63,7 +63,7 @@ fn member_viewer_writes_only_when_read_write() {
   }
   // Workspace-wide rows and settings stay closed even to a writer.
   for path in ["/favorite", "/views/save", "/settings/label", "/t/AAA/settings/label",
-               "/settings/access/token", "/settings/access/member", "/settings/teams/archive"] {
+               "/settings/access/token", "/t/AAA/settings/access/token", "/settings/access/member", "/settings/teams/archive"] {
     assert route_kind(scoped_route("POST", path, true)) == "closed"
   }
   let m = ViewerMember { id: "m1", name: "ann", token: "t", access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadWrite } }
