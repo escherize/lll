@@ -76,6 +76,27 @@ typography:
     select-flash: "12.5px"
     base: "13px"
     title: "19px"
+  docs-title:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "2.25rem"
+    fontWeight: 600
+    lineHeight: 1.15
+    letterSpacing: "-0.025em"
+  docs-title-mobile:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "1.875rem"
+    fontWeight: 600
+    lineHeight: 1.15
+  docs-section:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "1.5rem"
+    fontWeight: 600
+    lineHeight: 1.3
+  docs-body:
+    fontFamily: "Inter Variable, system-ui, sans-serif"
+    fontSize: "1.0625rem"
+    fontWeight: 400
+    lineHeight: 1.75
   landing-display:
     fontFamily: "Inter Variable, system-ui, sans-serif"
     fontSize: "clamp(44px, 6.5vw, 84px)"
@@ -762,3 +783,12 @@ also adds **12px** (landing-frame) for the board screenshot frame alone.
   Error Voice Rule still holds.
 - **Don't** carry the band's orange ground, display sizes or hero shadows
   into the product.
+
+## Documentation reading surface
+
+The public Markdown guides use the landing page's Inter Variable face, dark
+palette and restrained orange links. Reading roles are deliberately larger
+than board controls: 17px body at 1.75 line height, a 70ch column, 36px page
+titles (30px on mobile), and 24px section headings. Desktop navigation sits
+beside the text; mobile navigation uses a native disclosure. Tables and code
+scroll inside the reading column. Content and navigation work without JavaScript.

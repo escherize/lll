@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{ page.title | default: site.title | escape }} · lll</title>
+  <link rel="stylesheet" href="{{ '/docs.css' | relative_url }}">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="docs-header">
+    <a class="brand" href="{{ '/' | relative_url }}"><b aria-hidden="true">L</b><span>lll</span></a>
+    <a class="docs-home" href="{{ '/docs/' | relative_url }}">Documentation</a>
+    <a class="repository" href="https://github.com/escherize/lll">GitHub</a>
+  </header>
+  <div class="docs-shell">
+    <aside class="desktop-nav">{% include docs-nav.html %}</aside>
+    <div class="reading-column">
+      <details class="mobile-nav">
+        <summary>Browse documentation</summary>
+        {% include docs-nav.html %}
+      </details>
+      <main id="content" tabindex="-1">
+        <article class="doc-body">{{ content | replace: '<table>', '<div class="table-scroll" tabindex="0" role="region" aria-label="Table: scroll horizontally to see all columns"><table>' | replace: '</table>', '</table></div>' }}</article>
+        <footer class="doc-footer">
+          <a href="{{ '/docs/' | relative_url }}">All documentation</a>
+          <a href="https://github.com/escherize/lll/blob/main/docs/{{ page.path | uri_escape }}">Edit this page</a>
+        </footer>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
