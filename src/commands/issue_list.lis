@@ -69,6 +69,7 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let scope = configured_scope(ctx)?
   let mut parent_filter: Option<string> = None
   let mut subtree: Option<Map<models.IssueId, bool>> = None
+  let mut tree_snapshot: Option<records.IssueTree> = None
   if p.given("--parent") || p.given("--under") {
     writes.require_issue_parents(ctx)?
     let under = p.given("--under")
@@ -85,6 +86,7 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       if under {
         let links = records.fetch_issue_tree(ctx, query.TeamScope.Only(root.team))?
         subtree = Some(records.subtree_ids(links, root.id))
+        tree_snapshot = Some(records.index_issue_tree(links))
       } else { parent_filter = Some(root.id.string()) }
     }
   }
@@ -153,9 +155,19 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // LLL-651: the claim rides the list, so automation need not view each card.
   let held = if items.is_empty() { Map.new<models.IssueId, models.Claim>() } else { claims_by_issue(ctx, scope)? }
   if json_mode {
+    let mut tree = tree_snapshot
+    if !items.is_empty() && tree.is_none() {
+      let raw = raw_records.get(items[0].id).unwrap_or("null".bytes() as json.RawMessage)
+      let supported = record_has_parent(raw as string)?
+      if supported {
+        tree = Some(records.index_issue_tree(records.fetch_issue_tree(ctx, scope)?))
+      }
+    }
     let mut out: Slice<Map<string, json.RawMessage>> = []
     for i in items {
-      out = out.append(issue_json(raw_records.get(i.id).unwrap_or("null".bytes() as json.RawMessage), held.get(i.id))?)
+      let raw = raw_records.get(i.id).unwrap_or("null".bytes() as json.RawMessage)
+      let enriched = with_issue_tree(raw as string, tree)?
+      out = out.append(issue_json(enriched.bytes() as json.RawMessage, held.get(i.id))?)
     }
     return list_json(out, at, "issues")
   }
@@ -443,9 +455,9 @@ fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     if let Err(e) = json.Unmarshal(record.bytes(), &full) {
       return Err(pb.failed(f"decoding issue: {e}"))
     }
-    let reads = begin_issue_view_reads(ctx, full, true, false)
+    let reads = begin_issue_view_reads(ctx, full, true, false, record)
     return Ok(out.then(output.json(issue_view_json(
-      record,
+      with_issue_tree(record, await_issue_view(reads.tree, "tree")?)?,
       await_issue_view(reads.comments, "comments")?,
       await_issue_view(reads.claim, "claim")?,
       await_issue_view(reads.docs, "docs")?,

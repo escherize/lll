@@ -1,0 +1,74 @@
+import "go:encoding/json"
+import "display"
+import "models"
+import "pb"
+import "query"
+import "records"
+
+#[json]
+struct IssueTreeRef {
+  id: models.IssueId,
+  key: string,
+  title: string,
+  state: string,
+}
+
+fn tree_ref(issue: models.Issue, team_key: string) -> IssueTreeRef {
+  IssueTreeRef { id: issue.id, key: f"{team_key}-{issue.number}", title: issue.title, state: issue.state_wire }
+}
+
+/// An old server omits `parent` entirely. Ordinary reads still work there;
+/// only explicit parent operations require the issues.parents capability.
+fn record_has_parent(record: string) -> Result<bool, pb.CliError> {
+  let mut fields = Map.new<string, json.RawMessage>()
+  json.Unmarshal(record.bytes(), &fields).map_err(|e| pb.failed(f"decoding issue tree fields: {e}"))?
+  Ok(fields.get("parent").is_some())
+}
+
+fn tree_for_record(ctx: pb.Client, record: string) -> Result<Option<records.IssueTree>, pb.CliError> {
+  let supported = record_has_parent(record)?
+  if !supported { return Ok(None) }
+  let mut issue = models.Issue { .. }
+  json.Unmarshal(record.bytes(), &issue).map_err(|e| pb.failed(f"decoding issue tree: {e}"))?
+  Ok(Some(records.index_issue_tree(records.fetch_issue_tree(ctx, query.TeamScope.Only(issue.team))?)))
+}
+
+/// Preserve unknown server fields and exact numbers. This uses one bulk,
+/// viewer-scoped snapshot, never one request per child or per board card.
+fn with_issue_tree(record: string, tree: Option<records.IssueTree>) -> Result<string, pb.CliError> {
+  let Some(tree) = tree else { return Ok(record) };
+  let supported = record_has_parent(record)?
+  if !supported { return Ok(record) }
+  let mut issue = models.Issue { .. }
+  json.Unmarshal(record.bytes(), &issue).map_err(|e| pb.failed(f"decoding issue tree: {e}"))?
+  let mut fields = Map.new<string, json.RawMessage>()
+  json.Unmarshal(record.bytes(), &fields).map_err(|e| pb.failed(f"decoding issue tree JSON: {e}"))?
+  fields["children_summary"] = encode_json(tree.summary(issue.id), "children summary")?
+  let children = tree.direct_children(issue.id).map(|child| tree_ref(child, issue.expand.team.key))
+  fields["children_refs"] = encode_json(children, "child refs")?
+  let parent = tree.nodes.get(issue.parent).map(|parent| tree_ref(parent, issue.expand.team.key))
+  fields["parent_ref"] = encode_json(parent, "parent ref")?
+  json.Marshal(fields).map(|b| b as string).map_err(|e| pb.failed(f"encoding issue tree: {e}"))
+}
+
+fn issue_tree_lines(issue: models.Issue, tree: Option<records.IssueTree>, markdown: bool) -> Slice<string> {
+  let Some(tree) = tree else { return [] };
+  let mut lines: Slice<string> = []
+  if !issue.parent.is_empty() {
+    let parent = tree.nodes.get(issue.parent).map_or("unavailable", |p| f"{issue.expand.team.key}-{p.number} {p.title}")
+    let line = if markdown { f"- **Parent:** {parent}" } else { f"Parent:    {parent}" }
+    lines = lines.append(line)
+  }
+  let summary = tree.summary(issue.id)
+  if summary.total > 0 {
+    let heading = if markdown { f"- **Children:** {summary.done}/{summary.total} done" } else { f"Children:  {summary.done}/{summary.total} done" }
+    lines = lines.append(heading)
+    for child in tree.direct_children(issue.id) {
+      let state = display.state_name(child.state())
+      let line = f"{issue.expand.team.key}-{child.number} [{state}] {child.title}"
+      let formatted = if markdown { f"  - {line}" } else { f"  {line}" }
+      lines = lines.append(formatted)
+    }
+  }
+  lines
+}

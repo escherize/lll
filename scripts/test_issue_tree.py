@@ -131,6 +131,20 @@ assert {r['id'] for r in direct['items']}=={intermediate['id'],sibling['id']}
 whole = json.loads(cli('issue','list','--under',fk,'--sort','created','--json').stdout)
 assert {r['id'] for r in whole['items']}=={filtered_root['id'],intermediate['id'],leaf['id'],sibling['id']}
 assert whole['totalItems']==4
+by_id = {r['id']:r for r in whole['items']}
+assert by_id[filtered_root['id']]['children_summary']=={'done':1,'total':2}
+assert by_id[intermediate['id']]['children_summary']=={'done':0,'total':1}
+assert by_id[leaf['id']]['children_summary']=={'done':0,'total':0}
+assert by_id[leaf['id']]['parent_ref']['key']==ik
+view = json.loads(cli('issue','view',fk,'--json').stdout)
+assert view['children_summary']=={'done':1,'total':2}
+assert {r['id'] for r in view['children_refs']}=={intermediate['id'],sibling['id']}
+assert view['parent_ref'] is None
+for mode in ((),('--raw',)):
+    text = cli('issue','view',fk,*mode).stdout
+    assert '1/2 done' in text and ik in text
+    text = cli('issue','view',f"TREEA-{leaf['number']}",*mode).stdout
+    assert 'Parent:' in text and ik in text
 page = json.loads(cli('issue','list','--under',fk,'--sort','created','--limit','1','--page','2','--json').stdout)
 assert page['totalItems']==4 and page['items'][0]['id']==whole['items'][1]['id']
 needle = json.loads(cli('issue','list','--under',fk,'--search','Needle','--state','todo','--json').stdout)

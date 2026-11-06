@@ -138,7 +138,7 @@ fn collect_board_issues(
 /// Lightweight, complete containment input. A list's state/search filters must
 /// not cut an intermediate ancestor out of the graph used by --under.
 pub fn fetch_issue_tree(ctx: pb.Client, scope: query.TeamScope) -> Result<Slice<models.Issue>, pb.CliError> {
-  collect_issue_pages(scope, "", "id,parent,state,team", |path| {
+  collect_issue_pages(scope, "", "id,parent,state,team,number,title", |path| {
     let mut page = BoardPage { .. }
     pb.fetch(ctx, path, "issue tree", &page)?
     Ok(page)

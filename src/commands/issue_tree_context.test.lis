@@ -1,0 +1,43 @@
+import "go:encoding/json"
+import "models"
+import "records"
+
+#[test]
+fn tree_context_preserves_raw_fields_and_counts_unfiltered_direct_children() {
+  let record = "{\"id\":\"root\",\"parent\":\"\",\"number\":7,\"expand\":{\"team\":{\"key\":\"ENG\"}},\"future\":9007199254740993}"
+  let tree = records.index_issue_tree([
+    models.Issue { id: "root", number: 7, .. },
+    models.Issue { id: "closed", parent: "root", number: 8, title: "Closed", state_wire: "done", .. },
+    models.Issue { id: "leaf", parent: "closed", number: 9, title: "Open grandchild", state_wire: "todo", .. },
+  ])
+  let assert Ok(enriched) = with_issue_tree(record, Some(tree))
+  let mut fields = Map.new<string, json.RawMessage>()
+  let assert Ok(_) = json.Unmarshal(enriched.bytes(), &fields)
+  assert (fields.get("future").unwrap_or("".bytes() as json.RawMessage) as string) == "9007199254740993"
+  assert (fields.get("parent_ref").unwrap_or("".bytes() as json.RawMessage) as string) == "null"
+  let mut progress = records.ChildrenSummary { .. }
+  let assert Ok(_) = json.Unmarshal(fields.get("children_summary").unwrap_or("".bytes() as json.RawMessage), &progress)
+  assert progress.total == 1 && progress.done == 1
+  let mut children: Slice<IssueTreeRef> = []
+  let assert Ok(_) = json.Unmarshal(fields.get("children_refs").unwrap_or("".bytes() as json.RawMessage), &children)
+  assert children.length() == 1 && children[0].key == "ENG-8" && children[0].title == "Closed"
+}
+
+#[test]
+fn tree_context_old_issue_records_do_not_trigger_tree_reads_or_gain_guessed_progress() {
+  let record = "{\"id\":\"old-record\",\"future\":9007199254740993}"
+  let assert Ok(None) = tree_for_record(test_client("http://unreachable.invalid", "", ""), record)
+  let assert Ok(unchanged) = with_issue_tree(record, Some(records.index_issue_tree([])))
+  assert unchanged == record
+}
+
+#[test]
+fn tree_context_missing_parent_keeps_its_raw_relation_without_a_guessed_reference() {
+  let record = "{\"id\":\"child\",\"parent\":\"unavailable\",\"number\":2,\"expand\":{\"team\":{\"key\":\"ENG\"}}}"
+  let tree = records.index_issue_tree([models.Issue { id: "child", parent: "unavailable", number: 2, .. }])
+  let assert Ok(enriched) = with_issue_tree(record, Some(tree))
+  let mut fields = Map.new<string, json.RawMessage>()
+  let assert Ok(_) = json.Unmarshal(enriched.bytes(), &fields)
+  assert (fields.get("parent").unwrap_or("".bytes() as json.RawMessage) as string) == "\"unavailable\""
+  assert (fields.get("parent_ref").unwrap_or("".bytes() as json.RawMessage) as string) == "null"
+}
