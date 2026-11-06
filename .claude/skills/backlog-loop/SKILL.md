@@ -59,6 +59,10 @@ commit. If there is no precedent, it is a decision and it is not yours.
 "Change the filter parser" touches every noun that filters. "Add a header to
 one route" does not. Prefer the second when working alone.
 
+If a criterion contradicts the repo's documented contract, correct it on the
+issue before coding and cite the contract. Do not silently implement either
+version; follow `lll skill get lll` for recording the correction.
+
 If any answer is NO: leave it, and say on the issue exactly which question
 failed and what a human needs to supply. That comment is the deliverable.
 
@@ -92,16 +96,20 @@ ready issue you already hold under the same `--agent` label (or an
 unlabelled hold), saying `Resuming KEY` on stderr, so a loop that crashed
 after claiming picks its own work up again instead of exiting 5.
 
-Comments carry the reasons an issue is harder than its title. One issue on lll's
-board looks like a two-line normalisation and carries a comment explaining it
-became a cross-surface policy change. The title lied; the comment did not.
+Comments carry the reasons an issue is harder than its title. A title may suggest a two-line
+normalisation while a comment explains that it became a cross-surface policy
+change. The title lied; the comment did not.
 
 Then, per issue:
 
 1. **Reproduce.** Prove the problem exists, with output you can paste.
-2. **Claim it.** `lll issue claim KEY` then `lll issue update KEY --state in-progress`.
+2. **Claim it.** `lll issue claim KEY --agent YOUR-SESSION` then
+   `lll issue start KEY --agent YOUR-SESSION`.
    Claim is atomic and fails if another member got there first - that refusal is
    the point, let it stop you. (Same token = same member: see the claim trap below.)
+   If the orchestrator already claimed it for your identity and label, verify
+   that hold instead of re-claiming. Use the same label for comments, and renew
+   before the 24-hour limit when the run continues that long.
 3. **Implement.** Smallest change that satisfies the criteria. Nothing else.
    Found a second problem? File it, do not fix it.
 4. **Verify.** See below. Not "tests pass".
@@ -126,15 +134,12 @@ sufficient. It says you broke nothing. It does not say you fixed anything.
 **Reproduce the failure, fix, then reproduce the fix under the same conditions.**
 Not the gate's conditions - the issue's. A test-environment bug is verified by
 running the tests WITH the hostile variable exported, not by a clean run:
-in lll's own suite, exporting the two variables the bug was about took the unit
-tests from 2 failed / 304 passed to 306 passed, and only that pair of numbers
-is evidence. A clean green run would have
-proved nothing at all, because a clean run was already green before the fix.
+a clean green run proves nothing if the bug requires the hostile environment.
+Keep the actual before and after results.
 
-**Verify the claim the issue made, through the path a user takes.** lll's gate
-was green for five days while its demo-seeding task was completely broken,
-because the gate does not run it. A green gate is evidence about the gate's coverage as
-much as about your change.
+**Verify the issue's claim through the path a user takes.** A green gate can
+miss a broken demo-seeding task because the gate never runs it. Coverage is
+part of the evidence, not an assumption.
 
 - A header change: read the header off a running server.
 - A UI change: drive it in a browser and look at the screenshot.
@@ -161,8 +166,9 @@ board that lies is worse than no board.
 - Partly done → back to todo, with a comment naming precisely what remains.
   Do not close "most of it".
 - Blocked on a human → back to todo, with the question stated in one sentence.
-- Either way, `lll issue release KEY` so the next agent can take it; a held
-  issue reads as busy.
+- When handing work back to todo, `lll issue release KEY --agent YOUR-SESSION`
+  frees the hold for the next agent. Closing releases the claim automatically
+  and preserves the assignee; do not release after closing.
 - Cannot reproduce → say so with what you tried, and close only if the issue was
   about a symptom that demonstrably no longer occurs. Name it as
   "not reproducible", never as "fixed".
@@ -174,8 +180,8 @@ closing four issues you half-did.
 
 Stop and hand back when:
 
-- The next step is irreversible or outward-facing (deploy, release, delete,
-  anything a user sees).
+- The next step is irreversible or outward-facing and is not already
+  authorized (deploy, release, delete, anything a user sees).
 - You have hit the same failure twice and your second theory was also wrong.
   Two wrong theories means you do not understand the problem.
 - The change is growing past the issue. Scope growth unattended is how a small

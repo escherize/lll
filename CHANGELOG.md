@@ -101,6 +101,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- Make the shipped factory guides portable across repositories, clarify
+  labelled claim continuation and PR handoff, and cover protocol/access races
+  without prescribing writes into generated build output (LLL-711).
+
 - README and top-level help lead with shared agent memory and one new-owner
   path. The owner guide connects tasks, findings and decisions; setup explains
   invitation-token login and optional agent workflows (LLL-735).

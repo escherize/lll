@@ -22,7 +22,7 @@ conditions, and leave evidence a reviewer can re-run.
   Launch    an isolated environment        free ports, a temp data dir, a fresh config
   Doctor    is it worth driving?           before the first drive, and after any surprise
   Drive     the real user path             the entry point the issue names
-  Evidence  what you ran and what it said  a per-issue directory the build ignores
+  Evidence  what you ran and what it said  a per-issue directory outside generated output
   Cleanup   stop what you started          by PID, and the evidence survives
 ```
 
@@ -36,17 +36,25 @@ GATE > gate.log 2>&1; echo "GATE_EXIT=$?" >> gate.log
 grep GATE_EXIT gate.log
 ```
 
+This form works in bash and zsh. `PIPESTATUS` is bash-only; zsh uses
+`pipestatus`. Avoid a pipeline when you only need the gate's status.
+
 **The gate cannot see everything.** Demo-seeding scripts, scratch
 environments and the release workflow often run outside it. Ask what your
 change touches and whether the gate looks there. If it does not, that path is
 yours to drive.
 
-## Before - reproduce the failure first
+## Before - establish the baseline
 
 Reproduce what the issue reports on the code as it was, the same way you will
 check the fix. A fix verified against a failure you never saw is a guess: the
 test may pass because it never exercised the broken path. Keep the "before"
 output; it is half of the evidence.
+
+For a feature, capture the current behavior and the missing capability. For a
+protocol change, check each supported old/new client and server pair. For an
+access change, prove every relevant escalation is refused, with an allowed
+control so a broken endpoint cannot count as successful enforcement.
 
 ## Launch - an isolated environment
 
@@ -57,9 +65,9 @@ not yours. A shared dev instance is the wrong place to verify while another
 agent might be using it, and your real config is the wrong place to write test
 state.
 
-If your repo has a command that does this, use it. If it does not, that is
-worth an issue of its own: every agent verifying in parallel will otherwise
-hand-roll it and collide.
+Use the throwaway-instance command named by the repo. The repo should record
+it in AGENTS.md or its equivalent. If none exists, that is worth an issue:
+every agent verifying in parallel will otherwise hand-roll it and collide.
 
 ## Doctor - is it worth driving?
 
@@ -79,7 +87,12 @@ retrying into the same state.
 Drive the entry point the issue names, not whichever one is convenient. A
 write through an internal setter that produces the right row does not prove the
 interface a user touches renders it. If the change reaches users through two
-entry points, drive both.
+entry points, drive both. If one process advertises a capability for another
+(proxy, gateway or adopted upstream), also test them at different versions.
+
+For an authorization check followed by a write, race that write against
+revocation or narrowing. Count both successful controls and refused writes so
+a run in which nothing happened cannot pass as a security proof.
 
 Prefer a driver your repo already has. When none covers the path, drive it by
 hand and say so in the evidence, or add a driver if the path is one the repo
@@ -101,8 +114,10 @@ Match the evidence to the change and its user path. For documentation, review
 the instructions and check affected examples or links as appropriate; a prose
 edit does not by itself require a new runtime test. Record any remaining gap.
 
-Write it under a per-issue directory inside your build output (already ignored
-by version control, and per-issue so two agents do not overwrite each other).
+Keep it in a per-issue directory outside the checkout (for example,
+`/tmp/KEY-123`) or the location your repo names. Check repo rules before writing
+into generated directories; build output may be compiler-owned. Use separate
+paths so concurrent sessions do not overwrite each other.
 
 - **The real user path, not an internal setter.**
 - **The action and the resulting state**, not just the final screen.
@@ -126,6 +141,16 @@ the proof fails this stage even when the run passed.
 
 Clean up after failed attempts too. A stuck drive that leaves a server and a
 temp directory behind costs the next agent a confusing port collision.
+
+## Hand off a reviewable change
+
+Push the verified branch and open a PR using the repository's workflow. With
+GitHub, `lll issue pr KEY-123` opens it and records the reference; if the PR
+already exists, `lll issue ref KEY-123 gh#123` links it without opening another.
+Check each command's help for the installed client's syntax. Include the
+problem, resulting behavior, validation and any remaining gap in the PR.
+Record the PR link and evidence on the issue, then read `lll skill get merge-gate`.
+Opening a PR does not close the issue.
 
 ## What this skill is not
 
