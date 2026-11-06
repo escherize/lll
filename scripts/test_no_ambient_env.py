@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 WRITES = re.compile(r'\b(?:os|syscall)\.(Setenv|Unsetenv|Clearenv)\s*\(')
 READS = re.compile(r'\b(?:os|syscall)\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir)\s*\(')
-CHILD_ENV = re.compile(r'\.(Env)\s*=(?!=)')
+CHILD_ENV = re.compile(r'\.(Env)\s*=(?![=>])')
 # An aliased os or syscall import would hide every call above.
 ALIASED = re.compile(r'^\s*import\s+(\w+)\s+"(?:go:)?(os|syscall)"|^\s*(\w+)\s+"(os|syscall)"\s*$', re.M)
 
