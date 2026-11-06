@@ -1,0 +1,36 @@
+<figure class="guide-visual">
+  {% if include.guide.kind == 'record' %}
+  <div class="record-map">
+    <ul class="record-inputs" role="list">
+      {% for input in include.guide.inputs %}
+      <li><strong>{{ input.label | escape }}</strong><span>{{ input.detail | escape }}</span></li>
+      {% endfor %}
+    </ul>
+    <svg class="record-connector" viewBox="0 0 48 96" aria-hidden="true" focusable="false">
+      <path d="M0 24h12v48H0m12-24h32m-8-8 8 8-8 8" />
+    </svg>
+    <div class="record-result"><strong>{{ include.guide.result | escape }}</strong><span>{{ include.guide.detail | escape }}</span></div>
+  </div>
+  {% else %}
+  <ol class="guide-steps" role="list" style="--step-count: {{ include.guide.steps.size }}">
+    {% for step in include.guide.steps %}
+    <li>
+      <span class="step-number" aria-hidden="true">{{ forloop.index }}</span>
+      <strong>{{ step.label | escape }}</strong>
+      <span class="step-detail">{{ step.detail | escape }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  <figcaption>{{ include.guide.caption | escape }}</figcaption>
+</figure>
+<details class="page-map">
+  <summary>On this page</summary>
+  <nav aria-label="On this page">
+    <ul>
+      {% for section in include.guide.sections %}
+      <li><a href="#{{ section[1] | escape }}">{{ section[0] | escape }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+</details>
