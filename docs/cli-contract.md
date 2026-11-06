@@ -179,6 +179,20 @@ saved create does not depend on a second read. Older-server reads omit it.
 
 ### Other records
 
+`bot create --json` and `bot rotate --json` print one credential object:
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | bot member name |
+| `url` | string | server URL used for this invocation |
+| `token` | string | newly minted one-time credential |
+| `team` | string | explicit `--team` context, or `""`; not an access grant |
+
+JSON mode needs no configured team. `--env` and `--json` together exit 2
+before server or credential requests. Create still refuses an existing bot;
+only rotate invalidates its prior tokens. A failed credential write exits 1
+and names a recovery command without copying the token to stderr.
+
 | Record | Covered fields |
 |---|---|
 | comment | `id`, `issue`, `author`, `author_name`, `author_kind`, `server_record`, `agent`, `body`, `created`, `updated` |

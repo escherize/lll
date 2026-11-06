@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 WRITES = re.compile(r'\b(?:os|syscall)\.(Setenv|Unsetenv|Clearenv)\s*\(')
 READS = re.compile(r'\b(?:os|syscall)\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir)\s*\(')
-CHILD_ENV = re.compile(r'\.(Env)\s*=(?!=)')
+CHILD_ENV = re.compile(r'\.(Env)\s*=(?![=>])')
 # An aliased os or syscall import would hide every call above.
 ALIASED = re.compile(r'^\s*import\s+(\w+)\s+"(?:go:)?(os|syscall)"|^\s*(\w+)\s+"(os|syscall)"\s*$', re.M)
 
@@ -151,6 +151,8 @@ class NoAmbientEnvironment(unittest.TestCase):
         self.assertEqual(calls('src/x.lis', 'foo("http://h", os.Getenv("X"))\n'), [('os.Getenv', 'read')])
         self.assertEqual(calls('gopb/x.go', 'v := syscall.Getenv("X")\n'), [('syscall.Getenv', 'read')])
         self.assertEqual(calls('src/x.lis', 'cmd.Env = ["A=b"]\n'), [('.Env =', 'child env')])
+        self.assertEqual(violations('src/x.lis', 'match format { BotFormat.Env => (), _ => () }\n'), [])
+        self.assertEqual(violations('src/x.lis', 'if a.Env == b.Env { work() }\n'), [])
         self.assertEqual(violations('src/x.test.lis', 'cmd.Env = ["A=b"]\n'), [])
         self.assertEqual(calls('gopb/x.go', 'import (\n\tgoos "os"\n)\n'), [('aliased os', 'alias')])
         # The reader may read, and only inside read_env.

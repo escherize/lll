@@ -2,6 +2,22 @@ import "config"
 import "output"
 import "pb"
 
+#[test]
+fn declared_format_conflicts_refuse_during_parse_in_either_order() {
+  let spec = [
+    Flag { name: "--env", alias: "-e", .. },
+    Flag { name: "--json", excludes: ["--env"], conflict_message: "choose one format", .. },
+  ]
+  let assert Err(first) = parse(spec, ["--json", "-e"], 0, false, "test")
+  let assert Err(second) = parse(spec, ["-e", "--json"], 0, false, "test")
+  assert first.kind == pb.ErrorKind.Usage && second.kind == pb.ErrorKind.Usage
+  assert first.message == "choose one format" && second.message == first.message
+  assert parse(spec, ["--json"], 0, false, "test").is_ok()
+  // Existing specs leave the message empty and keep their own refusal.
+  let legacy = [Flag { name: "--env", .. }, Flag { name: "--json", excludes: ["--env"], .. }]
+  assert parse(legacy, ["--env", "--json"], 0, false, "test").is_ok()
+}
+
 /// A client from literal settings (LLL-486): dispatch hands it to the verb.
 fn test_ctx() -> pb.Client {
   pb.Client.new(config.given(config.Config { .. }, config.Sources { .. }, config.Env { .. }))
