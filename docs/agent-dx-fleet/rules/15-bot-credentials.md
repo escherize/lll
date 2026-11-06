@@ -34,9 +34,10 @@ Exact forms, so no token is ever displayed or typed:
 - Save exports with stdout ONLY (never `2>&1`, never `| tee`):
   `./lll bot create bot-helper-NN --env > helper-NN.env` and
   `./lll bot rotate bot-helper-NN --env > helper-NN-rotated.env`.
-- Run one command as the helper with a tiny script, for example
-  `as-helper.sh`: `set -a; . "$1"; set +a; exec ./lll whoami`, then
-  `sh as-helper.sh ./helper-NN.env`.
+- Run `./fleet-as-helper helper-NN.env` (or `helper-NN-rotated.env`). This
+  supplied helper reads only the token export, runs `./lll whoami` through
+  the audited wrapper and preserves its exit code. It never evaluates the
+  file as a shell script or prints the token.
 - If you lose or break an env file, recover with `bot rotate ... --env >`
   into it. Never create a second bot, never delete one, and never type a
   token into a file or command.
@@ -57,10 +58,10 @@ In this case you also act as a second identity. The wrapper honours two
 settings you give it for one command, and always uses conn.txt's server:
 `LLL_TOKEN` (a token, read from a file you saved, never typed) and
 `LLL_CONFIG_HOME` (a directory inside your worker directory, holding that
-identity's own saved login). Your sandbox may refuse `export VAR=$(...)` or
-`VAR=$(...) cmd` at the prompt; a tiny script that sets the variable and runs
-`./lll` is the way around that. Files that hold tokens or passwords stay in
-your directory; never print them.
+identity's own saved login). Use the supplied `fleet-as-helper` for identity
+checks; you do not need to construct a shell credential pipeline or source
+the exports yourself. Files that hold tokens or passwords stay in your
+directory; never print them.
 
 This harness allows environment variables scoped to child processes; older
 fleet lessons about refusing HOME/source are historical, not lll failures.
