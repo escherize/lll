@@ -109,6 +109,15 @@ fn claim_json(held: models.Claim) -> ClaimJson {
   }
 }
 
+/// The same comment shape in an issue view and a bulk comment list.
+fn named_comment_json(comment: models.Comment) -> Result<Map<string, json.RawMessage>, pb.CliError> {
+  let mut fields = Map.new<string, json.RawMessage>()
+  let raw = encode_json(comment, "comment")?
+  json.Unmarshal(raw, &fields).map_err(|e| pb.failed(f"decoding comment: {e}"))?
+  fields["author_name"] = encode_json(display.member_name(comment.author, comment.expand.author.name, ""), "comment author name")?
+  Ok(fields)
+}
+
 /// One issue record as every issue --json prints it (LLL-645, D2): the
 /// server's record with `key` ("ENG-12") and `claim` (null when unclaimed)
 /// added, and timestamps in RFC3339. `record` must expand team.

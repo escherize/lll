@@ -41,9 +41,13 @@ fn unknown_command_names_the_typed_verb_for_issue_verbs() {
   // A verb that is really a positional rides along too: 'lll comment
   // ENG-1 "hi"' points at the same place with the key named.
   assert refusal(["lll", "comment", "ENG-1"]).contains("'comment ENG-1'")
-  // A flag-like second word is not a verb; the message quotes the noun alone.
-  assert refusal(["lll", "comment", "-b"]).contains("'comment'")
-  assert refusal(["lll", "comment"]).contains("'comment'")
+  // Comment is now a read noun. A bare noun shows its page; a misplaced
+  // write flag points at that page, which explains the issue-write form.
+  assert refusal(["lll", "comment", "-b"]).contains("unknown flag")
+  assert refusal(["lll", "comment", "-b"]).contains("lll comment --help")
+  assert help_page(["lll", "comment"]).contains("lll comment list")
+  assert help_page(["lll", "comment"]).contains("lll issue comment KEY-123")
+  assert help_page(["lll", "claim"]).contains("lll issue claim KEY-123")
 }
 
 #[test]
@@ -374,6 +378,9 @@ fn a_misplaced_comment_add_names_key_and_text() {
   assert refusal(["lll", "comment", "add", "DEMO-4", "hi"]).contains("'lll issue comment DEMO-4 \"text\"'")
   assert refusal(["lll", "comment", "edit", "DEMO-4", "2"]).contains("'lll issue comment edit DEMO-4 ...' (see 'lll issue comment edit -h')")
   assert refusal(["lll", "comment", "frob", "DEMO-4"]).contains("'lll issue comment ...'")
+  assert refusal(["lll", "claim", "DEMO-4"]).contains("'lll issue claim DEMO-4'")
+  assert runs(["lll", "comment", "list", "--project", "Alpha", "--since", "opaque", "--json"])
+  assert runs(["lll", "claim", "list", "--json"])
 }
 
 /// LLL-702: a verb's example is the last thing its help prints, under

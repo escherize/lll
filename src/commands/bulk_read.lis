@@ -1,0 +1,313 @@
+import "go:crypto/sha256"
+import "go:encoding/base64"
+import "go:encoding/hex"
+import "go:encoding/json"
+import "go:net/url"
+import "go:strings"
+
+import "display"
+import "flags"
+import "models"
+import "output"
+import "pb"
+import "query"
+import "records"
+
+enum BulkRecords {
+  Comments,
+  Claims,
+}
+
+#[json]
+struct BulkCursor { version: int, query: string, after: string }
+
+#[json]
+struct BulkPage {
+  items: Slice<json.RawMessage>,
+  page: int,
+  #[json("perPage")]
+  per_page: int,
+  #[json("totalItems")]
+  total_items: int,
+  #[json("totalPages")]
+  total_pages: int,
+}
+
+#[json]
+struct BulkEnvelope {
+  items: Slice<Map<string, json.RawMessage>>,
+  page: int,
+  #[json("perPage")]
+  per_page: int,
+  #[json("totalItems")]
+  total_items: int,
+  #[json("totalPages")]
+  total_pages: int,
+  next_cursor: string,
+}
+
+#[json]
+struct BulkIssueNumber { number: int }
+
+#[json]
+struct BulkIssueExpansion { issue: BulkIssueNumber }
+
+#[json]
+struct BulkReference { id: string, issue: string, expand: BulkIssueExpansion }
+
+pub fn bulk_comment_commands() -> Slice<flags.Command> {
+  [bulk_list_command(BulkRecords.Comments)]
+}
+
+pub fn bulk_claim_commands() -> Slice<flags.Command> {
+  [bulk_list_command(BulkRecords.Claims)]
+}
+
+fn bulk_noun(kind: BulkRecords) -> string {
+  match kind {
+    BulkRecords.Comments => "comment",
+    BulkRecords.Claims => "claim",
+  }
+}
+
+fn bulk_list_command(kind: BulkRecords) -> flags.Command {
+  let noun = bulk_noun(kind)
+  flags.Command {
+    name: "list",
+    access: flags.Access.Read,
+    summary: f"read this team's current {noun}s in bulk, with a continuation cursor",
+    page: f"lll {noun} list - read current {noun}s across this team's issues
+
+Usage:
+  lll {noun} list [--project NAME] [--since CURSOR] [--limit N] [--json] [--team KEY]
+
+Reads current records, ordered by immutable record id. Pass next_cursor to
+--since with the same server, team and project to continue; an empty cursor
+means the scan is complete. --since takes this command's cursor, not a date.
+
+This is not an atomic snapshot or a change feed. Edits are read as they are
+when each page is fetched; deleted rows disappear. New or newly matching ids
+behind the cursor appear on a fresh scan. Use 'lll activity' for ordered
+write history.
+
+Flags:
+  --project NAME  only records on issues currently in this project
+  --since CURSOR  continue a previous page with the same query
+  --limit N       page size (default 100; 1-500)
+  --json          the list envelope plus next_cursor (empty at the end)
+  --team KEY      team for this invocation
+
+The envelope's totals count the remaining query after the cursor, not a
+fixed snapshot. Keep the original filters on every continuation.",
+    spec: flags.with_team([
+      flags.Flag {
+        name: "--project",
+        value: true,
+        hint: "NAME",
+        help: "only records on issues in this project",
+        ..,
+      },
+      flags.Flag {
+        name: "--since",
+        value: true,
+        hint: "CURSOR",
+        help: "continue with next_cursor from the same query (not a date)",
+        ..,
+      },
+      flags.Flag {
+        name: "--limit",
+        value: true,
+        hint: "N",
+        help: "page size (default 100; 1-500)",
+        ..,
+      },
+      flags.Flag {
+        name: "--json",
+        help: "the list envelope plus next_cursor",
+        ..,
+      },
+    ]),
+    run: |input| run_bulk_list(input, kind),
+    ..,
+  }
+}
+
+fn bulk_query_key(
+  collection: string,
+  base: string,
+  team: string,
+  project: string,
+) -> string {
+  let sum = sha256.Sum256(
+    f"{collection}\n{strings.TrimRight(base, "/")}\n{team}\n{project}".bytes(),
+  )
+  hex.EncodeToString(sum.to_slice())
+}
+
+fn bulk_cursor(key: string, after: string) -> Result<string, pb.CliError> {
+  let encoded = encode_json(
+    BulkCursor { version: 1, query: key, after },
+    "continuation cursor",
+  )?
+  Ok(f"c1_{base64.RawURLEncoding.EncodeToString(encoded)}")
+}
+
+fn bulk_after(raw: string, key: string) -> Result<string, pb.CliError> {
+  if raw == "" { return Ok("") }
+  let bad = "invalid --since cursor; use next_cursor from this list, or restart without --since"
+  if raw.length() > 4096 || !raw.starts_with("c1_") {
+    return Err(flags.usage_error(bad))
+  }
+  let Ok(decoded) = base64.RawURLEncoding.DecodeString(strings.TrimPrefix(
+    raw,
+    "c1_",
+  )) else {
+    return Err(flags.usage_error(bad))
+  }
+  let mut cursor = BulkCursor { .. }
+  let decoded_ok = json.Unmarshal(decoded, &cursor).is_ok()
+  if !decoded_ok || cursor.version != 1 || cursor.after == "" || cursor.after.length() > 255 {
+    return Err(flags.usage_error(bad))
+  }
+  if cursor.query != key {
+    return Err(flags.usage_error(
+      "this cursor belongs to a different list, server, team or project; restart without --since",
+    ))
+  }
+  Ok(cursor.after)
+}
+
+fn run_bulk_list(
+  input: flags.CommandInput,
+  kind: BulkRecords,
+) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let p = input.parsed
+  let noun = bulk_noun(kind)
+  let collection = f"{noun}s"
+  let limit = whole_number(p.one("--limit"), 100, "--limit")?
+  if limit < 1 || limit > 500 {
+    return Err(flags.usage_error("--limit must be between 1 and 500"))
+  }
+  if p.given("--since") && p.one("--since") == "" {
+    return Err(flags.usage_error(
+      "--since needs a non-empty continuation cursor",
+    ))
+  }
+  let Some(team) = records.configured_team(ctx)? else {
+    return Err(records.no_team())
+  }
+  let project = if p.given("--project") {
+    records.resolve_project(ctx, team.id, p.one("--project"))?.id.string()
+  } else {
+    ""
+  }
+  let base = ctx.url()?
+  let key = bulk_query_key(collection, base, team.id.string(), project)
+  let after = bulk_after(p.one("--since"), key)?
+  let mut clauses = [f"issue.team = {query.quote(team.id.string())}"]
+  if project != "" {
+    clauses = clauses.append(f"issue.project = {query.quote(project)}")
+  }
+  if after != "" { clauses = clauses.append(f"id > {query.quote(after)}") }
+  let filter = url.QueryEscape(strings.Join(clauses, " && "))
+  let (expand, selected) = match kind {
+    BulkRecords.Comments => (
+      "issue,author",
+      "id,issue,author,author_kind,server_record,agent,body,created,updated,expand.issue.number,expand.author.name",
+    ),
+    BulkRecords.Claims => (
+      "issue,member",
+      "id,issue,member,agent,created,updated,expand.issue.number,expand.member.name",
+    ),
+  }
+  // A count query can observe a different state than the page query. One
+  // lookahead row, fetched with this page, decides continuation instead.
+  let requested = limit + 1
+  let path = f"/api/collections/{collection}/records?sort=id&perPage={requested}&filter={filter}&expand={expand}&fields={selected}"
+  let mut page = BulkPage { .. }
+  pb.fetch(ctx, path, f"{noun} list", &page)?
+  if page.page != 1 || page.per_page < 1 || page.total_items < 0 || page.total_pages < 0 {
+    return Err(pb.failed(f"the server returned an invalid {noun} list page"))
+  }
+  if page.per_page < requested {
+    return Err(pb.failed(
+      "the server cannot provide this bulk page's lookahead; lower --limit",
+    ))
+  }
+  let more = page.items.length() > limit
+  let batch = if more { page.items[..limit] } else { page.items }
+  let mut items: Slice<Map<string, json.RawMessage>> = []
+  let mut last = after
+  let mut out = output.none()
+  for raw in batch {
+    let mut reference = BulkReference { .. }
+    json
+      .Unmarshal(raw, &reference)
+      .map_err(|e| pb.failed(f"decoding {noun}: {e}"))?
+    if reference.id == "" || reference.issue == "" || reference.expand.issue.number < 1 || reference.id <= last {
+      return Err(pb.failed(
+        f"the server returned an invalid or unordered {noun} list record",
+      ))
+    }
+    last = reference.id
+    let issue_key = f"{team.key}-{reference.expand.issue.number}"
+    let mut fields = Map.new<string, json.RawMessage>()
+    match kind {
+      BulkRecords.Comments => {
+        let mut comment = models.Comment { .. }
+        json
+          .Unmarshal(raw, &comment)
+          .map_err(|e| pb.failed(f"decoding comment: {e}"))?
+        fields = named_comment_json(comment)?.clone()
+        let author = display.member_name(
+          comment.author,
+          comment.expand.author.name,
+          "",
+        )
+        out = out.line(
+          f"{reference.id}\t{issue_key}\t{display.table_cell(author)}\t{display.table_cell(comment.body)}",
+        )
+      },
+      BulkRecords.Claims => {
+        let mut held = models.Claim { .. }
+        json
+          .Unmarshal(raw, &held)
+          .map_err(|e| pb.failed(f"decoding claim: {e}"))?
+        if held.member.string() == "" {
+          return Err(pb.failed("the server returned a claim without its member"))
+        }
+        let encoded = encode_json(claim_json(held), "claim")?
+        json
+          .Unmarshal(encoded, &fields)
+          .map_err(|e| pb.failed(f"decoding claim: {e}"))?
+        out = out.line(
+          f"{reference.id}\t{issue_key}\t{display.table_cell(held.expand.member.name)}\t{display.table_cell(held.agent)}",
+        )
+      },
+    }
+    fields["issue"] = encode_json(reference.issue, "issue id")?
+    fields["key"] = encode_json(issue_key, "issue key")?
+    items = items.append(fields)
+  }
+  let next = if more { bulk_cursor(key, last)? } else { "" }
+  if p.given("--json") {
+    let at = page_of_total(1, limit, page.total_items)
+    let envelope = BulkEnvelope {
+      items,
+      page: at.page,
+      per_page: at.per_page,
+      total_items: at.total_items,
+      total_pages: at.total_pages,
+      next_cursor: next,
+    }
+    return Ok(json_body(encode_json(envelope, f"{noun} list")? as string))
+  }
+  if page.items.is_empty() { return Ok(empty_list(collection)) }
+  if next != "" {
+    out = out.notice(
+      f"more {collection}; continue with the same filters and --since {next}",
+    )
+  }
+  Ok(out)
+}
