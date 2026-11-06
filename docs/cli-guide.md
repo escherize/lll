@@ -1,7 +1,7 @@
 # Using the lll CLI
 
 The CLI and [web board](#web-board) work on the same issues. Start with
-[the README quickstart](../README.md#quickstart) or [join an existing board](setup.md).
+[the README quickstart](https://github.com/escherize/lll#quickstart) or [join an existing board](setup.md).
 Every command has `--help`; `lll --help` lists the available commands.
 
 ## A day-to-day workflow

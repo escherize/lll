@@ -1,0 +1,34 @@
+- title: Get started
+  pages:
+    - title: Documentation
+      url: /docs/
+    - title: Set up a board
+      url: /setup.html
+    - title: Work with agents
+      url: /working-with-agents.html
+    - title: Invite your team
+      url: /inviting.html
+- title: Use lll
+  pages:
+    - title: CLI guide
+      url: /cli-guide.html
+    - title: CLI contract
+      url: /cli-contract.html
+    - title: Export to Markdown
+      url: /export-mirror.html
+    - title: API reference
+      url: /api.html
+- title: Run and maintain
+  pages:
+    - title: Upgrade safely
+      url: /upgrading.html
+    - title: Deploy a server
+      url: /ci-deployment.html
+    - title: Backup and recovery
+      url: /hosted-recovery.html
+    - title: Development
+      url: /development.html
+    - title: Release checklist
+      url: /release-checklist.html
+    - title: Agent DX fleet
+      url: /agent-dx-fleet/how-to-run.html
