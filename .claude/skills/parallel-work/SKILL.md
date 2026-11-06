@@ -164,10 +164,10 @@ Without it they mint members on the real board. That is not hypothetical:
 68 of 71 members there are synthetic identities left behind by ephemeral runs
 (LLL-374), and members cannot be deleted without the superuser.
 
-The warning is about throwaway runs. A durable member for each long-lived
-worker in a fleet is fine, and it is the only way the claim locks between
-workers: agents sharing one member token share every claim (see the claim
-section of [lll](../lll/SKILL.md)).
+The warning is about throwaway runs. Separate durable bot identities for
+long-lived workers are fine; sessions sharing a token use the labels described
+above. Do not mint a member for every worktree merely to make claims exclude
+other sessions (see the claim section of [lll](../lll/SKILL.md)).
 
 ## Finishing
 
