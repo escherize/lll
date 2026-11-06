@@ -223,13 +223,26 @@ value is in the pattern being recognisable:
 `--label`, `--project`, `--search`, `--sort`, `--limit`, and `--json`. Other
 read commands expose their supported filters in `--help`.
 
+**Keep containment separate from blockers.** Create a slice with
+`lll issue create -t "Slice" --parent KEY-12`, or reparent one with
+`lll issue update KEY-13 --parent KEY-12` (`--parent none` detaches it).
+`lll issue list --parent KEY-12` lists direct children; `--under KEY-12`
+includes the parent and every descendant. A parent link does not block work.
+Progress counts direct children in done or cancelled. Closing with open descendants needs
+explicit force and leaves those children open; progress is not verification.
+
 **Choose the events you need.** Plain `lll watch --json` reports issue
 changes. `lll watch --activity --json` also reports comment and claim changes
-for issues matching the selected team, project and filters. A comment or claim
-renewal need not change its parent issue. For a receiver, use
+for issues matching the selected team, project and filters. Comment edits and
+claim renewal need not advance the issue's `updated` timestamp. For a receiver, use
 `lll webhook add URL --activity`; existing registrations remain issue-only.
 Webhooks retain their shared-secret header and bounded retries, not a durable
 queue. Consumers should ignore unknown topics, actions and additional fields.
+
+Issue-list JSON includes `claim` and `last_activity` for checks without one
+read per issue. `last_activity` includes comment and claim writes, renewal and
+expiry; it does not change what `issue list --since` catches. Older versions
+may omit it: missing means unknown, not quiet.
 
 **Read actor and holder separately.** Activity gives the issue `key` and
 `author`, `author_name`, `author_kind`, `agent`. A forced claim release credits
