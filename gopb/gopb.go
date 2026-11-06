@@ -143,6 +143,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	})
 	// Last, so the check and the write share one transaction with nothing
 	// bound after it.
+	registerIssueTreeGuard(app)
 	registerTeamRefGuard(app)
 
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{

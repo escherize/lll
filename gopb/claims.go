@@ -262,6 +262,7 @@ func closeIssue(app core.App, issueID, expectedClaimID string, by releaser, keep
 				}
 			}
 		}
+		issue.Set(treeForceCloseKey, by.force)
 		issue.Set("state", "done")
 		return tx.Save(issue)
 	})

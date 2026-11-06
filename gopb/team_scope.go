@@ -441,7 +441,7 @@ func (a access) covers(b access) bool {
 // Relations a scoped member could point across teams, by collection: field ->
 // the collection it relates to. Every target carries its own team.
 var scopedRefs = map[string]map[string]string{
-	"issues":   {"project": "projects", "labels": "labels", "blocked_by": "issues"},
+	"issues":   {"project": "projects", "labels": "labels", "blocked_by": "issues", "parent": "issues"},
 	"docs":     {"issues": "issues"},
 	"webhooks": {"project": "projects"},
 }
@@ -489,6 +489,15 @@ func checkNewRefs(app core.App, auth *core.Record, record *core.Record) error {
 	original := record.Original()
 	for field, target := range scopedRefs[record.Collection().Name] {
 		ids := added(record.GetStringSlice(field), original.GetStringSlice(field))
+		// New containment references must not distinguish a missing parent
+		// from one outside the caller's visibility through the wire error.
+		if record.Collection().Name == "issues" && field == "parent" {
+			for _, id := range ids {
+				if _, err := app.FindRecordById(target, id); err != nil {
+					return router.NewBadRequestError("Failed to find all relation records with the provided ids.", nil)
+				}
+			}
+		}
 		if err := refsInScope(app, auth, target, ids); err != nil {
 			return err
 		}

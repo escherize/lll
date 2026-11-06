@@ -1,6 +1,10 @@
 package gopb
 
 import (
+	"fmt"
+	"github.com/pocketbase/pocketbase/apis"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -120,5 +124,76 @@ func TestIssueTreeConcurrentReparentsCannotFormCycle(t *testing.T) {
 	}
 	if accepted != 1 {
 		t.Fatalf("concurrent reciprocal parents: %d writes accepted, want one", accepted)
+	}
+}
+
+func TestIssueTreeParentHiddenAndMissingRefuseIdentically(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			f := newCreatorFixture(t)
+			issues := core.NewBaseCollection("issues")
+			issues.Fields.Add(&core.TextField{Name: "title"}, &core.TextField{Name: "team"})
+			rule := `@request.auth.id != ""`
+			issues.CreateRule, issues.UpdateRule, issues.ViewRule = &rule, &rule, &rule
+			if err := f.app.Save(issues); err != nil {
+				t.Fatal(err)
+			}
+			issues.Fields.Add(&core.RelationField{Name: "parent", CollectionId: issues.Id, MaxSelect: 1})
+			if err := f.app.Save(issues); err != nil {
+				t.Fatal(err)
+			}
+			makeIssue := func(team, title string) *core.Record {
+				r := core.NewRecord(issues)
+				r.Set("team", team)
+				r.Set("title", title)
+				if err := f.app.Save(r); err != nil {
+					t.Fatal(err)
+				}
+				return r
+			}
+			hidden := makeIssue(f.beta, "hidden title")
+			valid := makeIssue(f.alpha, "valid parent")
+			child := makeIssue(f.alpha, "child")
+			registerScopedRefGuard(f.app)
+			registerIssueTreeGuard(f.app)
+			token, err := f.coord.NewAuthToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes, err := apis.NewRouter(f.app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mux, err := routes.BuildMux()
+			if err != nil {
+				t.Fatal(err)
+			}
+			send := func(parent string) (int, string) {
+				path := "/api/collections/issues/records"
+				if method == http.MethodPatch {
+					path += "/" + child.Id
+				}
+				req := httptest.NewRequest(method, path, strings.NewReader(fmt.Sprintf(`{"title":"probe","team":%q,"parent":%q}`, f.alpha, parent)))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+token)
+				out := httptest.NewRecorder()
+				mux.ServeHTTP(out, req)
+				return out.Code, out.Body.String()
+			}
+			hiddenCode, hiddenBody := send(hidden.Id)
+			missingCode, missingBody := send("xxxxxxxxxxxxxxx")
+			if hiddenCode != 400 || missingCode != 400 || hiddenBody != missingBody {
+				t.Fatalf("hidden %d %s; missing %d %s", hiddenCode, hiddenBody, missingCode, missingBody)
+			}
+			if strings.Contains(hiddenBody, hidden.Id) || strings.Contains(hiddenBody, "hidden title") {
+				t.Fatal("hidden parent disclosed")
+			}
+			if code, body := send(valid.Id); code != 200 {
+				t.Fatalf("valid parent refused: %d %s", code, body)
+			}
+			if code, body := send(""); code != 200 {
+				t.Fatalf("parent clear refused: %d %s", code, body)
+			}
+		})
 	}
 }
