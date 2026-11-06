@@ -1089,7 +1089,8 @@ def seed_18(board):
 
 def judge_18(board, changes, after):
     (a, b), handshake = board.seats, board.fixtures['issue']
-    errors = untouched(changes, added={'issues': 1, 'comments': 2})
+    errors = untouched(changes, added={'issues': 1, 'comments': 2},
+                       changed={'issues': {handshake: set()}})
     created = one_added(changes, 'issues')
     if not created:
         return errors
