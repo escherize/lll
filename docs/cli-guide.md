@@ -34,7 +34,31 @@ lll watch --state in-review   # live NDJSON-able event stream for a query
 lll issue watch APP-2        # one issue + its comments, until Ctrl-C
 ```
 
-More nouns and helpers:
+## Break work into subtasks
+
+An issue can have one parent and children of its own. For example:
+
+```text
+APP-1 (parent: 1/2 done)
+├─ APP-2 (done)
+└─ APP-3 (todo)
+```
+
+```sh
+lll issue update APP-2 --parent APP-1
+lll issue create -t "Check migration" --parent APP-1
+lll issue list --parent APP-1   # direct children
+lll issue list --under APP-1    # parent plus every descendant
+lll issue view APP-1           # child states and direct progress
+lll issue update APP-2 --parent none
+```
+
+Trees stay within one team and cannot contain cycles. Moving a child moves
+its subtree; deleting a parent detaches its children. Closing with open
+descendants exits 4 unless you explicitly use `--force`, which leaves those
+descendants unchanged. Projects remain a separate way to group work.
+
+## More commands
 
 ```sh
 lll team list

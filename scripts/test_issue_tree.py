@@ -6,6 +6,9 @@ import http.server
 import os
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -96,8 +99,8 @@ with ThreadPoolExecutor(max_workers=2) as pool:
     codes = list(pool.map(attach, ((x,y), (y,x))))
 assert sorted(codes) == [200,400], codes
 # The user's CLI paths use the same relation and composite write boundary.
-def cli(*args, success=True):
-    result = subprocess.run([binary,*args], env=dict(os.environ,LLL_URL=api,LLL_TEAM='TREEA'),
+def cli(*args, success=True, team='TREEA'):
+    result = subprocess.run([binary,*args], env=dict(os.environ,LLL_URL=api,LLL_TEAM=team),
                             capture_output=True,text=True,timeout=30)
     assert (result.returncode==0)==success,(result.args,result.returncode,result.stdout,result.stderr)
     return result
@@ -191,6 +194,7 @@ class NoParents(http.server.BaseHTTPRequestHandler):
         type(self).writes += 1
         self.send_error(500,'unexpected write')
     do_PATCH = do_POST
+    do_DELETE = do_POST
     def log_message(self,*args):
         pass
 
@@ -209,6 +213,39 @@ try:
         ('issue','update',child_key,'--parent','none'),
     ):
         refused = subprocess.run([binary,*args],capture_output=True,text=True,timeout=30,
+            env=dict(os.environ,LLL_URL=f'http://127.0.0.1:{proxy.server_port}',LLL_TEAM='TREEA'))
+        assert refused.returncode!=0 and 'does not support issue parents' in refused.stderr,refused.stderr
+    with tempfile.TemporaryDirectory(prefix='lll-tree-mirror-') as directory:
+        mirror = Path(directory)
+        cli('export',directory)
+        source = json.loads(cli('issue','list','--json').stdout)['items']
+        cli('team','create','--key','TREECOPY','-n','Restored issue trees')
+        restored = cli('import','dir',directory,team='TREECOPY')
+        assert 'parent links' in restored.stdout
+        copied = json.loads(cli('issue','list','--json',team='TREECOPY').stdout)['items']
+        assert len(source)==len(copied)
+        source_by_id = {r['id']:r for r in source}
+        copied_by_title = {r['title']:r for r in copied}
+        assert len(copied_by_title)==len(copied)
+        for original in source:
+            back = copied_by_title[original['title']]
+            assert back['state']==original['state']
+            expected = copied_by_title[source_by_id[original['parent']]['title']]['id'] if original['parent'] else ''
+            assert back['parent']==expected,(original['title'],back['parent'],expected)
+        # Corrupt containment refuses before --replace deletes the target.
+        path = sorted(p for p in (mirror/'issues').glob('*.md') if not p.name.endswith('.comments.md'))[0]
+        saved = path.read_text()
+        key = re.search(r'^key: (.+)$',saved,re.M).group(1)
+        before = cli('issue','list','--json',team='TREECOPY').stdout
+        for parent in (key,'TREEA-999999999'):
+            path.write_text(re.sub(r'^parent:.*$',f'parent: {parent}',saved,flags=re.M))
+            failure = cli('import','dir',directory,'--replace',team='TREECOPY',success=False)
+            assert 'nothing was changed' in failure.stderr
+            assert cli('issue','list','--json',team='TREECOPY').stdout==before
+        path.write_text(saved)
+        # Equal-version missing support must refuse even a destructive restore
+        # before any DELETE/POST/PATCH can reach this proxy.
+        refused = subprocess.run([binary,'import','dir',directory,'--replace'],capture_output=True,text=True,timeout=30,
             env=dict(os.environ,LLL_URL=f'http://127.0.0.1:{proxy.server_port}',LLL_TEAM='TREEA'))
         assert refused.returncode!=0 and 'does not support issue parents' in refused.stderr,refused.stderr
     assert NoParents.writes==0,NoParents.writes
