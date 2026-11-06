@@ -48,20 +48,45 @@ fn projects_page(
 }
 
 fn projects_vm(ctx: pb.Client, team_id: models.TeamId, team_key: string) -> Result<ProjectsVM, pb.CliError> {
-  let projects = records.fetch_projects(ctx, query.TeamScope.Only(team_id))?
+  let fetched = records.fetch_projects(ctx, query.TeamScope.Only(team_id))?
   // LLL-426: into THIS team's table, not the configured team's.
   let base = issues_base(team_key)
-  Ok(ProjectsVM {
-    projects: projects.map(|p| ProjectVM {
-      name: p.name,
-      description: snippet(p.description),
-      status: p.status,
-      status_label: state_label(p.status),
-      tone: project_tone(p.status),
-      count: project_count(ctx, team_id, p.id),
-      href: f"{base}?project={url.QueryEscape(p.name)}",
-    }),
+  let projects = fetched.map(|p| ProjectVM {
+    name: p.name,
+    description: snippet(p.description),
+    status: p.status,
+    status_label: state_label(p.status),
+    tone: project_tone(p.status),
+    count: project_count(ctx, team_id, p.id),
+    href: f"{base}?project={url.QueryEscape(p.name)}",
   })
+  Ok(ProjectsVM {
+    projects,
+    groups: project_groups(projects),
+    // A team rename or an alias route must not reset its browser preference.
+    preference_key: f"lll.project-groups.{team_id}",
+  })
+}
+
+fn project_groups(projects: Slice<ProjectVM>) -> Slice<ProjectGroupVM> {
+  let mut statuses = records.project_statuses()
+  // A newer server may return a status this client does not know yet.
+  // Keep those projects visible after the known lifecycle, never drop them.
+  for project in projects {
+    if !statuses.contains(project.status) { statuses = statuses.append(project.status) }
+  }
+  let mut groups: Slice<ProjectGroupVM> = []
+  for status in statuses {
+    let rows = projects.filter(|p| p.status == status)
+    if rows.is_empty() { continue }
+    groups = groups.append(ProjectGroupVM {
+      status,
+      label: rows[0].status_label,
+      tone: rows[0].tone,
+      projects: rows,
+    })
+  }
+  groups
 }
 
 /// The state hue a project status borrows for its dot. It reuses the six

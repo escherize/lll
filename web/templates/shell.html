@@ -209,8 +209,14 @@
      mechanism. Auth is deferred (task-32), so a view is workspace-wide and
      the subtitle says so, exactly as favorites does. */}}
 {{define "rail-views"}}<div id="rail-views" class="rail-group">
-<h2>Saved views</h2>
+<h2 id="rail-views-title" tabindex="-1">Saved views</h2>
 <p class="rg-note">Shared by everyone here</p>
-{{range .}}<a href="{{.Href}}" title="{{.Name}}"><svg width="14" height="14"><use href="#ic-board"/></svg> <span class="rg-title">{{.Name}}</span></a>
-{{else}}<p class="rg-empty">Use the board's "Save view" to pin a filtered board here for the whole workspace.</p>
-{{end}}</div>{{end}}
+<p id="rail-views-flash" class="flash" role="status" aria-atomic="true" hidden></p>
+{{range .}}<div id="saved-view-{{.Id}}" class="rv-row">
+<a href="{{.Href}}" title="{{.Name}}"><svg width="14" height="14" aria-hidden="true"><use href="#ic-board"/></svg> <span class="rg-title">{{.Name}}</span></a>
+<form method="post" action="/views/delete" data-delete-view="{{.Name}}">
+<input type="hidden" name="id" value="{{.Id}}">
+<button type="submit" class="rv-delete" aria-label="Delete saved view {{.Name}}" title="Delete saved view {{.Name}}"><svg width="11.2" height="11.2" viewBox="0 0 14 14" aria-hidden="true"><use href="#ic-close"/></svg></button>
+</form></div>
+{{end}}<p class="rg-empty"{{if .}} hidden{{end}}>Use the board's "Save view" to pin a filtered board here for the whole workspace.</p>
+</div>{{end}}

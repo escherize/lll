@@ -62,7 +62,7 @@ fn member_viewer_writes_only_when_read_write() {
     assert route_kind(scoped_route("POST", path, false)) == "closed"
   }
   // Workspace-wide rows and settings stay closed even to a writer.
-  for path in ["/favorite", "/views/save", "/settings/label", "/t/AAA/settings/label",
+  for path in ["/favorite", "/views/save", "/views/delete", "/settings/label", "/t/AAA/settings/label",
                "/settings/access/token", "/settings/access/member", "/settings/teams/archive"] {
     assert route_kind(scoped_route("POST", path, true)) == "closed"
   }

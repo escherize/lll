@@ -5,11 +5,9 @@
      only place a project was ever shown. A relation nobody can see is worse
      than no relation: it accumulates data no one can check.
 
-     No page-specific JavaScript and no /events connection, as with /issues
-     and /settings have none: the bridge broadcasts ONE unfiltered #board
-     fragment to every board-scoped client, so a page that subscribed would be
-     morphed into the board. A project's name, status and issue count do not
-     move often enough to pay for a second SSE scope.
+     No /events connection: project groups are rendered by the server and
+     native details/summary controls work without JavaScript. Only the local
+     collapse preference needs page-specific JavaScript.
 
      Every row links into /issues?project=NAME, so the count is the thing you
      click. The list answers "what is there" and hands the drilldown to the
@@ -24,6 +22,7 @@
 <meta charset="utf-8">
 <title>{{template "team-title-prefix" .Rail}}projects</title>
 <link rel="stylesheet" href="/static/theme.css">
+<script src="/static/projects.js" defer></script>
 {{template "accent-head" .Rail}}
 </head>
 <body>
@@ -48,12 +47,15 @@
      The status dot borrows an --st-* hue rather than minting five project
      colours: a project lifecycle is the issue lifecycle at a coarser grain,
      and DESIGN.md rations colour. See project_tone in serve.lis. */}}
-{{define "projects-list"}}<div id="projects" class="pj-body">
+{{define "projects-list"}}<div id="projects" class="pj-body" data-project-groups-key="{{.PreferenceKey}}">
+<p id="pj-preference-error" class="pj-empty" role="status" hidden></p>
+{{range .Groups}}<details class="pj-group" data-project-status="{{.Status}}" open>
+<summary class="pj-group-toggle"><svg class="pj-chevron" width="14" height="14" aria-hidden="true"><use href="#ic-sort"/></svg><span class="pj-dot" style="background:var(--st-{{.Tone}})"></span><span class="pj-group-title">{{.Label}}</span><span class="pj-count">{{len .Projects}} project{{if ne (len .Projects) 1}}s{{end}}</span></summary>
 {{range .Projects}}<a class="pj-row" href="{{.Href}}" title="Show the issues in {{.Name}}">
 <span class="pj-dot" style="background:var(--st-{{.Tone}})"></span>
 <span class="pj-main"><span class="pj-name">{{.Name}}</span>{{if .Description}}<span class="pj-desc">{{.Description}}</span>{{end}}</span>
-<span class="pj-status">{{.StatusLabel}}</span>
 <span class="pj-n">{{.Count}} issue{{if ne .Count 1}}s{{end}}</span>
-</a>
+</a>{{end}}
+</details>
 {{else}}<p class="pj-empty">No projects yet. Add one under Projects in <a class="prose-link" href="settings">Settings</a>, or run <code>lll project create -n "name"</code>.</p>
 {{end}}</div>{{end}}

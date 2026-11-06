@@ -10,6 +10,32 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 - Fleet wrappers leave the agent label unset instead of attributing every
   worker to Codex, and still discard inherited controller labels (LLL-727).
+
+- The DX fleet controller refuses a second live case with an error reply,
+  preserving the active case and its audit evidence instead of exiting. Its
+  run guide no longer refers to an absent tally script (LLL-729).
+
+- First-boot team answers are normalized before being used or saved, keeping
+  the board, repository config and CLI on the same key without shortening
+  explicit identifiers (LLL-669).
+
+- Identity recovery explains an unreachable server before an expired token,
+  leads saved-token recovery with token-stdin login, and labels a missing
+  board endpoint as optional. Credential precedence and exit codes stay the
+  same (LLL-728).
+
+- Scoped members and their bots can move unreferenced records between teams
+  they can access, while source, destination and owner limits still apply
+  (LLL-668).
+
+- Unknown-command recovery prints the declared one-line usage when its
+  suggestion selects a single command, including aliases and nested verbs;
+  ambiguous and noun-only suggestions remain concise (LLL-555).
+
+- Viewer-read tests count access checks for a fresh viewer identity, so
+  unrelated page and live-stream activity cannot trigger a false duplicate
+  assertion; a genuine duplicate still fails (LLL-708).
+
 - Browser-poll observation-retention tests use controlled time and responses,
   avoiding false failures when subprocess startup exceeds 0.2 seconds under
   load; real process timeout and descendant cleanup coverage stays (LLL-724).
@@ -28,6 +54,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   without spending the invite (LLL-731).
 
 ### Added
+
+- The workspace board login can delete shared saved views from the sidebar.
+  Project views offer List/Board links that retain filters, and Projects groups
+  rows by status with per-team browser collapse preferences (LLL-738; PR #387).
 
 - The shipped workflow skills describe concise interruption handoffs, relevant
   findings and decisions before edits, and evidence marked passed, failed or

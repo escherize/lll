@@ -161,9 +161,9 @@ fn ask_team(suggested: string) -> Result<string, pb.CliError> {
       pb.failed(f"no team configured and no answer on stdin; set LLL_TEAM={suggested}, or add team = \"{suggested}\" to .lll.toml (see 'lll config init')"),
     )
   }
-  // Only directory-derived suggestions are shortened/normalized. Explicit
-  // input follows team create and attach --key: preserve the identifier.
-  let typed = strings.TrimSpace(line)
+  // Only directory-derived suggestions are shortened. Explicit input follows
+  // team create and attach --key: normalize case without truncating the key.
+  let typed = records.normalize_team_key(line)
   if typed == "" { Ok(suggested) } else { Ok(typed) }
 }
 
