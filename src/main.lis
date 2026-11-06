@@ -1,7 +1,9 @@
 import "go:fmt"
 import "go:github.com/escherize/lll/docs"
 import "go:os"
+import "go:os/signal"
 import "go:strings"
+import "go:syscall"
 
 import "commands"
 import "config"
@@ -78,6 +80,10 @@ fn help(topic: flags.Topic, env: config.Env) -> output.Output {
 /// and exit code. Notices are best effort: a broken stderr must not cost a
 /// script the data on stdout (the key 'issue next --claim' just claimed).
 fn render(before: output.Output, result: Result<output.Output, pb.CliError>, skew: Option<string>) {
+  // Let output errors reach the renderer's one-time-token recovery hint.
+  // Do this after the handler: spawned commands and the running server
+  // keep their normal signal behavior.
+  signal.Ignore(syscall.SIGPIPE)
   let out = match result {
     Ok(out) => out,
     Err(err) => err.output(),
