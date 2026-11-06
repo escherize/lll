@@ -1,4 +1,26 @@
 import "models"
+import "mirror"
+
+fn parent_front(key: string, parent: string) -> (mirror.Front, string) {
+  (mirror.Front { key, parent, .. }, "")
+}
+
+#[test]
+fn mirror_parents_validate_forward_links_and_reject_corrupt_graphs_before_writes() {
+  let assert Ok(true) = validate_mirror_parents([parent_front("ENG-1", "ENG-9"), parent_front("ENG-9", "")])
+  let assert Ok(false) = validate_mirror_parents([parent_front("ENG-1", "")])
+  assert validate_mirror_parents([parent_front("ENG-1", "missing")]).is_err()
+  assert validate_mirror_parents([parent_front("ENG-1", "ENG-1")]).is_err()
+  assert validate_mirror_parents([parent_front("ENG-1", "ENG-2"), parent_front("ENG-2", "ENG-1")]).is_err()
+  assert validate_mirror_parents([parent_front("ENG-1", ""), parent_front("ENG-1", "")]).is_err()
+}
+
+#[test]
+fn mirror_parents_do_not_impose_a_depth_limit_or_use_recursive_calls() {
+  let mut parsed = [parent_front("ENG-0", "")]
+  for n in 1..5000 { parsed = parsed.append(parent_front(f"ENG-{n}", f"ENG-{n - 1}")) }
+  let assert Ok(true) = validate_mirror_parents(parsed)
+}
 
 #[test]
 fn repo_shape_requires_owner_and_repo() {

@@ -376,7 +376,7 @@ fn bridge(ctx: pb.Client, events: Channel<realtime.Event>, hub: Hub) {
             fmt.Fprintln(os.Stderr, "realtime: re-rendering every open view after the reconnect")
             resync_refreshes(open_scopes(hub))
           },
-          realtime.Event.Record(ev) => event_refreshes(ev),
+          realtime.Event.Record(ev) => event_refreshes(ev).append(tree_refreshes(ev, open_scopes(hub))...),
         },
         None => { return },
       },
@@ -470,6 +470,26 @@ fn event_refreshes(ev: realtime.RecordEvent) -> Slice<Refresh> {
     realtime.Change.Unknown(_) => [],
     realtime.Change.Malformed(_) => [],
   }
+}
+
+/// A reparent event carries the new parent only. Refresh open issue pages
+/// in that team so the old parent, new parent and children's parent titles
+/// all converge without keeping an authority/cache of prior relation values.
+/// Work is bounded by open views, deduplicated, and read as each viewer by
+/// the existing per-issue queue. Board refreshes already use the whole team.
+fn tree_refreshes(ev: realtime.RecordEvent, scopes: Slice<string>) -> Slice<Refresh> {
+  let realtime.Change.Issue(issue) = ev.change else { return [] };
+  let team = issue.expand.team.key
+  if team == "" { return [] }
+  let prefix = f"issue:{team}-"
+  let mut keys: Slice<string> = []
+  for scope in scopes {
+    if strings.HasPrefix(scope, prefix) {
+      let key = strings.TrimPrefix(scope, "issue:")
+      if !keys.contains(key) { keys = keys.append(key) }
+    }
+  }
+  keys.map(|key| Refresh.Issue(IssueRefresh { key, client_id: 0 }))
 }
 
 /// A new page's first fragment: its board or its issue, for it alone.

@@ -1,0 +1,69 @@
+import "models"
+import "query"
+
+#[test]
+fn parent_progress_counts_direct_children_by_their_own_closed_state() {
+  let closed = models.Issue { id: "closed", parent: "root", state_wire: "done", .. }
+  let tree = index_issue_tree([
+    models.Issue { id: "root", .. },
+    closed,
+    models.Issue { id: "cancelled", parent: "root", state_wire: "cancelled", .. },
+    models.Issue { id: "unknown", parent: "root", state_wire: "future-state", .. },
+    models.Issue { id: "grandchild", parent: "closed", state_wire: "todo", .. },
+    closed,
+    models.Issue { id: "unrelated", state_wire: "done", .. },
+  ])
+  let progress = tree.summary(models.IssueId("root"))
+  assert progress.done == 2
+  assert progress.total == 3
+  let children = tree.direct_children(models.IssueId("root"))
+  assert children.map(|i| i.id.string()).equals(["closed", "cancelled", "unknown"])
+  assert tree.summary(models.IssueId("closed")).done == 0
+  assert tree.summary(models.IssueId("closed")).total == 1
+  assert tree.summary(models.IssueId("unknown")).total == 0
+  assert tree.direct_children(models.IssueId("hidden-or-missing")).is_empty()
+}
+
+#[test]
+fn a_subtree_includes_its_root_and_every_depth_but_not_siblings() {
+  let mut links = [models.Issue { id: "root", .. }, models.Issue { id: "other", .. }]
+  let mut parent = models.IssueId("root")
+  for n in 0..20 {
+    let id = models.IssueId(f"child-{n}")
+    links = links.append(models.Issue { id, parent, .. })
+    parent = id
+  }
+  let ids = subtree_ids(links, models.IssueId("root"))
+  assert ids.length() == 21
+  assert ids.get(models.IssueId("root")) == Some(true)
+  assert ids.get(parent) == Some(true)
+  assert ids.get(models.IssueId("other")) == None
+}
+
+#[test]
+fn a_subtree_does_not_loop_on_repeated_or_cyclic_input() {
+  let links = [
+    models.Issue { id: "a", parent: "b", .. },
+    models.Issue { id: "b", parent: "a", .. },
+    models.Issue { id: "c", parent: "b", .. },
+    models.Issue { id: "c", parent: "b", .. },
+  ]
+  assert subtree_ids(links, models.IssueId("a")).length() == 3
+}
+
+#[test]
+fn tree_metadata_is_complete_and_does_not_expand_relations() {
+  let mut calls = 0
+  let result = collect_issue_pages(query.TeamScope.Only(models.TeamId("team")), "", "id,parent,state,team", |path| {
+    calls += 1
+    assert path.contains("fields=id,parent,state,team")
+    assert !path.contains("expand=team")
+    if path.contains("page=1&") {
+      return Ok(BoardPage { items: [models.Issue { id: "a", .. }], total_items: 2, total_pages: 2 })
+    }
+    Ok(BoardPage { items: [models.Issue { id: "b", parent: "a", .. }], total_items: 2, total_pages: 2 })
+  })
+  let Ok(links) = result else { panic("tree metadata failed") };
+  assert calls == 2
+  assert subtree_ids(links, models.IssueId("a")).length() == 2
+}

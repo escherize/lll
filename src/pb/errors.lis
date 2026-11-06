@@ -80,6 +80,8 @@ pub enum ServerCode {
   ClaimHeld,
   /// Releasing someone else's claim needs force.
   NeedsForce,
+  /// Closing a work breakdown with open descendants needs explicit force.
+  OpenDescendants,
   /// The claim changed under the request.
   ClaimChanged,
   /// The issue is not claimed.
@@ -97,6 +99,7 @@ pub fn code_named(code: string) -> Option<ServerCode> {
   match code {
     "claim_held" => Some(ServerCode.ClaimHeld),
     "needs_force" => Some(ServerCode.NeedsForce),
+    "open_descendants" => Some(ServerCode.OpenDescendants),
     "claim_changed" => Some(ServerCode.ClaimChanged),
     "not_claimed" => Some(ServerCode.NotClaimed),
     "bot_exceeds_owner" => Some(ServerCode.BotExceedsOwner),
@@ -109,6 +112,7 @@ fn is_refusal(code: Option<ServerCode>) -> bool {
   match code {
     Some(ServerCode.ClaimHeld) => true,
     Some(ServerCode.NeedsForce) => true,
+    Some(ServerCode.OpenDescendants) => true,
     Some(ServerCode.ClaimChanged) => true,
     Some(ServerCode.NotClaimed) => true,
     Some(ServerCode.BotExceedsOwner) => false,

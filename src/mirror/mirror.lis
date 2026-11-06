@@ -51,6 +51,8 @@ pub struct Front {
   // record ids mean nothing in another database, and numbers round-trip.
   // Restored in a second pass, because ENG-3 can be blocked by ENG-7.
   pub blocked: Slice<string>,
+  // Containment travels as a mirror key and is linked after every issue exists.
+  pub parent: string,
   pub sort: float64,
   // Provenance. `lll issue view --raw` prints these as a bullet list and the
   // old bin/lll-export carried them into the mirror through it; dropping
@@ -105,6 +107,7 @@ pub fn front_of(issue: models.Issue, names: Names) -> Front {
     labels: issue.expand.labels.map(|l| l.name),
     attachments: issue.attachments,
     blocked,
+    parent: names.issues.get(issue.parent).unwrap_or(""),
     sort: issue.sort,
     creator: names.member(issue.creator),
     refs: issue.refs,

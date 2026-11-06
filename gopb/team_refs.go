@@ -122,6 +122,15 @@ func checkTeamRefs(app core.App, record *core.Record) error {
 	}
 	if moved {
 		for _, holder := range refHolders(collection) {
+			// The additive parent relation may not exist yet while an older
+			// migration saves records. Check only fields in the live schema.
+			holderCollection, err := app.FindCollectionByNameOrId(holder[0])
+			if err != nil {
+				return err
+			}
+			if holderCollection.Fields.GetByName(holder[1]) == nil {
+				continue
+			}
 			others, err := app.FindRecordsByFilter(holder[0],
 				fmt.Sprintf("%s.id ?= {:id} && team != {:team}", holder[1]), "id", 0, 0,
 				dbx.Params{"id": record.Id, "team": team})

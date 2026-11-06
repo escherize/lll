@@ -29,8 +29,9 @@ number and BB is role B's (e.g. `workers 07 and 08`).
 
 Both roles:
 1. Read the issue's description.
-2. Without waiting for your partner, append exactly one line to the end of
-   the description: role A appends
+2. Run `./fleet-ready append` after reading. It waits for your partner to
+   finish reading too (at most ten minutes), so neither writer starts alone.
+   Then append exactly one line to the end of the description: role A appends
    `fleet-17-NN: role A checked the upload path.` and role B appends
    `fleet-17-NN: role B checked the upload path.`
 3. Do not replace the description: your partner may be writing at the same
@@ -44,8 +45,28 @@ Both roles:
 Your role is the one the table gives your number. Do not change your
 mind.
 
-The artifact is a description with the original first line and both
-appended lines, each exactly once. Touch nothing else.
+## Guarded replacement variant
+
+Repeat on `Guarded release notes (workers AA and BB)`, with the same two lines:
+
+1. Read the full issue as JSON and keep its `updated` stamp and description.
+2. Run `./fleet-ready guarded` after reading. Both roles must cross this
+   separate barrier before the first replacement.
+3. Replace the description with the text you read plus your one line, using
+   `--if-unchanged-since STAMP` from that read. Every replacement in this
+   variant must include its read's stamp. Do not use append in this variant.
+4. One initial write should be refused because both agents read the same
+   version. On exit 4, read the issue again and retry with the new description
+   and stamp, preserving your partner's line. Do not repeat the barrier.
+   Record this expected stale-write refusal separately from tool friction.
+5. Read back until both lines are present, with the same bounded wait above.
+
+The artifacts are two descriptions, each with the original first line and
+both worker lines exactly once. The guarded issue must also have an audited
+stale-write refusal and successful guarded updates by both roles. Touch nothing
+else. A missing partner is a harness blocker, not an lll failure. The barriers
+force overlapping read/write intentions; they do not force an internal HTTP
+transaction interleaving.
 
 Look your number up in the table above; 09 is role A.
 Do not change your mind about your role, even if your partner seems slow.

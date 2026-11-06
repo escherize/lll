@@ -8,6 +8,7 @@ mode its workers get. Pair cases put two workers on one board; the odd worker
 is role A, the even worker role B.
 """
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -228,6 +229,49 @@ def wrapper_main():
     raise SystemExit(code)
 
 
+def pair_barrier(binary, worker, stage, timeout=600):
+    """Hold both readers before either writes; this does not order HTTP writes."""
+    if stage not in ('append', 'guarded'):
+        raise SystemExit('usage: fleet-ready append|guarded')
+    number = int(worker.name)
+    first = number if number % 2 else number - 1
+    directory = binary.parent / 'barriers' / worker.parent.name / f'{first:02}' / stage
+    private_dir(directory)
+    arrived = directory / f'{number:02}.arrived'
+    # Fresh case/run paths prevent stale arrivals. Retries preserve original evidence.
+    if not arrived.exists():
+        private_write(arrived, str(time.monotonic()))
+    deadline = time.monotonic() + timeout
+    while not all((directory / f'{n:02}.arrived').exists() for n in (first, first + 1)):
+        if time.monotonic() >= deadline:
+            raise SystemExit('fleet-ready: partner did not arrive before the deadline; report a harness blocker')
+        time.sleep(0.05)
+    private_write(directory / f'{number:02}.released', str(time.monotonic()))
+    print(f'Both readers ready for {stage}; continue through ./lll.')
+
+
+def credential_helper(worker, kind, args):
+    """Pass credentials only through stdin/environment to the audited wrapper."""
+    worker = worker.resolve()
+    env = dict(os.environ)
+    if kind == 'login' and not args:
+        token = connection(conn_file(worker))[1]
+        return subprocess.run([str(worker / 'lll'), 'login', '--token', '-'],
+                              cwd=worker, env=env, input=token + '\n', text=True).returncode
+    if kind == 'as-helper' and len(args) == 1:
+        path = (worker / args[0]).resolve()
+        if worker not in path.parents or not path.is_file():
+            raise SystemExit('fleet-as-helper: name an environment file inside your worker directory')
+        token = env_token(path)
+        if not token:
+            raise SystemExit('fleet-as-helper: file has no token export; rotate into it again')
+        env['LLL_TOKEN'] = token
+        # The supplied token is the deliberate identity switch, not ambient config.
+        env.pop('LLL_CONFIG_HOME', None)
+        return subprocess.run([str(worker / 'lll'), 'whoami'], cwd=worker, env=env).returncode
+    raise SystemExit('usage: fleet-login | fleet-as-helper ENV_FILE')
+
+
 def foreign_url(args, url):
     """Whether a call names a server other than the board (--url X, config set url X)."""
     named = [value for flag, value in zip(args, args[1:]) if flag == '--url']
@@ -355,13 +399,25 @@ class Board:
         (seat.worker / 'lll').write_text(wrapper)
         (seat.worker / 'lll').chmod(0o700)
         if self.case == '14':
-            # Case 14 needs the right url and a valid token as inputs. Helpers
-            # print them so no worker opens a credentials file (run 1: the
-            # sandbox refused `sed -n 2p conn.txt` for one worker).
-            for name, line in (('fleet-url', 1), ('fleet-token', 2)):
+            # Supply the public URL separately; fleet-login transfers the token
+            # directly to the CLI instead of asking a worker to build a pipe.
+            for name, line in (('fleet-url', 1),):
                 helper = seat.worker / name
                 helper.write_text(f'#!/bin/sh\nsed -n {line}p {str(target)!r}\n')
                 helper.chmod(0o700)
+
+        if self.case in ('14', '15'):
+            name, kind = ('fleet-login', 'login') if self.case == '14' else ('fleet-as-helper', 'as-helper')
+            helper = seat.worker / name
+            helper.write_text(f'#!/usr/bin/env python3\nimport os\nos.execv({sys.executable!r}, [{sys.executable!r}, '
+                              f'{str(script)!r}, "credential-helper", {str(seat.worker)!r}, {kind!r}, *os.sys.argv[1:]])\n')
+            helper.chmod(0o700)
+
+        if self.case == '17':
+            helper = seat.worker / 'fleet-ready'
+            helper.write_text(f'#!/usr/bin/env python3\nimport os\nos.execv({sys.executable!r}, [{sys.executable!r}, '
+                              f'{str(script)!r}, "pair-barrier", {str(self.binary)!r}, {str(seat.worker)!r}, *os.sys.argv[1:]])\n')
+            helper.chmod(0o700)
 
     def close(self):
         if self.child:
@@ -951,11 +1007,68 @@ def judge_16(board, changes, after):
 
 def seed_17(board):
     board.fixtures['issue'] = board.issue(pair_title(board, 'Shared release notes'), 'Release notes:')['id']
+    board.fixtures['guarded'] = board.issue(pair_title(board, 'Guarded release notes'), 'Release notes:')['id']
+
+
+def flag_value(args, name):
+    for index, arg in enumerate(args):
+        if arg.startswith(name + '='):
+            return arg[len(name) + 1:]
+        if arg == name and index + 1 < len(args):
+            return args[index + 1]
+    return None
 
 
 def judge_17(board, changes, after):
     issue = board.fixtures['issue']
-    errors = untouched(changes, changed={'issues': {issue: {'description'}}})
+    guarded = board.fixtures['guarded']
+    errors = untouched(changes, changed={'issues': {issue: {'description'}, guarded: {'description'}}})
+    for record, stage in ((issue, 'append'), (guarded, 'guarded')):
+        errors += judge_pair_notes(board, after, record, stage)
+    original = row(board.before, 'issues', guarded)
+    key = f"FLEET-{original['number']}"
+    refused = False
+    for seat in board.seats:
+        own = [entry for entry in read_audit(board.binary, seat.worker)
+               if len(entry['command']) >= 4 and entry['command'][:3] == ['lll', 'issue', 'update']
+               and entry['command'][3].rstrip('/').rsplit('/', 1)[-1] == key]
+        guarded_calls = [entry for entry in own if flag_value(entry['command'], '--if-unchanged-since') is not None]
+        if not guarded_calls:
+            errors.append(f'worker {seat.number} has no initial guarded update')
+            continue
+        first = guarded_calls[0]['command']
+        try:
+            initial_stamp = datetime.fromisoformat(flag_value(first, '--if-unchanged-since'))
+        except ValueError:
+            initial_stamp = None
+        if initial_stamp != datetime.fromisoformat(original['updated']):
+            errors.append(f'worker {seat.number} did not start from the shared original stamp')
+        if any(not any(flag_value(entry['command'], flag) is not None
+                           for flag in ('-b', '--body', '-d', '--description'))
+               for entry in guarded_calls):
+            errors.append(f'worker {seat.number} did not exercise full description replacement')
+        if len(guarded_calls) != len(own):
+            errors.append(f'worker {seat.number} made an unguarded replacement')
+        if not any(entry['exit_code'] == 0 for entry in guarded_calls):
+            errors.append(f'worker {seat.number} has no successful guarded update')
+        refused |= any(entry['exit_code'] == 4 for entry in guarded_calls)
+    if not refused:
+        errors.append('no stale guarded update was refused with exit 4')
+    return errors
+
+
+def judge_pair_notes(board, after, issue, stage):
+    errors = []
+    directory = board.binary.parent / 'barriers' / board.seats[0].worker.parent.name / board.seats[0].number / stage
+    try:
+        arrivals = [float((directory / f'{seat.number}.arrived').read_text()) for seat in board.seats]
+        releases = [float((directory / f'{seat.number}.released').read_text()) for seat in board.seats]
+        if max(arrivals) > min(releases):
+            errors.append(f'{stage} writer released before both readers arrived')
+        destination = board.seats[0].worker.parent / 'barrier-receipts' / board.seats[0].number / stage
+        shutil.copytree(directory, destination, dirs_exist_ok=True)
+    except (OSError, ValueError):
+        errors.append(f'pair did not complete the {stage} start barrier')
     lines = row(after, 'issues', issue)['description'].split('\n')
     if lines[0] != 'Release notes:':
         errors.append('the original description line was lost')
@@ -1161,6 +1274,13 @@ def serve(args):
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'wrapper':
         wrapper_main()
+    if len(sys.argv) > 1 and sys.argv[1] == 'pair-barrier':
+        if len(sys.argv) != 5:
+            raise SystemExit('usage: fleet-ready append|guarded')
+        pair_barrier(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4])
+        raise SystemExit(0)
+    if len(sys.argv) > 1 and sys.argv[1] == 'credential-helper':
+        raise SystemExit(credential_helper(Path(sys.argv[2]), sys.argv[3], sys.argv[4:]))
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--binary', required=True, type=Path)

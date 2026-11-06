@@ -21,7 +21,8 @@ Your saved lll configuration is broken in two ways. Plain `./lll whoami` fails.
    code you see.
 2. Repair the saved configuration so that plain `./lll whoami` works as your
    existing bot `bot-fleet-worker-NN`. `./fleet-url` prints the right server and
-   `./fleet-token` prints a valid token for that bot.
+   `./fleet-login` signs in as that bot through the audited CLI without
+   displaying a token.
 3. Do not create members, bots or tokens, and do not use admin credentials:
    the fix must reuse your existing identity.
 4. Finish with a successful `./lll whoami`. Read the result back ONLY through
@@ -35,12 +36,13 @@ members.
 
 ## Environment
 
-Your instance is already running. Two helpers in your worker directory print
-the correct facts: `./fleet-url` prints the API URL and `./fleet-token` prints
-a valid token for your existing bot `bot-fleet-worker-NN`. Do not open any
-connection or credentials file. Never type, paste, print or quote the token:
-only pipe `./fleet-token` into a command that reads a token from stdin. In this
-case the wrapper passes no connection to lll. It clears inherited LLL/XDG
+Your instance is already running. Two helpers in your worker directory supply
+the required inputs: `./fleet-url` prints the API URL; `./fleet-login` passes
+your existing bot token directly into `./lll login --token -`. Fix the saved
+URL with lll before running `./fleet-login`. Do not open any connection or
+credentials file. Never type, paste, print or quote the token. The helper
+invokes the audited wrapper and preserves the CLI exit code; it does not
+write configuration itself. In this case the wrapper passes no connection to lll. It clears inherited LLL/XDG
 settings and runs the pinned binary with your own saved configuration, under
 `home/config` in your worker directory, and that configuration is broken.
 Repair it with lll's own commands; do not edit the config file by hand. All CLI calls must use the wrapper: run it as

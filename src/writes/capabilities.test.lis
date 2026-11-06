@@ -114,3 +114,45 @@ fn a_server_without_the_list_falls_back_to_the_support_route() {
   seen.close()
   assert seen.receive() == None
 }
+
+#[test]
+fn unsupported_parent_creates_are_refused_before_any_post(t: TestContext) {
+  check_unsupported_parent_create(t, false)
+  check_unsupported_parent_create(t, true)
+}
+
+fn check_unsupported_parent_create(_t: TestContext, keyed: bool) {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(advertising(
+    "{\"service\":\"lll\",\"version\":\"1.4.1\",\"capabilities\":[]}", seen,
+  ))
+  defer server.Close()
+  let issue = models.NewIssue { parent: Some(models.IssueId("p1")), .. }
+  let result = if keyed {
+    create_issue_once(capability_client(server.URL), issue, "", "intent")
+  } else {
+    create_issue(capability_client(server.URL), pb.Caller.Process, issue, "")
+  }
+  let Err(e) = result else { panic("unsupported parent create was sent") };
+  assert e.message == "this server (1.4.1) does not support issue parents; upgrade the server before retrying --parent"
+  assert seen.receive() == Some("GET /.well-known/lll")
+  seen.close()
+  assert seen.receive() == None
+}
+
+#[test]
+fn unsupported_parent_clear_is_refused_before_any_patch() {
+  let seen = Channel.buffered<string>(8)
+  let mut server = httptest.NewServer(advertising(
+    "{\"service\":\"lll\",\"version\":\"1.4.1\",\"capabilities\":[]}", seen,
+  ))
+  defer server.Close()
+  let result = update_issue(capability_client(server.URL), models.Issue { .. },
+    IssuePatch { parent: Relation.Clear, ..IssuePatch.unchanged() },
+    UpdateOptions.as_caller(pb.Caller.Process))
+  let Err(UpdateFailure.Failed(e)) = result else { panic("unsupported parent clear was sent") };
+  assert e.message == "this server (1.4.1) does not support issue parents; upgrade the server before retrying --parent"
+  assert seen.receive() == Some("GET /.well-known/lll")
+  seen.close()
+  assert seen.receive() == None
+}

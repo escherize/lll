@@ -144,6 +144,8 @@ fn issues_for(scoped: bool, issues: Slice<models.Issue>) -> Slice<models.Issue> 
 fn card_vm(issue: models.Issue) -> CardVM {
   let prio = display.priority_name(issue.priority())
   CardVM {
+    parent: IssueLinkVM { .. },
+    children_progress: "",
     claim_holder: "",
     attachment_count: issue.attachments.length(),
     id: issue.id.string(),
@@ -351,6 +353,7 @@ fn board_columns(
   order: string,
 ) -> Slice<ColumnVM> {
   let ordered = order_issues(issues, order)
+  let tree = records.index_issue_tree(issues)
   models.IssueState
     .all()
     .map(|s| ColumnVM {
@@ -360,7 +363,7 @@ fn board_columns(
       sig: strings.ReplaceAll(s.wire(), "-", "_") as template.JS,
       cards: ordered
         .filter(|i| i.state() == Some(s) && issue_matches(i, flt))
-        .map(|i| board_card(i, claimed)),
+        .map(|i| tree_card(i, claimed, tree)),
       total: issues.filter(|i| i.state() == Some(s)).length(),
       manual: order == "manual",
     })
@@ -374,6 +377,24 @@ fn board_card(issue: models.Issue, claimed: Slice<models.Claim>) -> CardVM {
     card.claim_holder = held.expand.member.name
     if card.claim_holder == "" { card.claim_holder = "unknown member" }
   } else { card.work_stale = true }
+  card
+}
+
+fn issue_link(issue: models.Issue, team_key: string) -> IssueLinkVM {
+  let key = f"{team_key}-{issue.number}"
+  let state = display.state_name(issue.state())
+  IssueLinkVM { key, title: issue.title, href: f"/t/{team_key}/issue/{key}", state, state_label: state_label(state) }
+}
+
+fn tree_progress(tree: records.IssueTree, id: models.IssueId) -> string {
+  let summary = tree.summary(id)
+  if summary.total == 0 { "" } else { f"{summary.done}/{summary.total} done" }
+}
+
+fn tree_card(issue: models.Issue, claimed: Slice<models.Claim>, tree: records.IssueTree) -> CardVM {
+  let mut card = board_card(issue, claimed)
+  card.parent = tree.nodes.get(issue.parent).map_or(IssueLinkVM { .. }, |p| issue_link(p, issue.expand.team.key))
+  card.children_progress = tree_progress(tree, issue.id)
   card
 }
 
@@ -472,7 +493,11 @@ fn issue_fields_vm(ctx: pb.Client, raw: models.Issue, comments: Slice<models.Com
   let mut work = ""
   if issue.work_branch != "" { work = f"{issue.work_branch} @ {issue.work_host}:{issue.work_path}" }
   let work_stale = records.work_site_stale(issue.state(), held.is_some())
+  let tree = records.index_issue_tree(records.fetch_issue_tree(ctx, query.TeamScope.Only(issue.team))?)
   Ok(IssueVM {
+    parent: tree.nodes.get(issue.parent).map_or(IssueLinkVM { .. }, |p| issue_link(p, issue.expand.team.key)),
+    children: tree.direct_children(issue.id).map(|c| issue_link(c, issue.expand.team.key)),
+    children_progress: tree_progress(tree, issue.id),
     provenance: provenance.fields(issue),
     claim_id, claim_holder, claim_age, claim_actor, claim_actor_id, claim_error,
     claim_read_only: issue.expand.team.archived,
