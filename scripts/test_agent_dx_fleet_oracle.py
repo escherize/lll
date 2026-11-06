@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reject adversarial false positives in the independent fleet oracle."""
 import copy
-from agent_dx_fleet import COLLECTIONS, Board, Seat, audit_path, private_dir, private_write
+import json
+from agent_dx_fleet import COLLECTIONS, Board, Seat, audit_path, private_dir, private_write, judge_17, diff
 
 def exercise_oracle(root):
     i = Board.__new__(Board)
@@ -39,6 +40,46 @@ def exercise_oracle(root):
     for field, value in [('creator','wrong'),('state','done'),('priority',3),('labels',[]),('project',''),('description','changed')]:
         assert not judge('06', lambda a, f=field, v=value: a['issues'][1].update({f:v}))['pass'], field
     assert i.before['issues'][0]['title'] == 'Seed'
+    # Correct final descriptions alone must not pass the guarded race case.
+    pair = Board.__new__(Board)
+    pair.binary = root / 'pair-controller' / 'lll'
+    pair.seats = [Seat(root / 'case-17-run-1' / n, n) for n in ('01', '02')]
+    pair.fixtures = {'issue': 'append', 'guarded': 'guarded'}
+    pair.before = {name: [] for name in COLLECTIONS}
+    pair.before['issues'] = [{'id': name, 'number': n, 'updated': '2026-11-06 00:00:00.000Z',
+                              'description': 'Release notes:'} for n, name in enumerate(('append', 'guarded'), 1)]
+    after = copy.deepcopy(pair.before)
+    for issue in after['issues']:
+        issue['description'] += '\nfleet-17-01: role A checked the upload path.\nfleet-17-02: role B checked the upload path.'
+    changes = diff(pair.before, after)
+    audits = []
+    for index, seat in enumerate(pair.seats):
+        seat.worker.mkdir(parents=True)
+        path = audit_path(pair.binary, seat.worker)
+        private_dir(path.parent)
+        command = ['lll', 'issue', 'update', 'FLEET-2', '--description=body',
+                   '--if-unchanged-since=2026-11-06T00:00:00Z']
+        calls = [{'command': command, 'exit_code': 0 if index == 0 else 4, 'stdout': '', 'stderr': ''}]
+        if index:
+            calls.append({'command': command, 'exit_code': 0, 'stdout': '', 'stderr': ''})
+        audits.append((path, calls))
+        private_write(path, ''.join(json.dumps(call) + '\n' for call in calls))
+        for stage in ('append', 'guarded'):
+            directory = pair.binary.parent / 'barriers' / seat.worker.parent.name / '01' / stage
+            private_dir(directory)
+            private_write(directory / f'{seat.number}.arrived', '1')
+            private_write(directory / f'{seat.number}.released', '2')
+    assert judge_17(pair, changes, after) == []
+    path, valid = audits[0]
+    for omitted in ('--if-unchanged-since=', '--description='):
+        bad = copy.deepcopy(valid)
+        bad[0]['command'] = [arg for arg in bad[0]['command'] if not arg.startswith(omitted)]
+        private_write(path, ''.join(json.dumps(call) + '\n' for call in bad))
+        assert judge_17(pair, changes, after), f'accepted missing {omitted} with correct artifacts'
+    private_write(path, ''.join(json.dumps(call) + '\n' for call in valid))
+    directory = pair.binary.parent / 'barriers' / pair.seats[0].worker.parent.name / '01' / 'guarded'
+    private_write(directory / '01.released', '0')
+    assert any('before both readers' in error for error in judge_17(pair, changes, after))
     print('Fleet oracle: exact artifacts accepted; wrong author/creator/fields, unmatched duplicates, seed edits and extra webhooks rejected.')
 
 if __name__ == "__main__":

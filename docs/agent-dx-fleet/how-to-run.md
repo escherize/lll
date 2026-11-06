@@ -84,6 +84,18 @@ A provision request while a case is live returns an error and leaves that case
 and its private audit copies intact. Review it and send `stop` before asking
 for the next case; a refused request does not end the controller.
 
+## Pair-edit coordination
+
+Case 17 has two independent reader barriers, `fleet-ready append` and
+`fleet-ready guarded`. Each pair reads before either starts writing; the
+second exercise requires full replacements with `--if-unchanged-since` and
+checks that one stale initial write is refused, then safely retried. That
+expected exit 4 is part of the task, not tool-owned friction. This
+coordinates agent starts, not the server's internal transaction scheduling.
+Barriers wait at most ten minutes and isolate each case/run, pair and stage.
+Missing partners are harness blockers. Keep their non-secret arrival/release
+receipts with the controller evidence.
+
 ## Wrapper modes
 
 Most cases use the default wrapper: URL, token and team from conn.txt. Four
