@@ -2,7 +2,9 @@
 """LLL-177: tree invariants through native HTTP and the atomic close route."""
 from concurrent.futures import ThreadPoolExecutor
 import json
+import http.server
 import os
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -89,4 +91,64 @@ def attach(pair):
 with ThreadPoolExecutor(max_workers=2) as pool:
     codes = list(pool.map(attach, ((x,y), (y,x))))
 assert sorted(codes) == [200,400], codes
+# The user's CLI paths use the same relation and composite write boundary.
+def cli(*args, success=True):
+    result = subprocess.run([binary,*args], env=dict(os.environ,LLL_URL=api,LLL_TEAM='TREEA'),
+                            capture_output=True,text=True,timeout=30)
+    assert (result.returncode==0)==success,(result.args,result.returncode,result.stdout,result.stderr)
+    return result
+
+root = json.loads(cli('issue','create','-t','CLI root','--parent','none','--json').stdout)
+root_key = f"TREEA-{root['number']}"
+child = json.loads(cli('issue','create','-t','CLI child','--parent',root_key,'--json').stdout)
+child_key = f"TREEA-{child['number']}"
+assert child['parent']==root['id']
+cleared = json.loads(cli('issue','update',child_key,'--parent','none','--json').stdout)
+assert cleared['parent']==''
+who = json.loads(cli('whoami','--json').stdout)
+combined = json.loads(cli('issue','update',child_key,'--parent',root_key,'--assignee',who['name'],'--json').stdout)
+assert combined['parent']==root['id'] and combined['assignee']
+cleared = json.loads(cli('issue','update',child_key,'--parent','none','--assignee','none','--json').stdout)
+assert cleared['parent']=='' and cleared['assignee']==''
+refused = cli('issue','update',child_key,'--parent',f"TREEB-{other['number']}",'--title','Must not land',success=False)
+assert refused.returncode==4 and fresh(child)['title']=='CLI child'
+assert cli('issue','update',root_key,'--parent',root_key,success=False).returncode==4
+assert cli('issue','update',child_key,'--parent','',success=False).returncode==2
+# Equal version strings do not authorize a parent write. No POST/PATCH is
+# allowed through this proxy, even when all ordinary record reads succeed.
+class NoParents(http.server.BaseHTTPRequestHandler):
+    writes = 0
+    def do_GET(self):
+        if self.path == '/.well-known/lll':
+            data = json.dumps({'service':'lll','version':'1.4.1','capabilities':['issues.idempotency']}).encode()
+        else:
+            upstream = urllib.request.Request(api+self.path,headers={'Authorization':self.headers.get('Authorization','')})
+            with urllib.request.urlopen(upstream,timeout=15) as response:
+                data = response.read()
+        self.send_response(200);self.send_header('Content-Type','application/json')
+        self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+    def do_POST(self):
+        type(self).writes += 1
+        self.send_error(500,'unexpected write')
+    do_PATCH = do_POST
+    def log_message(self,*args):
+        pass
+
+proxy = http.server.ThreadingHTTPServer(('127.0.0.1',0),NoParents)
+proxy.daemon_threads = True
+thread = threading.Thread(target=proxy.serve_forever,daemon=True);thread.start()
+try:
+    for args in (
+        ('issue','create','-t','Unsupported parent','--parent',root_key),
+        ('issue','create','-t','Unsupported keyed parent','--parent',root_key,'--idempotency-key','parent-intent'),
+        ('issue','create','-t','Unsupported explicit root','--parent','none'),
+        ('issue','update',child_key,'--parent',root_key),
+        ('issue','update',child_key,'--parent','none'),
+    ):
+        refused = subprocess.run([binary,*args],capture_output=True,text=True,timeout=30,
+            env=dict(os.environ,LLL_URL=f'http://127.0.0.1:{proxy.server_port}',LLL_TEAM='TREEA'))
+        assert refused.returncode!=0 and 'does not support issue parents' in refused.stderr,refused.stderr
+    assert NoParents.writes==0,NoParents.writes
+finally:
+    proxy.shutdown();proxy.server_close();thread.join(timeout=5)
 print('Issue trees: native cycles/cross-team refs refused; descendant close preserves claims on refusal; force preserves children; reparent/delete preserve the subtree; reciprocal HTTP updates cannot form a cycle')

@@ -6,6 +6,7 @@ import (
 	"github.com/pocketbase/dbx"
 	validation "github.com/pocketbase/ozzo-validation/v4"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 const treeForceCloseKey = "@lll_tree_force_close"
@@ -103,4 +104,15 @@ func checkIssueTreeClose(app core.App, issue *core.Record) error {
 		return nil
 	}
 	return treeRefusal("validation_open_descendants", fmt.Sprintf("this issue has %d open descendant(s); finish them first or explicitly force the close", count))
+}
+
+// The native records and composite assignment routes share the same refusal
+// for a parent that is absent or outside the authenticated caller's scope.
+func parentRefsInScope(app core.App, auth *core.Record, ids []string) error {
+	for _, id := range ids {
+		if _, err := app.FindRecordById("issues", id); err != nil {
+			return router.NewBadRequestError("Failed to find all relation records with the provided ids.", nil)
+		}
+	}
+	return refsInScope(app, auth, "issues", ids)
 }

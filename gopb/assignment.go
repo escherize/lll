@@ -19,6 +19,7 @@ type assignmentFields struct {
 	Priority    *int      `json:"priority"`
 	Emoji       *string   `json:"emoji"`
 	Project     *string   `json:"project"`
+	Parent      *string   `json:"parent"`
 	Labels      *[]string `json:"labels"`
 	// LLL-513: 'lll issue update --add-label/--remove-label' combined with
 	// --assignee arrives here. Set resolves the modifier against the issue
@@ -63,7 +64,12 @@ func (fields assignmentFields) refsInScope(re *core.RequestEvent) error {
 		return err
 	}
 	if fields.Project != nil && *fields.Project != "" {
-		return refsInScope(re.App, re.Auth, "projects", []string{*fields.Project})
+		if err := refsInScope(re.App, re.Auth, "projects", []string{*fields.Project}); err != nil {
+			return err
+		}
+	}
+	if fields.Parent != nil && *fields.Parent != "" {
+		return parentRefsInScope(re.App, re.Auth, []string{*fields.Parent})
 	}
 	return nil
 }
@@ -87,6 +93,9 @@ func (fields assignmentFields) apply(issue *core.Record) {
 	}
 	if fields.Project != nil {
 		issue.Set("project", *fields.Project)
+	}
+	if fields.Parent != nil {
+		issue.Set("parent", *fields.Parent)
 	}
 	if fields.Labels != nil {
 		issue.Set("labels", *fields.Labels)

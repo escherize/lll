@@ -492,11 +492,10 @@ func checkNewRefs(app core.App, auth *core.Record, record *core.Record) error {
 		// New containment references must not distinguish a missing parent
 		// from one outside the caller's visibility through the wire error.
 		if record.Collection().Name == "issues" && field == "parent" {
-			for _, id := range ids {
-				if _, err := app.FindRecordById(target, id); err != nil {
-					return router.NewBadRequestError("Failed to find all relation records with the provided ids.", nil)
-				}
+			if err := parentRefsInScope(app, auth, ids); err != nil {
+				return err
 			}
+			continue
 		}
 		if err := refsInScope(app, auth, target, ids); err != nil {
 			return err

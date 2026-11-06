@@ -54,6 +54,13 @@ fn check_priority(val: string) -> Result<models.Priority, pb.CliError> {
 fn issue_create_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag {
+      name: "--parent",
+      value: true,
+      hint: "KEY|none",
+      help: "parent issue in the same team; none makes this a root issue",
+      ..,
+    },
+    flags.Flag {
       name: "-t",
       alias: "--title",
       value: true,
@@ -190,6 +197,13 @@ fn issue_view_spec() -> Slice<flags.Flag> {
 
 fn issue_update_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Update).append([
+    flags.Flag {
+      name: "--parent",
+      value: true,
+      hint: "KEY|none",
+      help: "parent issue in the same team; none makes this a root issue",
+      ..,
+    },
     flags.Flag {
       name: "--priority",
       alias: "-p",

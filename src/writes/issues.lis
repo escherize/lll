@@ -59,6 +59,7 @@ pub struct IssuePatch {
   pub priority: Option<models.Priority>,
   pub assignee: Relation<models.MemberId>,
   pub project: Relation<models.ProjectId>,
+  pub parent: Relation<models.IssueId>,
   pub labels: LabelEdit,
   pub title: Option<string>,
   pub description: DescriptionEdit,
@@ -72,6 +73,7 @@ impl IssuePatch {
     IssuePatch {
       assignee: Relation.Keep,
       project: Relation.Keep,
+      parent: Relation.Keep,
       labels: LabelEdit.Keep,
       description: DescriptionEdit.Keep,
       ..,
@@ -87,6 +89,7 @@ impl IssuePatch {
       Relation.Keep => true,
       _ => false,
     }
+    let parent = match self.parent { Relation.Keep => true, _ => false }
     let labels = match self.labels {
       LabelEdit.Keep => true,
       _ => false,
@@ -98,6 +101,7 @@ impl IssuePatch {
     self.state.is_none() && self.sort.is_none() && self.priority.is_none() &&
     assignee &&
     project &&
+    parent &&
     labels &&
     self.title.is_none() &&
     description &&
@@ -120,6 +124,8 @@ struct IssueFields {
   assignee: Option<string>,
   #[json(omitempty)]
   project: Option<string>,
+  #[json(omitempty)]
+  parent: Option<string>,
   #[json(omitempty)]
   labels: Option<Slice<models.LabelId>>,
   #[json("labels+", omitempty)]
@@ -203,6 +209,10 @@ pub fn update_issue(
   patch: IssuePatch,
   opts: UpdateOptions,
 ) -> Result<Option<Transition>, UpdateFailure> {
+  match patch.parent {
+    Relation.Keep => (),
+    _ => require_issue_parents(ctx).map_err(UpdateFailure.Failed)?,
+  }
   let assigning = match patch.assignee {
     Relation.Keep => false,
     _ => true,
@@ -358,6 +368,7 @@ fn issue_fields(
       priority: patch.priority.map(|p| p.wire()),
       assignee: relation_value(patch.assignee, |id| id.string()),
       project: relation_value(patch.project, |id| id.string()),
+      parent: relation_value(patch.parent, |id| id.string()),
       labels,
       labels_add,
       labels_remove,
@@ -411,6 +422,7 @@ pub fn create_issue(
   issue: models.NewIssue,
   path_query: string,
 ) -> Result<string, pb.CliError> {
+  if issue.parent.is_some() { require_issue_parents(ctx)? }
   create(ctx, caller, collection_path("issues") + path_query, issue, "issue")
 }
 
@@ -423,6 +435,7 @@ pub fn create_issue_once(
   path_query: string,
   key: string,
 ) -> Result<string, pb.CliError> {
+  if issue.parent.is_some() { require_issue_parents(ctx)? }
   require_keyed_writes(ctx, "issues", "creation")?
   let body = encode(issue, "issue")?
   ctx.post_idempotent(collection_path("issues") + path_query, body, key)
@@ -438,6 +451,10 @@ fn require_keyed_writes(ctx: pb.Client, collection: string, what: string) -> Res
     f"/api/lll/{collection}/idempotency",
     f"--idempotency-key; upgrade the server before retrying this {what}",
   )
+}
+
+pub fn require_issue_parents(ctx: pb.Client) -> Result<(), pb.CliError> {
+  require_capability(ctx, "issues.parents", "/api/lll/issues/parents", "issue parents; upgrade the server before retrying --parent")
 }
 
 pub fn delete_issue(ctx: pb.Client, id: models.IssueId) -> Result<(), pb.CliError> {

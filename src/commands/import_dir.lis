@@ -114,6 +114,7 @@ To import somewhere harmless instead: lll attach --key NEWKEY in another directo
       }
     }
     let new_issue = models.NewIssue {
+      parent: None,
       creator: filed_by,
       origin: models.IssueOrigin {
         host: front.origin.host,

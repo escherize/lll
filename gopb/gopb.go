@@ -162,6 +162,9 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
 		registerIssueCounterRoutes(e.Router)
+		e.Router.GET("/api/lll/issues/parents", func(re *core.RequestEvent) error {
+			return re.JSON(http.StatusOK, map[string]bool{"supported": true})
+		})
 		e.Router.GET("/.well-known/lll", func(re *core.RequestEvent) error {
 			return re.JSON(http.StatusOK, apiDiscovery(version, webURL))
 		})
@@ -341,5 +344,5 @@ func apiDiscovery(version, boardURL string) map[string]any {
 // feature ships; never remove or rename one. A server without the list
 // predates it, so the CLI asks that feature's own support route instead.
 func Capabilities() []string {
-	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity"}
+	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents"}
 }

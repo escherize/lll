@@ -64,6 +64,12 @@ fn create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let mut project = None
   if project_name != "" { project = Some(records.resolve_project(ctx, team.id, project_name)?.id) }
 
+  let parent = if p.given("--parent") {
+    let value = resolve_parent(ctx, team.id, p.one("--parent"))?
+    if value.is_none() { writes.require_issue_parents(ctx)? }
+    value
+  } else { None }
+
   let mut labels: Slice<models.LabelId> = []
   for name in label_names {
     labels = labels.append(records.resolve_label(ctx, team.id, name)?.id)
@@ -77,6 +83,7 @@ fn create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     creator: records.find_actor(ctx)?.map(|member| member.id),
     origin,
     team: team.id,
+    parent,
     title,
     description,
     emoji,
@@ -109,6 +116,16 @@ fn create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   }
   let action = if reuse.reused { "Reused" } else { "Created" }
   Ok(output.line(f"{action} {team.key}-{created.number}: {created.title}"))
+}
+
+fn resolve_parent(ctx: pb.Client, team: models.TeamId, raw: string) -> Result<Option<models.IssueId>, pb.CliError> {
+  if raw == "" { return Err(flags.usage_error("--parent needs an issue key or none")) }
+  if raw == "none" { return Ok(None) }
+  let parent = records.fetch_issue(ctx, deslug(raw))?
+  if parent.team != team {
+    return Err(pb.fail(pb.ErrorKind.Refused, "parent and child must belong to the same team"))
+  }
+  Ok(Some(parent.id))
 }
 
 #[json]
@@ -150,6 +167,7 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let project_name = p.one("--project")
   let title = p.one("--title")
   let project_set = p.given("--project")
+  let parent_set = p.given("--parent")
   let title_set = p.given("--title")
   // LLL-646: -b is the description, as on create. It used to be the reason
   // for a forced clear, so '--assignee none --force -b why' would now quietly
@@ -220,7 +238,7 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   }
   let labelling = !label_names.is_empty() || !add_label_names.is_empty() || !remove_label_names.is_empty()
   let describing = match description { writes.DescriptionEdit.Keep => false, _ => true }
-  if state.is_none() && priority.is_none() && assignee_name == "" && !labelling && !project_set && !title_set && !describing && !emoji_set {
+  if state.is_none() && priority.is_none() && assignee_name == "" && !labelling && !project_set && !parent_set && !title_set && !describing && !emoji_set {
     return Err(flags.usage_error(f"nothing to update: pass at least one flag\nusage: {usage}"))
   }
 
@@ -288,6 +306,17 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
       changed = changed.append(f"project={project_name}")
     }
   }
+  let mut parent = writes.Relation.Keep
+  if parent_set {
+    match resolve_parent(ctx, issue.team, p.one("--parent"))? {
+      Some(id) => {
+        if id == issue.id { return Err(pb.fail(pb.ErrorKind.Refused, "an issue cannot be its own parent")) }
+        parent = writes.Relation.Set(id)
+      },
+      None => parent = writes.Relation.Clear,
+    }
+    changed = changed.append(f"parent={p.one("--parent")}")
+  }
   let mut labels = writes.LabelEdit.Keep
   if !label_names.is_empty() {
     let mut label_ids: Slice<models.LabelId> = []
@@ -341,7 +370,7 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let observed = if read_claim { writes.ClaimRead.Read(held_before.map(|h| h.id)) } else { writes.ClaimRead.Unread }
   let me = records.token_member(ctx.token())
   let hold = models.hold_of(held_before, me, agent)
-  let mut patch = writes.IssuePatch { priority, assignee, project, labels, description, .. }
+  let mut patch = writes.IssuePatch { priority, assignee, project, parent, labels, description, .. }
   if let Some(to) = state { patch.state = Some(models.transition(models.Ask.Move { to, keep_claim })) }
   if title_set { patch.title = Some(title) }
   if emoji_set { patch.emoji = Some(emoji) }
