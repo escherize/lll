@@ -2935,4 +2935,7 @@ python3 "$REPO_ROOT"/scripts/test_comment_idempotency.py "$LIN" "$LLL_URL"
 
 LLL_TEST_SUPERUSER_TOKEN=$(pb_superuser_token "$LLL_URL") python3 "$REPO_ROOT"/scripts/test_audit_log.py "$LIN" "$LLL_URL"
 
+# The Linux artifact gate runs this suite too: prove SIGPIPE recovery on both platforms.
+python3 "$REPO_ROOT"/scripts/test_token_output_loss.py "$LIN" "$LLL_URL"
+
 echo "e2e_web: all assertions passed"
