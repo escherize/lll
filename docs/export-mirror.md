@@ -19,10 +19,12 @@ Each mirror holds:
 | `docs/SLUG.md` | a document | yes, including kind, coordinates and issue links |
 
 Front matter carries the fields the prose does not: state, priority, assignee,
-project, labels, and the issue's `number` and `sort`. Those last two matter
-more than they look — an import supplies them, so a restored `ENG-7` comes back
-as `ENG-7` rather than being renumbered, and every cross-reference in every
-description still points where it did.
+project, labels, and the issue's `number` and `sort`.
+
+| Restore identity | Issue numbers |
+|---|---|
+| Superuser | Preserved, including gaps |
+| Member or bot | Allocated by the server; the command prints old → new mappings |
 
 The export is byte-stable: the same server state exported twice produces
 identical files, so a scheduled mirror under Git commits only real changes.
@@ -50,8 +52,9 @@ What does come back: numbers, sort order, titles, descriptions, states,
 priorities, emoji, assignees, projects, labels, refs, the original creation
 origin, `blocked_by` dependency links, documents with their kind and retrieval
 coordinates, and attachment bytes. Issue links inside documents and dependency
-links between issues are stored as KEYS and re-resolved after every issue
-exists, which works only because numbers round-trip.
+links between issues use mirror keys, resolved to the new record ids after
+every issue exists. These links survive renumbering; issue keys written inside
+description text stay as written.
 
 Five things do not come back:
 
