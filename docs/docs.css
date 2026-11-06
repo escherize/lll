@@ -71,12 +71,42 @@ main:focus { outline: none; }
 .doc-body pre code { overflow-wrap: normal; }
 .table-scroll { max-width: 100%; overflow-x: auto; margin: 1.5rem 0; }
 .doc-body table { width: 100%; min-width: 36rem; border-collapse: collapse; font-size: 0.875rem; }
+.doc-body.compact-tables table { min-width: 0; }
 .doc-body th, .doc-body td { padding: 0.75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); min-width: 3rem; }
 .doc-body th { color: var(--text); font-weight: 600; }
 .doc-body blockquote { margin: 1.5rem 0; padding: 0 1.25rem; border-left: 1px solid var(--line); color: var(--text-2); }
 .doc-body img { display: block; max-width: 100%; height: auto; }
 .doc-body hr { border: 0; border-top: 1px solid var(--line); margin: 2.5rem 0; }
 .doc-body h1, .doc-body h2, .doc-body h3 { scroll-margin-top: 1rem; }
+.doc-body .guide-visual { container-type: inline-size; margin: 0 0 1.5rem; padding: 1.5rem 0; border-block: 1px solid var(--line); }
+.guide-visual strong { font-weight: 600; line-height: 1.4; }
+.guide-visual figcaption { margin-top: 1.25rem; color: var(--text-2); font-size: 0.875rem; }
+.record-map { display: grid; grid-template-columns: minmax(0, 1fr) 3rem minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+.doc-body .record-inputs { list-style: none; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
+.doc-body .record-inputs li { margin: 0; }
+.record-map strong, .record-map span { display: block; }
+.record-map span { color: var(--text-2); font-size: 0.875rem; }
+.record-connector { width: 100%; height: 6rem; color: var(--accent); }
+.record-connector path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.record-result { padding-left: 0.5rem; }
+.doc-body .guide-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(var(--step-count), minmax(0, 1fr)); gap: 1.25rem; }
+.doc-body .guide-steps li { position: relative; margin: 0; display: grid; align-content: start; justify-items: start; gap: 0.75rem; }
+.guide-steps li:not(:last-child)::after { content: ""; position: absolute; top: 1rem; left: 2rem; width: calc(100% + 1.25rem - 2rem); border-top: 1px solid var(--line); }
+.step-number { display: grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); background: var(--bg); }
+.step-detail { color: var(--text-2); font-size: 0.875rem; line-height: 1.6; }
+.doc-body .page-map { margin: 0 0 1.5rem; border-bottom: 1px solid var(--line); }
+.page-map summary { min-height: 2.75rem; align-content: center; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+.doc-body .page-map ul { margin: 0 0 1rem; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.5rem; }
+.doc-body .page-map li { margin: 0; }
+.page-map a { display: block; padding: 0.5rem 0; font-size: 0.875rem; }
+/* Use the diagram's measure, including enlarged text, rather than only the viewport. */
+@container (max-width: 38em) {
+  .doc-body .guide-steps { grid-template-columns: 1fr; gap: 1rem; }
+  .doc-body .guide-steps li { grid-template-columns: 2rem minmax(0, 1fr); gap: 0.25rem 1rem; }
+  .step-number { grid-row: span 2; }
+  .step-detail { grid-column: 2; }
+  .guide-steps li:not(:last-child)::after { top: 2rem; left: 1rem; width: 0; height: calc(100% + 1rem - 2rem); border-top: 0; border-left: 1px solid var(--line); }
+}
 .doc-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); padding-top: 1.5rem; margin-top: 4rem; font-size: 0.875rem; }
 .doc-footer a { color: var(--text-2); }
 @media (max-width: 800px) {
@@ -90,8 +120,17 @@ main:focus { outline: none; }
   .mobile-nav a { min-height: 2.75rem; align-content: center; }
   .doc-body h1 { font-size: 1.875rem; }
 }
+@media (max-width: 600px) {
+  .doc-body .guide-steps { grid-template-columns: 1fr; gap: 1rem; }
+  .doc-body .guide-steps li { grid-template-columns: 2rem minmax(0, 1fr); gap: 0.25rem 1rem; }
+  .step-number { grid-row: span 2; }
+  .step-detail { grid-column: 2; }
+  .guide-steps li:not(:last-child)::after { top: 2rem; left: 1rem; width: 0; height: calc(100% + 1rem - 2rem); border-top: 0; border-left: 1px solid var(--line); }
+  .doc-body .page-map ul { grid-template-columns: 1fr; }
+  .page-map a { min-height: 2.75rem; align-content: center; }
+}
 @media print {
-  :root { --text: black; --text-2: black; --accent: black; --line: currentColor; }
+  :root { --bg: white; --panel: white; --text: black; --text-2: black; --accent: black; --line: currentColor; }
   .table-scroll { overflow: visible; }
   .doc-body table { min-width: 0; }
   body { background: white; color: black; }
@@ -100,4 +139,6 @@ main:focus { outline: none; }
   .reading-column { max-width: none; }
   a { color: inherit; }
   .doc-body pre, .doc-body :not(pre) > code { background: transparent; }
+  .page-map { display: none; }
+  .guide-visual { break-inside: avoid; }
 }

@@ -22,7 +22,13 @@
         {% include docs-nav.html %}
       </details>
       <main id="content" tabindex="-1">
-        <article class="doc-body">{{ content | replace: '<table>', '<div class="table-scroll" tabindex="0" role="region" aria-label="Table: scroll horizontally to see all columns"><table>' | replace: '</table>', '</table></div>' }}</article>
+        {% assign guide = site.data.guide_maps[page.path] %}
+        {% assign article = content %}
+        {% if guide %}
+          {% capture guide_intro %}</h1>{% include guide-visual.html guide=guide %}{% endcapture %}
+          {% assign article = article | replace_first: '</h1>', guide_intro %}
+        {% endif %}
+        <article class="doc-body{% if guide.compact_tables %} compact-tables{% endif %}">{{ article | replace: '<table>', '<div class="table-scroll" tabindex="0" role="region" aria-label="Table: scroll horizontally to see all columns"><table>' | replace: '</table>', '</table></div>' }}</article>
         <footer class="doc-footer">
           <a href="{{ '/docs/' | relative_url }}">All documentation</a>
           <a href="https://github.com/escherize/lll/blob/main/docs/{{ page.path | uri_escape }}">Edit this page</a>

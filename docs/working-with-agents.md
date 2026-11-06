@@ -1,29 +1,22 @@
 # Leave a record your next agent can use
 
-A chat ends. Another agent starts, perhaps on another machine. The task title
-is still there, but the investigation, rejected approaches and reasons for the
-last change may be buried in an old conversation.
-
-lll gives that work a shared home: tasks say what needs doing, comments carry
-progress and evidence, findings record what was learned about particular
-files, and decisions explain why an approach was chosen. The next agent can
-retrieve those records before changing the code.
+A chat ends; the investigation should survive it. lll keeps the task, evidence
+and reasoning together so the next agent can retrieve them before changing code.
 
 ## The working loop
 
-1. Read the task and claim it before writing code. Other workers can see it is
-   taken.
-2. Check what is already known about the files you will touch. Use
-   `lll finding near PATH`, read the relevant records with `lll doc view SLUG`,
-   and search for related decisions or earlier work.
-3. Do the work and verify the result. Leave progress and verification evidence
-   on the issue so a person or another agent can follow it.
-4. Record the useful lesson where it will be found again: a comment for this
-   task, a path-linked finding for a code trap, or a decision for a lasting
-   choice. Close the task when the work has actually landed.
+Read and claim the task before editing. Check `lll finding near PATH`, read
+records with `lll doc view SLUG`, and search for related decisions or earlier work.
+Leave progress and verification evidence on the issue; close it after delivery.
 
-An empty search is fine. There is no requirement to invent a finding for every
-task; keep the discoveries that would save the next worker time or a mistake.
+| Record | What belongs there |
+|---|---|
+| Comment | Progress and test evidence for this task |
+| Finding | A reusable code trap, linked to the affected paths |
+| Decision | A lasting choice and the reasoning behind it |
+
+Keep lessons that save the next worker time or a mistake. An empty search is
+fine; a task does not need an invented finding.
 
 ## A real example
 

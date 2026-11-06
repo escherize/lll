@@ -1,0 +1,61 @@
+setup.md:
+  kind: record
+  caption: People and agents use the same record.
+  inputs:
+    - label: You
+      detail: in a browser
+    - label: Your agents
+      detail: through the CLI
+  result: Shared board
+  detail: Work, findings and decisions
+  sections:
+    - [Start a board, start-your-own-board]
+    - [Join a board, join-an-existing-board]
+    - [Attach a repository, choose-a-team-for-a-repository]
+    - [Invite someone, invite-someone]
+    - [Share on your network, share-a-board-on-a-lan-or-tailscale]
+    - [Database administration, database-administration]
+    - [Try an isolated board, try-an-isolated-board]
+    - [Upgrade, upgrades]
+
+working-with-agents.md:
+  kind: steps
+  compact_tables: true
+  caption: Leave the record ready for the next agent.
+  steps:
+    - label: Read and claim
+      detail: Read the task; reserve it before editing.
+    - label: Check the record
+      detail: Find what is known about the files.
+    - label: Build and verify
+      detail: Do the work and leave test evidence.
+    - label: Record and close
+      detail: Keep useful lessons; close after delivery.
+  sections:
+    - [The working loop, the-working-loop]
+    - [A real example, a-real-example]
+    - [People and agents, people-agents-and-watchers]
+    - [Choose your workflow, how-much-workflow-do-you-need]
+
+release-checklist.md:
+  kind: steps
+  caption: Each gate needs evidence before publication.
+  steps:
+    - label: Prepare
+      detail: Version and final cut
+    - label: Deploy
+      detail: Green gate and matching image
+    - label: Rehearse
+      detail: Compatibility, restore and five agents
+    - label: Publish
+      detail: Tag the verified cut
+    - label: Verify
+      detail: Download and Homebrew install
+  sections:
+    - [Declare the cut, 1-declare-the-cut-line]
+    - [Automated checks, 2-4-automated]
+    - [Compatibility and restore, clientserver-compatibility-and-migration-rehearsal]
+    - [Agent DX fleet, 5-agent-dx-fleet]
+    - [Release order, 6-release-order]
+    - [Verify the install, 7-verify-the-published-artifact]
+    - [Rollback, 8-rollback]
