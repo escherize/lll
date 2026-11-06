@@ -1692,8 +1692,10 @@ done
 # a flag in the completions entry but not the parser would make this error
 # impossible — the two are one table now, so assert both surfaces agree on
 # the flag that once drifted.
-assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='-t --title -b --body -d --description --emoji" \
+assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,create) words='--parent -t --title -b --body -d --description --emoji" \
   "completions offer the parser's own issue create flags"
+assert_contains "$(cat "$DATA_DIR/comp.bash")" "issue,list) words='--state --assignee --label --project --parent --under" \
+  "completions offer direct-child and subtree filters"
 
 # TASK-177: create --json joined the spec, so its completions entry carries
 # it automatically — one table (TASK-127), asserted like watch's entry above.
