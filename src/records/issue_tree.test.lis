@@ -1,0 +1,46 @@
+import "models"
+import "query"
+
+#[test]
+fn a_subtree_includes_its_root_and_every_depth_but_not_siblings() {
+  let mut links = [models.Issue { id: "root", .. }, models.Issue { id: "other", .. }]
+  let mut parent = models.IssueId("root")
+  for n in 0..20 {
+    let id = models.IssueId(f"child-{n}")
+    links = links.append(models.Issue { id, parent, .. })
+    parent = id
+  }
+  let ids = subtree_ids(links, models.IssueId("root"))
+  assert ids.length() == 21
+  assert ids.get(models.IssueId("root")) == Some(true)
+  assert ids.get(parent) == Some(true)
+  assert ids.get(models.IssueId("other")) == None
+}
+
+#[test]
+fn a_subtree_does_not_loop_on_repeated_or_cyclic_input() {
+  let links = [
+    models.Issue { id: "a", parent: "b", .. },
+    models.Issue { id: "b", parent: "a", .. },
+    models.Issue { id: "c", parent: "b", .. },
+    models.Issue { id: "c", parent: "b", .. },
+  ]
+  assert subtree_ids(links, models.IssueId("a")).length() == 3
+}
+
+#[test]
+fn tree_metadata_is_complete_and_does_not_expand_relations() {
+  let mut calls = 0
+  let result = collect_issue_pages(query.TeamScope.Only(models.TeamId("team")), "", "id,parent,state,team", |path| {
+    calls += 1
+    assert path.contains("fields=id,parent,state,team")
+    assert !path.contains("expand=team")
+    if path.contains("page=1&") {
+      return Ok(BoardPage { items: [models.Issue { id: "a", .. }], total_items: 2, total_pages: 2 })
+    }
+    Ok(BoardPage { items: [models.Issue { id: "b", parent: "a", .. }], total_items: 2, total_pages: 2 })
+  })
+  let Ok(links) = result else { panic("tree metadata failed") };
+  assert calls == 2
+  assert subtree_ids(links, models.IssueId("a")).length() == 2
+}

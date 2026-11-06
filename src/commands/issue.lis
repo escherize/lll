@@ -119,6 +119,8 @@ fn issue_create_spec() -> Slice<flags.Flag> {
 
 fn issue_list_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.List).append([
+    flags.Flag { name: "--parent", value: true, hint: "KEY|none", help: "direct children of an issue; none lists root issues", .. },
+    flags.Flag { name: "--under", value: true, hint: "KEY", help: "the issue and all descendants, including through filtered-out ancestors", .. },
     flags.Flag {
       name: "--search",
       alias: "",

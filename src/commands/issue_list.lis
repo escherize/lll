@@ -55,11 +55,39 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let blocked_only = p.given("--blocked")
   if ready_only && blocked_only { return Err(flags.usage_error("--ready and --blocked exclude each other")) }
 
+  if p.given("--parent") && p.given("--under") {
+    return Err(flags.usage_error("--parent lists direct children; --under lists a whole subtree; choose one"))
+  }
+  if (p.given("--parent") && p.one("--parent") == "") || (p.given("--under") && p.one("--under") == "") {
+    return Err(flags.usage_error("--parent/--under needs an issue key; --parent none lists roots"))
+  }
+
   let cfg = ctx.settings.config().map_err(pb.failed)?
 
   // A configured team (LLL_TEAM or .lll.toml) scopes the list by default,
   // and with it the label and project names the list filters by.
   let scope = configured_scope(ctx)?
+  let mut parent_filter: Option<string> = None
+  let mut subtree: Option<Map<models.IssueId, bool>> = None
+  if p.given("--parent") || p.given("--under") {
+    writes.require_issue_parents(ctx)?
+    let under = p.given("--under")
+    let raw = if under { p.one("--under") } else { p.one("--parent") }
+    if !under && raw == "none" {
+      parent_filter = Some("")
+    } else {
+      let root = records.fetch_issue(ctx, deslug(raw))?
+      if let query.TeamScope.Only(team) = scope {
+        if team != root.team {
+          return Err(flags.usage_error(f"{raw} is in {root.expand.team.key}; use --team {root.expand.team.key} to list its tree"))
+        }
+      }
+      if under {
+        let links = records.fetch_issue_tree(ctx, query.TeamScope.Only(root.team))?
+        subtree = Some(records.subtree_ids(links, root.id))
+      } else { parent_filter = Some(root.id.string()) }
+    }
+  }
 
   let mut sort_spec = sort_flag
   if sort_spec == "" { sort_spec = cfg.sort }
@@ -70,6 +98,10 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   let mut per_page = 200
   if limit > 0 { per_page = limit }
   let mut filter = resolve_filter_query(ctx, scope, filters)?
+  if let Some(parent) = parent_filter {
+    let clause = f"parent={query.quote(parent)}"
+    filter = if filter == "" { clause } else { f"{filter} && {clause}" }
+  }
   if since != "" {
     let clause = f"updated >= {query.quote(since)}"
     filter = if filter == "" { clause } else { f"{filter} && {clause}" }
@@ -87,7 +119,7 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   // LLL-673: --ready and --blocked are decided here, after the fetch, so like
   // priority order they need the WHOLE result: filtering one page dropped
   // ready issues past it and reported the page's count as the total.
-  let mode = if by_priority || ready_only || blocked_only { ListMode.Whole } else { ListMode.Page }
+  let mode = if by_priority || ready_only || blocked_only || subtree.is_some() { ListMode.Whole } else { ListMode.Page }
   let (fetched, raw_records, served) = match mode {
     ListMode.Whole => {
       let order = if by_priority { "&sort=priority,id" } else { f"&sort={url.QueryEscape(sort + ",id")}" }
@@ -102,6 +134,7 @@ fn list(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     },
   }
   let mut items = fetched
+  if let Some(ids) = subtree { items = items.filter(|i| ids.get(i.id).unwrap_or(false)) }
   let mut at = served
   // LLL-175: --ready is what an agent can pick up now - open, and every
   // blocker done or cancelled; --blocked is the complement with at least

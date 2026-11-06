@@ -1,0 +1,27 @@
+import "models"
+
+/// A subtree includes its root. Iterative traversal has no depth cap and
+/// tolerates repeated/cyclic input from an inconsistent historical snapshot.
+pub fn subtree_ids(links: Slice<models.Issue>, root: models.IssueId) -> Map<models.IssueId, bool> {
+  let mut children = Map.new<models.IssueId, Slice<models.IssueId>>()
+  for issue in links {
+    if !issue.parent.is_empty() {
+      children[issue.parent] = children.get(issue.parent).unwrap_or([]).append(issue.id)
+    }
+  }
+  let mut selected = Map.new<models.IssueId, bool>()
+  selected[root] = true
+  let mut queue = [root]
+  let mut cursor = 0
+  while cursor < queue.length() {
+    let current = queue[cursor]
+    cursor += 1
+    for child in children.get(current).unwrap_or([]) {
+      if !selected.get(child).unwrap_or(false) {
+        selected[child] = true
+        queue = queue.append(child)
+      }
+    }
+  }
+  selected
+}

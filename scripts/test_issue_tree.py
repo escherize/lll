@@ -114,6 +114,27 @@ refused = cli('issue','update',child_key,'--parent',f"TREEB-{other['number']}",'
 assert refused.returncode==4 and fresh(child)['title']=='CLI child'
 assert cli('issue','update',root_key,'--parent',root_key,success=False).returncode==4
 assert cli('issue','update',child_key,'--parent','',success=False).returncode==2
+# Traverse the full tree before applying state/search filters or pagination.
+filtered_root = json.loads(cli('issue','create','-t','Filter root','--json').stdout)
+fk = f"TREEA-{filtered_root['number']}"
+intermediate = json.loads(cli('issue','create','-t','Closed intermediate','--state','done','--parent',fk,'--json').stdout)
+ik = f"TREEA-{intermediate['number']}"
+leaf = json.loads(cli('issue','create','-t','Needle deep leaf','--parent',ik,'--json').stdout)
+sibling = json.loads(cli('issue','create','-t','Sibling leaf','--parent',fk,'--json').stdout)
+cli('issue','create','-t','Needle outside the subtree')
+direct = json.loads(cli('issue','list','--parent',fk,'--json').stdout)
+assert {r['id'] for r in direct['items']}=={intermediate['id'],sibling['id']}
+whole = json.loads(cli('issue','list','--under',fk,'--sort','created','--json').stdout)
+assert {r['id'] for r in whole['items']}=={filtered_root['id'],intermediate['id'],leaf['id'],sibling['id']}
+assert whole['totalItems']==4
+page = json.loads(cli('issue','list','--under',fk,'--sort','created','--limit','1','--page','2','--json').stdout)
+assert page['totalItems']==4 and page['items'][0]['id']==whole['items'][1]['id']
+needle = json.loads(cli('issue','list','--under',fk,'--search','Needle','--state','todo','--json').stdout)
+assert [r['id'] for r in needle['items']]==[leaf['id']]
+roots = json.loads(cli('issue','list','--parent','none','--json').stdout)
+assert all(r['parent']=='' for r in roots['items'])
+assert cli('issue','list','--parent',fk,'--under',fk,success=False).returncode==2
+assert cli('issue','list','--under','',success=False).returncode==2
 # Equal version strings do not authorize a parent write. No POST/PATCH is
 # allowed through this proxy, even when all ordinary record reads succeed.
 class NoParents(http.server.BaseHTTPRequestHandler):
@@ -139,6 +160,9 @@ proxy.daemon_threads = True
 thread = threading.Thread(target=proxy.serve_forever,daemon=True);thread.start()
 try:
     for args in (
+        ('issue','list','--parent',root_key),
+        ('issue','list','--under',root_key),
+        ('issue','list','--parent','none'),
         ('issue','create','-t','Unsupported parent','--parent',root_key),
         ('issue','create','-t','Unsupported keyed parent','--parent',root_key,'--idempotency-key','parent-intent'),
         ('issue','create','-t','Unsupported explicit root','--parent','none'),
