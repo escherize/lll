@@ -185,6 +185,9 @@ class StalledDownload(Forward):
         if self.command == 'GET' and self.path.startswith('/api/files/issues/'):
             self.stall()
             return True
+        # Separate legitimate lookup time from the transfer's idle budget.
+        if self.command == 'GET':
+            time.sleep(11)
         return False
 
 
