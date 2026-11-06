@@ -6,9 +6,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-06
+
 ### Fixed
 
-- Access prompts verify that the selected identity can read the advertised team, including current bot-owner limits, and explain incompatible selections without widening access.
+- Access prompts verify that the selected identity can read the advertised
+  team, including current bot-owner limits, and explain incompatible selections
+  without widening access (LLL-742).
 
 - Serialize member creation with owner changes so concurrent administrator
   writes cannot form a forbidden ownership chain (LLL-622).
