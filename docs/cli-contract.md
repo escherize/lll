@@ -134,7 +134,17 @@ Every issue `--json` prints the same object: `issue list` per item,
 | `project_name` | string | `""` when none |
 | `label_names` | array of string | the names of the labels in `labels` |
 | `created`, `updated` | string | RFC3339 |
+| `last_activity` | string | server-owned activity timestamp; omitted by older servers (see below) |
 | `claim` | object or null | see below |
+
+`last_activity` advances for committed issue edits and comment/claim creates,
+edits and deletes, including claim renewal and expiry. No-op issue/comment
+saves do not count. Timestamps are nondecreasing; writes in the same clock
+tick may share one timestamp. Comment/claim-only activity does not change
+`updated`, so `issue list --since` retains its existing issue-edit semantics.
+Read `last_activity` for inactivity checks; use the activity cursor for ordered
+change consumption. Existing records are backfilled from retained record and
+audit timestamps; deleted activity from before auditing cannot be recovered.
 
 `claim` is `null` when nobody holds the issue, and otherwise:
 

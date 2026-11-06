@@ -3,6 +3,7 @@ package gopb
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -10,6 +11,14 @@ import (
 func activityDateFixture(t *testing.T) (core.App, string) {
 	t.Helper()
 	app, id, _, _ := auditFixture(t)
+	events, err := app.FindCollectionByNameOrId("audit_events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+	if err := app.Save(events); err != nil {
+		t.Fatal(err)
+	}
 	issues, err := app.FindCollectionByNameOrId("issues")
 	if err != nil {
 		t.Fatal(err)
@@ -19,6 +28,46 @@ func activityDateFixture(t *testing.T) (core.App, string) {
 		t.Fatal(err)
 	}
 	return app, id
+}
+
+func TestLastActivityPreservesNewerDateOnStaleIssueSave(t *testing.T) {
+	app, id := activityDateFixture(t)
+	stale, _ := app.FindRecordById("issues", id)
+	// Simulate activity committed after the caller read its issue. A future
+	// clock value also checks monotonicity after the host clock moves back.
+	date := "2060-01-01 00:00:00.000Z"
+	if _, err := app.DB().NewQuery("UPDATE issues SET last_activity = '" + date + "'").Execute(); err != nil {
+		t.Fatal(err)
+	}
+	stale.Set("title", "save from stale read")
+	stale.Set("last_activity", "2099-01-01 00:00:00.000Z")
+	if err := app.Save(stale); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := app.FindRecordById("issues", id)
+	if fresh.GetString("last_activity") != date {
+		t.Fatal("stale save lost or forged the newer activity date")
+	}
+}
+
+func TestLastActivityTracksClaimRenewalAndExpiry(t *testing.T) {
+	app, id := activityDateFixture(t)
+	member, _ := app.FindFirstRecordByData("members", "name", "Alpha")
+	held, err := acquireClaim(app, id, member.Id, "activity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renewClaim(app, id, held.ClaimID, releaser{memberID: member.Id}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := expireClaims(app, time.Now().Add(48*time.Hour), claimMaxAge); err != nil || n != 1 {
+		t.Fatalf("expiry %d: %v", n, err)
+	}
+	rows, _ := app.FindRecordsByFilter("audit_events", "", "-seq", 1, 0)
+	issue, _ := app.FindRecordById("issues", id)
+	if issue.GetString("last_activity") < rows[0].GetString("created") {
+		t.Fatal("claim lifecycle missing from issue activity")
+	}
 }
 
 func TestLastActivityTracksCommentsWithoutTouchingIssueUpdated(t *testing.T) {
