@@ -62,6 +62,10 @@ normal = subprocess.run([binary, '--version'], env=env, capture_output=True, tex
 assert normal.returncode == 0 and normal.stdout.startswith('lll ') and not normal.stderr
 # A notice on an unwritable stderr must not lose the successfully claimed
 # issue's stdout key. Only SIGPIPE is ignored; normal process signals remain.
+team_result = subprocess.run([binary, 'team', 'create', '--key', 'PIPEOUT', '-n', 'Output notice control'],
+                             env=env, capture_output=True, text=True, timeout=30)
+assert team_result.returncode == 0
+env['LLL_TEAM'] = 'PIPEOUT'
 created = subprocess.run([binary, 'issue', 'create', '-t', 'Output notice control', '--json'],
                          env=env, capture_output=True, text=True, timeout=30)
 assert created.returncode == 0
