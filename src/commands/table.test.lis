@@ -41,9 +41,13 @@ fn unknown_command_names_the_typed_verb_for_issue_verbs() {
   // A verb that is really a positional rides along too: 'lll comment
   // ENG-1 "hi"' points at the same place with the key named.
   assert refusal(["lll", "comment", "ENG-1"]).contains("'comment ENG-1'")
-  // A flag-like second word is not a verb; the message quotes the noun alone.
-  assert refusal(["lll", "comment", "-b"]).contains("'comment'")
-  assert refusal(["lll", "comment"]).contains("'comment'")
+  // Comment is now a read noun. A bare noun shows its page; a misplaced
+  // write flag points at that page, which explains the issue-write form.
+  assert refusal(["lll", "comment", "-b"]).contains("unknown flag")
+  assert refusal(["lll", "comment", "-b"]).contains("lll comment --help")
+  assert help_page(["lll", "comment"]).contains("lll comment list")
+  assert help_page(["lll", "comment"]).contains("lll issue comment KEY-123")
+  assert help_page(["lll", "claim"]).contains("lll issue claim KEY-123")
 }
 
 #[test]
