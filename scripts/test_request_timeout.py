@@ -33,6 +33,7 @@ import urllib.request
 binary, api = sys.argv[1:]
 ANSWER_SECONDS = 30
 STALL_SECONDS = 60
+LOOKUP_DELAY_SECONDS = 11
 STREAM_IDLE_SECONDS = 90
 NETWORK_EXIT = 1
 env = dict(os.environ, LLL_TEAM='ENG')
@@ -69,6 +70,10 @@ class Forward(http.server.BaseHTTPRequestHandler):
     """Forwards every request to the API; a subclass's intercept() may take
     a request over instead (returning True)."""
     protocol_version = 'HTTP/1.1'
+
+    # Each stalling proxy type has one fixture per test process. Record when
+    # its partial answer reaches the socket, independently of CLI startup.
+    stall_started_at = None
 
     def intercept(self, data):
         return False
@@ -108,6 +113,10 @@ class Forward(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b'{"partial":')
         self.wfile.flush()
+        # Keep the first answer's clock: an unexpected retry must not reset
+        # the evidence and make two stalled attempts look like one.
+        if type(self).stall_started_at is None:
+            type(self).stall_started_at = time.monotonic()
         time.sleep(STALL_SECONDS * 3)
         self.close_connection = True
 
@@ -187,7 +196,7 @@ class StalledDownload(Forward):
             return True
         # Separate legitimate lookup time from the transfer's idle budget.
         if self.command == 'GET':
-            time.sleep(11)
+            time.sleep(LOOKUP_DELAY_SECONDS)
         return False
 
 
@@ -209,7 +218,9 @@ def stalled_download_case(out):
     name = re.search(r'^Attached to \S+: (\S+)$', attached.stdout, re.M).group(1)
     start = time.monotonic()
     result = cli('issue', 'download', key, name, url=serve(StalledDownload), timeout=STALL_SECONDS * 3)
-    out['download'] = (result, time.monotonic() - start)
+    ended = time.monotonic()
+    stalled = None if StalledDownload.stall_started_at is None else ended - StalledDownload.stall_started_at
+    out['download'] = (result, ended - start, stalled)
 
 
 def stalled_upload_answer_case(out):
@@ -220,7 +231,9 @@ def stalled_upload_answer_case(out):
         start = time.monotonic()
         result = cli('issue', 'attach', key, str(attachment), url=serve(StalledUploadAnswer),
             timeout=STALL_SECONDS * 3)
-    out['upload_answer'] = (result, time.monotonic() - start)
+    ended = time.monotonic()
+    stalled = None if StalledUploadAnswer.stall_started_at is None else ended - StalledUploadAnswer.stall_started_at
+    out['upload_answer'] = (result, ended - start, stalled)
 
 
 # --- a realtime stream that goes silent after its first keepalive ---
@@ -300,11 +313,18 @@ assert SlowUpload.paced, 'the upload never reached the slow link'
 assert upload_elapsed > ANSWER_SECONDS, upload_elapsed
 
 for case in ('download', 'upload_answer'):
-    result, elapsed = out[case]
+    result, total_elapsed, stalled_elapsed = out[case]
     assert result.returncode == NETWORK_EXIT, (case, result.returncode, result.stderr)
     assert f'stopped sending for {STALL_SECONDS}s partway through its answer' in result.stderr, (case, result.stderr)
     assert 'token=' not in result.stderr, (case, 'a file token leaked', result.stderr)
-    assert STALL_SECONDS - 1 <= elapsed < STALL_SECONDS + 20, (case, elapsed)
+    assert stalled_elapsed is not None, (case, 'proxy never started its stalled answer', result.stderr)
+    assert STALL_SECONDS - 1 <= stalled_elapsed < STALL_SECONDS + 20, (
+        case, {'total_seconds': total_elapsed, 'stall_seconds': stalled_elapsed})
+
+# The delayed lookups are legitimate ordinary requests. Their time must not
+# consume the transfer's separate inactivity budget. The subprocess ceiling
+# above still bounds the whole command.
+assert out['download'][1] - out['download'][2] >= LOOKUP_DELAY_SECONDS - 1, out['download'][1:]
 
 ready, lost, lines = out['stream']
 assert ready is not None, lines
@@ -312,5 +332,6 @@ assert lost is not None, f'a silent stream was never dropped: {lines}'
 assert STREAM_IDLE_SECONDS - 5 <= lost - ready < STREAM_IDLE_SECONDS + 20, (lost - ready, lines)
 
 print(f'request timeout: silent server failed in {out["silent"][1]:.0f}s; slow upload succeeded in '
-      f'{upload_elapsed:.0f}s; stalled download and upload answer failed in {out["download"][1]:.0f}s and '
-      f'{out["upload_answer"][1]:.0f}s; silent stream dropped after {lost - ready:.0f}s')
+      f'{upload_elapsed:.0f}s; stalled download and upload answer failed after {out["download"][2]:.0f}s and '
+      f'{out["upload_answer"][2]:.0f}s idle (whole commands {out["download"][1]:.0f}s and '
+      f'{out["upload_answer"][1]:.0f}s); silent stream dropped after {lost - ready:.0f}s')
