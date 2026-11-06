@@ -22,13 +22,25 @@ import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
-from agent_dx_fleet import (CASES, audit_path, conn_file, connection, private_dir, private_write, public_snapshot,
+from agent_dx_fleet import (CASES, COLLECTIONS, diff, untouched, audit_path, conn_file, connection, private_dir, private_write, public_snapshot,
                             publish_audit, serve, stop, wrapper_env, credential_helper, pair_barrier)
 
 HERE = Path(__file__).resolve().parent
 
 
 def harness_checks():
+    before = {name: [] for name in COLLECTIONS}
+    before['issues'] = [{'id': 'target', 'last_activity': 'old', 'title': 'keep'},
+                        {'id': 'decoy', 'last_activity': 'old'}]
+    after = dict(before, issues=[dict(before['issues'][0], last_activity='new'), before['issues'][1]])
+    changes = diff(before, after)
+    assert untouched(changes), 'read-only case accepted an activity write'
+    assert not untouched(changes, changed={'issues': {'target': set()}}), 'allowed target activity rejected'
+    after['issues'][0]['title'] = 'unrelated edit'
+    assert untouched(diff(before, after), changed={'issues': {'target': set()}}), 'activity allowance hid a title edit'
+    after['issues'][0]['title'] = 'keep'
+    after['issues'][1] = dict(before['issues'][1], last_activity='new')
+    assert untouched(diff(before, after), changed={'issues': {'target': set()}}), 'activity allowance hid a decoy write'
     with tempfile.TemporaryDirectory(prefix='lll-fleet-harness-') as temporary:
         root = Path(temporary)
         worker = root / '01'
