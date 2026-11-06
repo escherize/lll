@@ -6,6 +6,12 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Board event subscriptions normalize team keys, so mixed-case URLs receive
+  their initial snapshot and later updates without changing visibility checks
+  (LLL-741).
+
 ## [1.4.0] - 2026-11-06
 
 ### Fixed

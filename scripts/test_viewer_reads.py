@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
             # The link viewer's PocketBase token never reaches the browser.
             assert 'eyJ' not in body and 'eyJ' not in str(headers), f'link {path} carries a token'
         for path in ['/t/BETA/', '/t/BETA', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1', '/events?team=BETA',
-                     '/events?page=issue&key=BETA-1', '/t/BETA/search?q=zebra']:
+                     '/events?page=issue&key=BETA-1', '/events?team=beta', '/t/BETA/search?q=zebra']:
             assert page(path, link)[0] == 404, path
         assert 'zebra' in page('/t/BETA/', BOARD_TOKEN)[1], 'control: the board token sees BETA'
 
@@ -116,6 +116,16 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
         out = root / 'link.sse'
         streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={link}', board + '/events?team=ALPHA'],
                                         stdout=out.open('w'), stderr=subprocess.DEVNULL, start_new_session=True))
+        # LLL-741: URL spelling must not change initial or live delivery.
+        case_streams = []
+        for label, credential, spelling in [('full-upper', BOARD_TOKEN, 'ALPHA'),
+                                             ('full-mixed', BOARD_TOKEN, 'aLpHa'),
+                                             ('link-mixed', link, 'aLpHa')]:
+            capture = root / (label + '.sse')
+            case_streams.append(capture)
+            streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={credential}',
+                                             board + '/events?team=' + spelling],
+                                            stdout=capture.open('w'), stderr=subprocess.DEVNULL, start_new_session=True))
         gout = root / 'guest-issue.sse'
         streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={guest_tok}',
                                          board + '/events?page=issue&key=ALPHA-1'],
@@ -133,11 +143,15 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
             assert needle in path.read_text(), f'{path.name}: never saw {needle!r}'
 
         wait_for(out, 'alpha work')
+        for capture in case_streams:
+            wait_for(capture, 'alpha work')
         wait_for(gout, 'alpha work')
         wait_for(rout, 'alpha work')
         call(api, f"/api/collections/issues/records/{ib['id']}", {'title': 'zebra moved'}, su, 'PATCH')
         call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha moved'}, su, 'PATCH')
         wait_for(out, 'alpha moved')
+        for capture in case_streams:
+            wait_for(capture, 'alpha moved')
         wait_for(gout, 'alpha moved')
         wait_for(rout, 'alpha moved')
         time.sleep(.5)
