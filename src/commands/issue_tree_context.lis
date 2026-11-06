@@ -14,7 +14,7 @@ struct IssueTreeRef {
 }
 
 fn tree_ref(issue: models.Issue, team_key: string) -> IssueTreeRef {
-  IssueTreeRef { id: issue.id, key: f"{team_key}-{issue.number}", title: issue.title, state: issue.state_wire }
+  IssueTreeRef { id: issue.id, key: f"{team_key}-{issue.number}", title: issue.title, state: display.state_name(issue.state()) }
 }
 
 /// An old server omits `parent` entirely. Ordinary reads still work there;
