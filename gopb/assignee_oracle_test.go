@@ -43,21 +43,21 @@ func TestAssigneeMissingAndHiddenHaveTheSameHTTPRefusal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := func(assignee string) (int, string) {
+			request := func(verb, id, assignee string) (int, string) {
 				path := "/api/collections/issues/records"
-				if method == http.MethodPatch {
-					path += "/" + issue.Id
+				if verb == http.MethodPatch {
+					path += "/" + id
 				}
 				body := fmt.Sprintf(`{"team":%q,"title":"probe","assignee":%q}`, f.alpha, assignee)
-				req := httptest.NewRequest(method, path, strings.NewReader(body))
+				req := httptest.NewRequest(verb, path, strings.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Authorization", "Bearer "+token)
 				out := httptest.NewRecorder()
 				mux.ServeHTTP(out, req)
 				return out.Code, out.Body.String()
 			}
-			hiddenCode, hiddenBody := request(hidden.Id)
-			missingCode, missingBody := request("xxxxxxxxxxxxxxx")
+			hiddenCode, hiddenBody := request(method, issue.Id, hidden.Id)
+			missingCode, missingBody := request(method, issue.Id, "xxxxxxxxxxxxxxx")
 			if hiddenCode != 400 || missingCode != 400 {
 				t.Fatalf("hidden=%d missing=%d", hiddenCode, missingCode)
 			}
@@ -67,7 +67,7 @@ func TestAssigneeMissingAndHiddenHaveTheSameHTTPRefusal(t *testing.T) {
 			if strings.Contains(hiddenBody, hidden.Id) || strings.Contains(hiddenBody, hidden.GetString("name")) {
 				t.Error("refusal exposes the hidden member")
 			}
-			validCode, validBody := request(f.coord.Id)
+			validCode, validBody := request(method, issue.Id, f.coord.Id)
 			if validCode != 200 {
 				t.Fatalf("valid assignment refused: %d %s", validCode, validBody)
 			}
@@ -82,9 +82,13 @@ func TestAssigneeMissingAndHiddenHaveTheSameHTTPRefusal(t *testing.T) {
 			if err != nil || stored.GetString("assignee") != f.coord.Id {
 				t.Fatalf("valid assignment not persisted: %v", err)
 			}
-			clearCode, clearBody := request("")
+			clearCode, clearBody := request(http.MethodPatch, assigned.ID, "")
 			if clearCode != 200 {
 				t.Fatalf("clearing refused: %d %s", clearCode, clearBody)
+			}
+			stored, err = f.app.FindRecordById("issues", assigned.ID)
+			if err != nil || stored.GetString("assignee") != "" {
+				t.Fatalf("clearing was not persisted: %v", err)
 			}
 		})
 	}
