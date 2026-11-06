@@ -114,6 +114,16 @@ git diff --check
 
 A directory path formats every source file beneath it. Even a single-file
 format can change unrelated existing lines in that file; review those too.
+On lis 0.12.0, formatting can also **delete `///` comments on struct
+fields** (LLL-725). A minimal `struct Example {` with a documented `value:
+string` field becomes `struct Example { value: string }`, losing its docs.
+Before formatting an existing struct, inspect its field comments. For a
+scoped change, preserve those comments and format the new code by hand, or
+format a disposable snippet and apply only the intended text. `--check` is
+non-mutating, but a formatter-clean result does not prove comments survived;
+review the source diff before committing. Do not accept comment deletion as
+formatting noise.
+
 For a new helper in a large existing file, format a temporary `.lis` file
 containing the helper and apply its formatted text to the intended source.
 Keep repository-wide formatting in its own change rather than expanding the
