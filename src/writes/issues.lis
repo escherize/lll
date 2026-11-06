@@ -159,7 +159,8 @@ pub enum UpdateFailure {
 /// How an update runs. `stamp` is a stamp the caller read and insists on
 /// (--if-unchanged-since): a 412 is then the answer, never a retry.
 /// `claim` is the caller; its force and reason are used only when the patch
-/// edits the assignee, which goes through the claim route. Its agent label
+/// edits the assignee, which goes through the claim route; force also
+/// acknowledges open descendants on a finish. Its agent label
 /// rides every write, because a move into done or cancelled releases the
 /// caller's own claim (the finish rule, gopb finishReleases) and the label
 /// says which session the caller is. The opt-out from that release rides
@@ -310,6 +311,7 @@ fn send_fields(
   let mut params: Slice<string> = []
   if by.agent != "" { params = params.append(f"agent={url.QueryEscape(by.agent)}") }
   if keep_claim { params = params.append("keep_claim=true") }
+  if by.force { params = params.append("force=true") }
   let mut path = record_path("issues", id.string())
   if !params.is_empty() { path = f"{path}?{strings.Join(params, "&")}" }
   match stamp {

@@ -60,13 +60,17 @@ assert patch(a, {'parent':a['id']})[0] == 400
 assert patch(b, {'parent':other['id']})[0] == 400
 assert fresh(a)['parent'] == '' and fresh(b)['parent'] == a['id']
 for state in ('done', 'cancelled'):
-    assert patch(a, {'state':state})[0] == 400
+    code, refused = patch(a, {'state':state})
+    assert code == 409 and refused['data']['code'] == 'open_descendants'
     assert fresh(a)['state'] == 'todo'
+assert patch(a, {'state':'done','@lll_tree_force_close':True})[0] in (400,409)
+assert fresh(a)['state']=='todo'
 # Closing must roll back claim deletion if the descendant check refuses.
 code, claim = request('/api/lll/issues/' + a['id'] + '/claim', {'agent':'tree-test'})
 assert code == 200, (code, claim)
 body = {'claim_id':claim['claim_id'], 'agent':'tree-test'}
-assert request('/api/lll/issues/' + a['id'] + '/close', body)[0] == 400
+code, refused = request('/api/lll/issues/' + a['id'] + '/close', body)
+assert code == 409 and refused['data']['code'] == 'open_descendants'
 claims = request('/api/collections/claims/records?filter=' + urllib.parse.quote('issue="' + a['id'] + '"'))[1]['items']
 assert len(claims) == 1 and claims[0]['id'] == claim['claim_id']
 assert request('/api/lll/issues/' + a['id'] + '/close', dict(body, force=True))[0] == 200
@@ -135,6 +139,27 @@ roots = json.loads(cli('issue','list','--parent','none','--json').stdout)
 assert all(r['parent']=='' for r in roots['items'])
 assert cli('issue','list','--parent',fk,'--under',fk,success=False).returncode==2
 assert cli('issue','list','--under','',success=False).returncode==2
+# Explicit --force is required even with piped input; there is no implicit
+# confirmation or cascade, and a refused close keeps the parent open.
+close_refused = cli('issue','close',fk,success=False)
+assert close_refused.returncode==4 and f"lll issue close {fk} --force" in close_refused.stderr
+assert fresh(filtered_root)['state']=='todo'
+cli('issue','close',fk,'--force')
+assert fresh(filtered_root)['state']=='done' and fresh(leaf)['state']=='todo'
+cli('issue','update',fk,'--state','todo')
+state_refused = cli('issue','update',fk,'--state','cancelled',success=False)
+assert state_refused.returncode==4 and f"--state cancelled --force" in state_refused.stderr
+cli('issue','update',fk,'--state','cancelled','--force')
+assert fresh(filtered_root)['state']=='cancelled' and fresh(leaf)['state']=='todo'
+cli('issue','update',fk,'--state','todo')
+cli('issue','claim',fk,'--agent','tree-close')
+held = json.loads(cli('issue','view',fk,'--json').stdout)['claim']['id']
+combined_refused = cli('issue','update',fk,'--state','done','--assignee',who['name'],'--agent','tree-close',success=False)
+assert combined_refused.returncode==4 and fresh(filtered_root)['state']=='todo'
+assert json.loads(cli('issue','view',fk,'--json').stdout)['claim']['id']==held
+cli('issue','update',fk,'--state','done','--assignee',who['name'],'--agent','tree-close','--force')
+assert json.loads(cli('issue','view',fk,'--json').stdout)['claim'] is None
+assert fresh(filtered_root)['state']=='done' and fresh(leaf)['state']=='todo'
 # Equal version strings do not authorize a parent write. No POST/PATCH is
 # allowed through this proxy, even when all ordinary record reads succeed.
 class NoParents(http.server.BaseHTTPRequestHandler):

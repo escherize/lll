@@ -2,6 +2,7 @@ package gopb
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/pocketbase/dbx"
 	validation "github.com/pocketbase/ozzo-validation/v4"
@@ -103,7 +104,7 @@ func checkIssueTreeClose(app core.App, issue *core.Record) error {
 	if count == 0 {
 		return nil
 	}
-	return treeRefusal("validation_open_descendants", fmt.Sprintf("this issue has %d open descendant(s); finish them first or explicitly force the close", count))
+	return withCode(router.NewApiError(http.StatusConflict, fmt.Sprintf("this issue has %d open descendant(s); finish them first or explicitly force the close", count), nil), "open_descendants")
 }
 
 // The native records and composite assignment routes share the same refusal

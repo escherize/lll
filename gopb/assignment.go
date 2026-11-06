@@ -184,6 +184,7 @@ func updateAssignment(app core.App, issueID, expectedClaimID string, fields assi
 			}
 		}
 		fields.apply(issue)
+		issue.Set(treeForceCloseKey, by.force)
 		return tx.Save(issue)
 	})
 	if err != nil {

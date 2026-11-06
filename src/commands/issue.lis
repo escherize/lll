@@ -282,7 +282,7 @@ fn issue_update_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--force",
-      help: "with --assignee none: clear a claim another member, or another agent label on your token, holds; leaves a comment on the issue",
+      help: "with --state done|cancelled: finish despite open descendants (leaves them unchanged);\nwith --assignee none: clear another holder's claim, leaving a comment",
       ..,
     },
     reason_flag("update"),
@@ -316,7 +316,7 @@ fn issue_close_spec() -> Slice<flags.Flag> {
     },
     flags.Flag {
       name: "--force",
-      help: "close an issue another member, or another agent label on your token, holds:\nreleases that claim and leaves a comment on the issue",
+      help: "close despite open descendants, leaving them unchanged;\nalso releases another holder's claim, leaving a comment on the issue",
       ..,
     },
     reason_flag("close"),
