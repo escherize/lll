@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Claim, release, renewal, assignment and close routes recheck archived-team
+  access after waiting for the issue lock, inside their write transaction
+  (LLL-752).
+
 - Native records writes check archived teams in their write transaction, so an
   archive cannot finish between the check and save; stale source-team reads
   cannot move or delete records out of an archived team (LLL-751).
