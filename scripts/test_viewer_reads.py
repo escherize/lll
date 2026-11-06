@@ -115,6 +115,16 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
         out = root / 'link.sse'
         streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={link}', board + '/events?team=ALPHA'],
                                         stdout=out.open('w'), stderr=subprocess.DEVNULL, start_new_session=True))
+        # LLL-741: URL spelling must not change initial or live delivery.
+        case_streams = []
+        for label, credential, spelling in [('full-upper', BOARD_TOKEN, 'ALPHA'),
+                                             ('full-mixed', BOARD_TOKEN, 'aLpHa'),
+                                             ('link-mixed', link, 'aLpHa')]:
+            capture = root / (label + '.sse')
+            case_streams.append(capture)
+            streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={credential}',
+                                             board + '/events?team=' + spelling],
+                                            stdout=capture.open('w'), stderr=subprocess.DEVNULL, start_new_session=True))
         gout = root / 'guest-issue.sse'
         streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={guest_tok}',
                                          board + '/events?page=issue&key=ALPHA-1'],
@@ -127,10 +137,14 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
             assert needle in path.read_text(), f'{path.name}: never saw {needle!r}'
 
         wait_for(out, 'alpha work')
+        for capture in case_streams:
+            wait_for(capture, 'alpha work')
         wait_for(gout, 'alpha work')
         call(api, f"/api/collections/issues/records/{ib['id']}", {'title': 'zebra moved'}, su, 'PATCH')
         call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha moved'}, su, 'PATCH')
         wait_for(out, 'alpha moved')
+        for capture in case_streams:
+            wait_for(capture, 'alpha moved')
         wait_for(gout, 'alpha moved')
         time.sleep(.5)
         for marker in HIDDEN:
