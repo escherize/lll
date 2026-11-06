@@ -125,7 +125,7 @@ fn whoami(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     let expired = ctx.expired_token_message()
     if let Err(down) = ctx.get_as("/api/health", "") {
       if let pb.ErrorKind.Network = down.kind {
-        return Err(expired.with_message(f"{expired.message}\nand the server does not answer: {down.message}"))
+        return Err(expired.with_message(f"{down.message}\nafter fixing the server URL or connectivity, replace the expired credential:\n{expired.message}"))
       }
     }
     return Err(expired)

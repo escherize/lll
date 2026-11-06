@@ -1,0 +1,17 @@
+#[test]
+fn project_layout_keeps_team_project_and_common_filters() {
+  let q = ViewQuery { project: "Release & QA", state: "todo", assignee: "Ada L", label: "bug", .. }
+  let layout = project_layout("ENG", q, "list")
+  assert layout.list_href == "/t/ENG/issues?state=todo&assignee=Ada+L&label=bug&project=Release+%26+QA"
+  assert layout.board_href == "/t/ENG/?state=todo&assignee=Ada+L&label=bug&project=Release+%26+QA"
+  assert layout.project == "Release & QA"
+  assert layout.active == "list"
+  assert project_layout("OPS", q, "board").board_href == "/t/OPS/?state=todo&assignee=Ada+L&label=bug&project=Release+%26+QA"
+}
+
+#[test]
+fn a_multi_project_board_is_not_a_single_project_view() {
+  // The table accepts one project, so offering it for a set would widen scope.
+  assert project_layout("ENG", ViewQuery { project: "Alpha,Beta", .. }, "board").project == ""
+  assert project_layout("ENG", ViewQuery { .. }, "list").project == ""
+}

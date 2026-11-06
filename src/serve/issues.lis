@@ -195,6 +195,7 @@ fn issues_page(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>, tea
 
   let rows = list.items.map(card_vm)
   let vm = IssuesVM {
+    layout: project_layout(team.key, q, "list"),
     base,
     cols: issue_cols(q, base),
     rows,

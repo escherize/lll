@@ -145,6 +145,27 @@ with tempfile.TemporaryDirectory(prefix='lll-views-refresh-') as directory:
         board = wait_banner(secondary, log)
         with urllib.request.urlopen(urllib.request.Request(board + '/t/RVW/', headers={'Cookie': cookie}), timeout=15) as response:
             assert b'Kept saved view' in response.read()
+        # Deletion is a workspace action, including on pages without Datastar.
+        deletable = request('/api/collections/views/records', {'name': 'Delete from rail', 'query': 'state=todo'}, token)
+        def delete_view(view_id, origin=board):
+            req = urllib.request.Request(board + '/views/delete', data=urllib.parse.urlencode({'id': view_id}).encode(), headers={'Cookie': cookie, 'Origin': origin, 'Content-Type': 'application/x-www-form-urlencoded'})
+            try:
+                response = urllib.request.urlopen(req, timeout=15)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                return response.status, response.read().decode()
+        status, _ = delete_view(deletable['id'], 'https://foreign.invalid')
+        assert status == 403, 'cross-origin deletion was admitted'
+        status, body = delete_view(deletable['id'])
+        assert status == 204 and body == '', 'delete must not return a snapshot that can race live refreshes'
+        remaining = request('/api/collections/views/records', token=token)['items']
+        assert all(v['id'] != deletable['id'] for v in remaining), 'view was not deleted'
+        assert any(v['id'] == kept['id'] for v in remaining), 'deletion removed another view'
+        status, _ = delete_view('')
+        assert status == 400, 'missing view id was accepted'
+        status, _ = delete_view(deletable['id'])
+        assert status == 400, 'stale deletion hid the error'
         stream = Stream(board)
         stream.until(lambda e: 'id="board"' in e)
         Proxy.fail.set()
@@ -164,7 +185,7 @@ with tempfile.TemporaryDirectory(prefix='lll-views-refresh-') as directory:
         stream.until(lambda e: 'id="rail-views"' in e and 'Created after recovery' in e)
         for view in (kept, trigger, created):
             request('/api/collections/views/records/' + view['id'], token=token, method='DELETE')
-        empty = stream.until(lambda e: 'id="rail-views"' in e and 'class="rg-empty"' in e)[-1]
+        empty = stream.until(lambda e: 'id="rail-views"' in e and '<p class="rg-empty">' in e)[-1]
         assert all((name not in empty for name in ('Kept saved view', 'Recovered saved view', 'Created after recovery'))), empty
         print('Saved views: failed realtime read preserves prior group; page fallback, recovery/update/create and actual empty deletion pass')
     finally:

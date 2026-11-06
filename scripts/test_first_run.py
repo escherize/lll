@@ -34,10 +34,14 @@ def clean_env(home):
     return env
 
 
-def boot(directory, env, log):
+def boot(directory, env, log, answer=None):
     with log.open('w') as output:
         child = subprocess.Popen([binary, 'up', '--no-open', '--port', str(port())], cwd=directory, env=env,
-                                 stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+                                 stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+                                 stdin=subprocess.PIPE if answer is not None else None, text=True)
+    if answer is not None:
+        child.stdin.write(answer)
+        child.stdin.close()
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         text = log.read_text()
@@ -61,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
     board_dir.mkdir(parents=True)
     env = clean_env(home)
     api = f'http://127.0.0.1:{port()}'
-    child, banner = boot(board_dir, dict(env, LLL_TEAM='FIRST', LLL_URL=api), root / 'up.log')
+    child, banner = boot(board_dir, dict(env, LLL_TEAM=' first ', LLL_URL=api), root / 'up.log')
     try:
         assert re.search(r'^admin  admin@local\.dev; generated password in \S+/\.lll-admin\.json ', banner, re.M), banner
         assert 'admin-local-123' not in banner, banner
@@ -190,5 +194,22 @@ with tempfile.TemporaryDirectory(prefix='lll-first-run-') as tmp:
         os.killpg(child.pid, 15)
         child.wait(timeout=15)
 
-print('first run: README walk, CLI auto-login, a pasted agent prompt (none under a shell token), '
+    # A typed key keeps its full identifier, normalized like team create/attach.
+    prompt_home = root / 'prompt-home'
+    prompt_dir = prompt_home / 'board'
+    prompt_dir.mkdir(parents=True)
+    prompt_env = clean_env(prompt_home)
+    child, banner = boot(prompt_dir, dict(prompt_env, LLL_URL=f'http://127.0.0.1:{port()}'),
+                         root / 'prompt.log', answer='  rci-notes_v2  \n')
+    try:
+        persisted = (prompt_dir / '.lll.toml').read_text()
+        assert 'team = "RCI-NOTES_V2"' in persisted, persisted
+        assert '\nteam   RCI-NOTES_V2\n' in banner, 'banner team differs from persisted key'
+        out = run(prompt_dir, prompt_env, 'issue', 'create', '-t', 'Typed team check')
+        assert out.returncode == 0 and 'RCI-NOTES_V2-1' in out.stdout, out.stdout + out.stderr
+    finally:
+        os.killpg(child.pid, 15)
+        child.wait(timeout=15)
+
+print('first run: normalized configured/typed teams, README walk, CLI auto-login, a pasted agent prompt (none under a shell token), '
       'own password change and a kept hosted url passed')

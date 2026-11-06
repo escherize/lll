@@ -418,7 +418,7 @@ fn finish_login(
   out = out.then(settle_team(ctx.with_url(plan.server).with_token(token, saved_from), read_only))
   let saved_cfg = ctx.settings.reload().config().map_err(|e| pb.failed(e).after(out))?
   if saved_cfg.web_url == "" {
-    out = out.line("board endpoint: run 'lll config set web_url URL' with the board address supplied by your deployer")
+    out = out.line("board endpoint (optional): to open the web board, run 'lll config set web_url URL' with the board address supplied by your deployer")
   }
   Ok(out)
 }

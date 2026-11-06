@@ -152,6 +152,7 @@ fn every_non_get_request_must_come_from_the_boards_own_origin() {
     "/claim",
     "/labels",
     "/views/save",
+    "/views/delete",
     "/login",
     "/join/abc",
     "/static/theme.css",

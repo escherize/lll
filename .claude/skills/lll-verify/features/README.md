@@ -15,6 +15,7 @@ lists others.** If your change touches the board and the issue page, drive both.
 | [Search](search.md) | `browser_search.js` | inline (`search_ordering`) |
 | [Issue list and sort](issues.md) | `browser_issue_sort.js`, `browser_board_pagination.js` | inline, `test_board_pagination.py` |
 | [Drafts and forms](drafts.md) | `browser_settings_drafts.js`, `browser_create_failure.js`, `browser_state_failure.js` | inline |
+| [Projects](projects.md) | `browser_project_groups.js` | inline (`e2e_web.sh`) |
 | [Attachments](attachments.md) | `browser_attachments.js` | `test_attachments.py` |
 
 Other drivers in the suite, without their own page because no issue has needed

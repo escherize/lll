@@ -166,7 +166,7 @@ fn command(
   if let Some(sub) = resolve_command(c.verbs, word) {
     return command(nouns, noun, f"{path} {sub.name}", sub, args, start + 1)
   }
-  if let Some(hint) = sub_verb_guess(path, c, word, args.get(start + 1).unwrap_or("")) { return Err(usage_error(hint)) }
+  if let Some(hint) = sub_verb_guess(nouns, path, c, word, args.get(start + 1).unwrap_or("")) { return Err(usage_error(hint)) }
   let usage = usage(path, c.spec, c.positional)
   // Help first: no flag error, missing argument or required flag may answer
   // a request for help (TASK-237), and nothing runs.

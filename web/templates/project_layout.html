@@ -1,0 +1,4 @@
+{{define "project-layout"}}{{if .Project}}<nav class="project-layout" aria-label="Issue layout">
+<a href="{{.ListHref}}" aria-label="List view" title="List view"{{if eq .Active "list"}} aria-current="page"{{end}}><svg width="14" height="14" aria-hidden="true"><use href="#ic-issues"/></svg></a>
+<a href="{{.BoardHref}}" aria-label="Board view" title="Board view"{{if eq .Active "board"}} aria-current="page"{{end}}><svg width="14" height="14" aria-hidden="true"><use href="#ic-board"/></svg></a>
+</nav>{{end}}{{end}}

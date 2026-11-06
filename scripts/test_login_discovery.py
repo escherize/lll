@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory() as directory:
             output = login(target)
             assert saved_board() is None, (status, 'stale or unverified endpoint persisted')
             assert 'logged in as e2e' in output
-            assert 'board endpoint: run' in output
+            assert 'board endpoint (optional):' in output
         # An environment API override must not hide a saved server switch.
         login(api, '--web-url', override)
         env['LLL_URL'] = target

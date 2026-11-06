@@ -136,6 +136,47 @@ def harness_checks():
                 assert str(error) == 'case/run paths must be fresh', error
             else:
                 raise AssertionError('accepted reused case/run path')
+        live_boards = []
+
+        class LiveBoard:
+            def __init__(self, binary, controls, case, seats):
+                self.seats = seats
+                self.closed = self.judged = 0
+                self.audit = controls / 'private-audit.jsonl'
+                private_write(self.audit, 'captured evidence\n')
+                live_boards.append(self)
+
+            def judge(self):
+                assert not self.closed and self.audit.read_text() == 'captured evidence\n'
+                self.judged += 1
+                return {'pass': True}
+
+            def close(self):
+                self.closed += 1
+
+        def live_commands():
+            yield '{"action":"provision","case":"01","workers":1}\n'
+            yield '{"action":"judge"}\n'
+            yield '{"action":"provision","case":"02","workers":1}\n'
+            assert len(live_boards) == 1 and not live_boards[0].closed
+            assert live_boards[0].audit.read_text() == 'captured evidence\n'
+            yield '{"action":"judge"}\n'
+            yield '{"action":"exit"}\n'
+
+        live_root = root / 'live-run'
+        args = SimpleNamespace(root=live_root, binary=fake, commit='fixture',
+                               sha256=hashlib.sha256(fake.read_bytes()).hexdigest())
+        replies = io.StringIO()
+        with patch('sys.stdin', live_commands()), patch('sys.stdout', replies), \
+             patch('agent_dx_fleet.Board', LiveBoard):
+            serve(args)
+        messages = [json.loads(line) for line in replies.getvalue().splitlines()]
+        errors = [m for m in messages if 'error' in m]
+        assert len(errors) == 1 and 'stop previous case' in errors[0]['error'], messages
+        judgments = [m for m in messages if 'artifacts_passed' in m]
+        assert len(judgments) == 2 and all(m['case'] == '01' for m in judgments), messages
+        assert live_boards[0].judged == 2 and live_boards[0].closed == 1
+        assert not (live_root / 'case-02-run-1').exists()
         exited = subprocess.Popen([sys.executable, '-c', 'pass'])
         exited.wait(timeout=5)
         exited.terminate = lambda: (_ for _ in ()).throw(AssertionError('re-signaled reaped child'))
