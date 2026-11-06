@@ -22,7 +22,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 from agent_dx_fleet import (CASES, audit_path, conn_file, connection, private_dir, private_write, public_snapshot,
-                            publish_audit, serve, stop, wrapper_env)
+                            publish_audit, serve, stop, wrapper_env, credential_helper)
 
 HERE = Path(__file__).resolve().parent
 
@@ -121,6 +121,47 @@ def harness_checks():
         snapshot = {'webhooks': [{'id': 'hook', 'secret': 'throwaway-hook-secret'}]}
         assert public_snapshot(snapshot)['webhooks'][0]['secret'] == '[REDACTED]'
         assert snapshot['webhooks'][0]['secret'] == 'throwaway-hook-secret'
+        # Helpers invoke the same audited wrapper, without token-bearing shell
+        # commands, eval, argv or output. Preserve native refusal exit codes.
+        helper_log = root / 'helper-invocations.jsonl'
+        helper_wrapper = worker / 'lll'
+        helper_wrapper.write_text('#!/usr/bin/env python3\nimport os,sys,json\nfrom pathlib import Path\n'
+            f'log=Path({str(helper_log)!r})\n'
+            'args=sys.argv[1:]\n'
+            'if args==["login","--token","-"]:\n'
+            ' assert sys.stdin.read()=="throwaway-test-token\\n"\n'
+            'else:\n'
+            ' assert args==["whoami"] and os.environ["LLL_TOKEN"]=="helper-test-token"\n'
+            ' assert "LLL_CONFIG_HOME" not in os.environ\n'
+            'with log.open("a") as out: out.write(json.dumps(args)+"\\n")\n'
+            'print("safe identity output")\n'
+            'sys.exit(6 if args==["whoami"] else 0)\n')
+        helper_wrapper.chmod(0o700)
+        assert credential_helper(worker, 'login', []) == 0
+        token_file = worker / 'helper.env'
+        token_file.write_text('export LLL_TOKEN=helper-test-token\nexport UNTRUSTED=$(touch should-not-exist)\n')
+        with patch.dict(os.environ, {'LLL_CONFIG_HOME': '/outside-worker'}):
+            assert credential_helper(worker, 'as-helper', ['helper.env']) == 6
+        assert not (worker / 'should-not-exist').exists()
+        assert [json.loads(line) for line in helper_log.read_text().splitlines()] == [
+            ['login', '--token', '-'], ['whoami']]
+        outside = root / 'outside.env'
+        outside.write_text('export LLL_TOKEN=not-allowed\n')
+        (worker / 'outside-link.env').symlink_to(outside)
+        for path in ('../outside.env', 'outside-link.env', 'missing.env'):
+            try:
+                credential_helper(worker, 'as-helper', [path])
+            except SystemExit as error:
+                assert 'inside your worker directory' in str(error)
+            else:
+                raise AssertionError('helper accepted a foreign or absent file')
+        token_file.write_text('not a token export\n')
+        try:
+            credential_helper(worker, 'as-helper', ['helper.env'])
+        except SystemExit as error:
+            assert 'no token export' in str(error)
+        else:
+            raise AssertionError('helper silently used the primary identity')
         run_root = root / 'fresh-run'
 
         def commands():
@@ -354,7 +395,8 @@ def w14(w, right):
     w.run('config', 'set', 'url', url)
     assert w.run('whoami', check=False).returncode == 6
     if right:
-        w.run('login', '--token', '-', stdin=token + '\n')
+        recovered = subprocess.run([str(w.dir / 'fleet-login')], cwd=w.dir, capture_output=True, text=True, timeout=30)
+        assert recovered.returncode == 0, recovered.stderr
         w.run('whoami')
     w.report()
 
@@ -365,8 +407,8 @@ def w15(w, right):
     old.write_text(w.run('bot', 'create', name, '--env').stdout)
 
     def as_helper(path):
-        token = next(l.split('=', 1)[1].strip('\'"') for l in path.read_text().splitlines() if 'LLL_TOKEN=' in l)
-        return w.run('whoami', env={'LLL_TOKEN': token}, check=False)
+        return subprocess.run([str(w.dir / 'fleet-as-helper'), path.name], cwd=w.dir,
+                              capture_output=True, text=True, timeout=30)
     assert as_helper(old).returncode == 0
     if right:
         new.write_text(w.run('bot', 'rotate', name, '--env').stdout)

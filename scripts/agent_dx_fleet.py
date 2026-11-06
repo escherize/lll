@@ -228,6 +228,29 @@ def wrapper_main():
     raise SystemExit(code)
 
 
+
+def credential_helper(worker, kind, args):
+    """Pass credentials only through stdin/environment to the audited wrapper."""
+    worker = worker.resolve()
+    env = dict(os.environ)
+    if kind == 'login' and not args:
+        token = connection(conn_file(worker))[1]
+        return subprocess.run([str(worker / 'lll'), 'login', '--token', '-'],
+                              cwd=worker, env=env, input=token + '\n', text=True).returncode
+    if kind == 'as-helper' and len(args) == 1:
+        path = (worker / args[0]).resolve()
+        if worker not in path.parents or not path.is_file():
+            raise SystemExit('fleet-as-helper: name an environment file inside your worker directory')
+        token = env_token(path)
+        if not token:
+            raise SystemExit('fleet-as-helper: file has no token export; rotate into it again')
+        env['LLL_TOKEN'] = token
+        # The supplied token is the deliberate identity switch, not ambient config.
+        env.pop('LLL_CONFIG_HOME', None)
+        return subprocess.run([str(worker / 'lll'), 'whoami'], cwd=worker, env=env).returncode
+    raise SystemExit('usage: fleet-login | fleet-as-helper ENV_FILE')
+
+
 def foreign_url(args, url):
     """Whether a call names a server other than the board (--url X, config set url X)."""
     named = [value for flag, value in zip(args, args[1:]) if flag == '--url']
@@ -355,13 +378,19 @@ class Board:
         (seat.worker / 'lll').write_text(wrapper)
         (seat.worker / 'lll').chmod(0o700)
         if self.case == '14':
-            # Case 14 needs the right url and a valid token as inputs. Helpers
-            # print them so no worker opens a credentials file (run 1: the
-            # sandbox refused `sed -n 2p conn.txt` for one worker).
-            for name, line in (('fleet-url', 1), ('fleet-token', 2)):
+            # Supply the public URL separately; fleet-login transfers the token
+            # directly to the CLI instead of asking a worker to build a pipe.
+            for name, line in (('fleet-url', 1),):
                 helper = seat.worker / name
                 helper.write_text(f'#!/bin/sh\nsed -n {line}p {str(target)!r}\n')
                 helper.chmod(0o700)
+
+        if self.case in ('14', '15'):
+            name, kind = ('fleet-login', 'login') if self.case == '14' else ('fleet-as-helper', 'as-helper')
+            helper = seat.worker / name
+            helper.write_text(f'#!/usr/bin/env python3\nimport os\nos.execv({sys.executable!r}, [{sys.executable!r}, '
+                              f'{str(script)!r}, "credential-helper", {str(seat.worker)!r}, {kind!r}, *os.sys.argv[1:]])\n')
+            helper.chmod(0o700)
 
     def close(self):
         if self.child:
@@ -1161,6 +1190,8 @@ def serve(args):
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'wrapper':
         wrapper_main()
+    if len(sys.argv) > 1 and sys.argv[1] == 'credential-helper':
+        raise SystemExit(credential_helper(Path(sys.argv[2]), sys.argv[3], sys.argv[4:]))
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--binary', required=True, type=Path)
