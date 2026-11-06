@@ -2,6 +2,29 @@ import "models"
 import "query"
 
 #[test]
+fn parent_progress_counts_direct_children_by_their_own_closed_state() {
+  let closed = models.Issue { id: "closed", parent: "root", state_wire: "done", .. }
+  let tree = index_issue_tree([
+    models.Issue { id: "root", .. },
+    closed,
+    models.Issue { id: "cancelled", parent: "root", state_wire: "cancelled", .. },
+    models.Issue { id: "unknown", parent: "root", state_wire: "future-state", .. },
+    models.Issue { id: "grandchild", parent: "closed", state_wire: "todo", .. },
+    closed,
+    models.Issue { id: "unrelated", state_wire: "done", .. },
+  ])
+  let progress = tree.summary(models.IssueId("root"))
+  assert progress.done == 2
+  assert progress.total == 3
+  let children = tree.direct_children(models.IssueId("root"))
+  assert children.map(|i| i.id.string()).equals(["closed", "cancelled", "unknown"])
+  assert tree.summary(models.IssueId("closed")).done == 0
+  assert tree.summary(models.IssueId("closed")).total == 1
+  assert tree.summary(models.IssueId("unknown")).total == 0
+  assert tree.direct_children(models.IssueId("hidden-or-missing")).is_empty()
+}
+
+#[test]
 fn a_subtree_includes_its_root_and_every_depth_but_not_siblings() {
   let mut links = [models.Issue { id: "root", .. }, models.Issue { id: "other", .. }]
   let mut parent = models.IssueId("root")
