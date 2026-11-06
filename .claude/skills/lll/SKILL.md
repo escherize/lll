@@ -172,6 +172,11 @@ the creator minted. A bot without a human owner cannot provision this way.
 Bots and owned identities cannot create person accounts to escape that bound.
 
 Use `lll bot rotate NAME` to replace a leaked token, not another create call.
+For setup scripts, use `lll bot create bot-NAME --json` or
+`lll bot rotate NAME --json`. Each returns one credential object with
+`name`, `url`, `token` and `team`.
+`team` is empty unless explicitly supplied as handoff context; it changes no
+grants. JSON needs no configured team and excludes `--env`.
 Only the authorized owner, creator or administrator can rotate; a revoked or
 read-only creator cannot mint tokens. Treat token output as a credential, not
 a report artifact. Existing API names and covered fields are separate from
