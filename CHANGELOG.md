@@ -8,6 +8,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Access prompts verify that the selected identity can read the advertised team, including current bot-owner limits, and explain incompatible selections without widening access.
+
+- Serialize member creation with owner changes so concurrent administrator
+  writes cannot form a forbidden ownership chain (LLL-622).
+
+- Non-interactive password-login hints show the existing private-file/stdin
+  path, keeping passwords out of command arguments and shell history (LLL-732).
+
 - Fleet wrappers leave the agent label unset instead of attributing every
   worker to Codex, and still discard inherited controller labels (LLL-727).
 
@@ -55,6 +63,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- Access-page token minting offers a one-time, copyable agent prompt with the
+  viewed team and actual board address (LLL-507).
+
 - The workspace board login can delete shared saved views from the sidebar.
   Project views offer List/Board links that retain filters, and Projects groups
   rows by status with per-team browser collapse preferences (LLL-738; PR #387).
@@ -94,6 +105,14 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   failed (expired, or force-released by someone else) (LLL-705).
 
 ### Changed
+
+- Make the shipped factory guides portable across repositories, clarify
+  labelled claim continuation and PR handoff, and cover protocol/access races
+  without prescribing writes into generated build output (LLL-711).
+
+- README and top-level help lead with shared agent memory and one new-owner
+  path. The owner guide connects tasks, findings and decisions; setup explains
+  invitation-token login and optional agent workflows (LLL-735).
 
 - `lll issue next --claim` hands back the caller's own held ready issue, exit
   0 with the key on stdout and `Resuming KEY: already claimed by ...` on

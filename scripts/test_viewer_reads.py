@@ -92,6 +92,7 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
             return rec, call(api, f"/api/collections/members/impersonate/{rec['id']}", {'duration': 3600}, su)[1]['token']
 
         guest, guest_tok = member('alpha-guest', scope='teams', teams=[alpha['id']], mode='rw')
+        _, readonly_tok = member('alpha-reader', scope='teams', teams=[alpha['id']], mode='ro')
         link = 'ALPHA.' + hmac.new(BOARD_TOKEN.encode(), b'ALPHA', hashlib.sha256).hexdigest()
 
         def page(path, tok):
@@ -120,6 +121,11 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
                                          board + '/events?page=issue&key=ALPHA-1'],
                                         stdout=gout.open('w'), stderr=subprocess.DEVNULL, start_new_session=True))
 
+        rout = root / 'readonly-issue.sse'
+        streams.append(subprocess.Popen(['curl', '-sN', '-H', f'Cookie: lll_board={readonly_tok}',
+                                         board + '/events?page=issue&key=ALPHA-1'],
+                                        stdout=rout.open('w'), stderr=subprocess.DEVNULL, start_new_session=True))
+
         def wait_for(path, needle):
             deadline = time.monotonic() + 15
             while needle not in path.read_text() and time.monotonic() < deadline:
@@ -128,15 +134,24 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
 
         wait_for(out, 'alpha work')
         wait_for(gout, 'alpha work')
+        wait_for(rout, 'alpha work')
         call(api, f"/api/collections/issues/records/{ib['id']}", {'title': 'zebra moved'}, su, 'PATCH')
         call(api, f"/api/collections/issues/records/{ia['id']}", {'title': 'alpha moved'}, su, 'PATCH')
         wait_for(out, 'alpha moved')
         wait_for(gout, 'alpha moved')
+        wait_for(rout, 'alpha moved')
         time.sleep(.5)
         for marker in HIDDEN:
             assert marker not in out.read_text(), f'link stream leaked {marker!r}'
         # Read as the guest, the live detail offers the guest's own claim.
-        assert 'Claim as alpha-guest' in gout.read_text(), 'live issue fragment does not name the viewer'
+        live_detail = gout.read_text().rsplit('id="issue-detail"', 1)[-1]
+        assert 'alpha moved' in live_detail, 'latest detail did not contain the update'
+        assert 'Claim as alpha-guest' in live_detail, 'live issue fragment does not name the viewer'
+
+        # LLL-627: read-only viewers must stay read-only after a live update.
+        readonly_fragments = rout.read_text()
+        assert 'id="claim-form"' not in readonly_fragments, 'live update restored a read-only claim form'
+        assert 'Claim as ' not in readonly_fragments, 'live update offered a read-only claim'
 
         # --- only a caller that sees every team gets a link reader ---
         assert call(api, '/api/lll/link-token', {'team': 'ALPHA'}, guest_tok)[0] == 403, 'a scoped member got a link token'

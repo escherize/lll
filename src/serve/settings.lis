@@ -468,6 +468,7 @@ fn marshal(value: Unknown) -> Result<string, pb.CliError> {
 pub struct AccessTokenVM {
   pub name: string,
   pub token: string,
+  pub prompt: string,
 }
 
 /// PATCH body for credentialing a member: the login identity and the
@@ -532,7 +533,19 @@ fn access_member(ctx: pb.Client, r: mut Ref<http.Request>) -> Result<models.Memb
 /// so a token minted from the board still died in under a week, silently. It
 /// borrows the CLI's `default_token_duration` rather than restating a year in
 /// seconds: two doors onto one mint should not be able to drift apart.
-fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
+fn access_token_write(
+  ctx: pb.Client,
+  _v: Viewing,
+  w: http.ResponseWriter,
+  r: mut Ref<http.Request>,
+) -> Result<string, pb.CliError> {
+  w.Header().Set("Cache-Control", "no-store")
+  let Some(team) = records.find_team(ctx, r.PathValue("team"))? else {
+    return Err(pb.failed("no team with that key on this server"))
+  }
+  // The board proxies /api/ at the browser's origin; use the same validated
+  // origin as Add a bot, never the internal API listener or the boot team.
+  let origin = request_origin(r)?
   let member = access_member(ctx, r)?
   let su = verify_admin(ctx, r.PostFormValue("admin_password"))?
   let body = ctx.post_as(
@@ -541,11 +554,32 @@ fn access_token_write(ctx: pb.Client, _v: Viewing, r: mut Ref<http.Request>) -> 
     su,
   )?
   let tok = tokens.decode_auth(body, "the impersonate response")?
+  // Read as this identity, including its current owner/creator bounds.
+  // Authentication alone does not make the prompt's selected team usable.
+  let visible_team = records.find_team_as(ctx, tok, team.key)?
+  if visible_team.is_none() {
+    return Err(pb.failed(f"{member.name} cannot see team {team.key}; choose a member with access, or switch to their team before minting the prompt"))
+  }
   let html = render(
     "access-token-result",
-    AccessTokenVM { name: member.name, token: tok },
+    AccessTokenVM {
+      name: member.name,
+      token: tok,
+      prompt: access_agent_prompt(member.name, origin, team.key, tok),
+    },
   )?
   Ok(patch_event(html) + mint_expiry_event(time.Now()))
+}
+
+/// Shell-safe and complete without attaching or writing credentials to a repo.
+fn access_agent_prompt(name: string, origin: string, team: string, token: string) -> string {
+  let identity = tokens.shell_word(f"You act as {name} on lll team {team}.")
+  let board = tokens.shell_word(f"Board for a human: {origin}/t/{team}/")
+  f"true {identity}\n" + tokens.agent_env(origin, token) +
+  f"export LLL_TEAM={tokens.shell_word(team)}\n" +
+  "lll skill get software-factory\n" +
+  tokens.prose("Claim an issue before writing code; record findings on the board.") +
+  f"true {board}\n"
 }
 
 /// The impersonate request body the Access mint sends, duration included.
