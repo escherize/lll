@@ -220,7 +220,7 @@
 {{range .Members}}<option value="{{.Id}}">{{.Name}}</option>
 {{end}}</select>
 <input name="admin_password" type="password" placeholder="Admin password" autocomplete="off" aria-label="Admin password" class="set-second">
-<button type="button" class="btn" data-on:click="@post('/settings/access/token', {contentType: 'form'})">Mint token</button>
+<button type="button" class="btn" data-on:click="@post('/t/{{$.TeamKey}}/settings/access/token', {contentType: 'form'})">Mint token</button>
 </form>
 <div id="access-token-result"></div>
 
@@ -244,6 +244,9 @@
 {{define "access-token-result"}}<div id="access-token-result" class="access-token">
 <p class="set-note">One-time agent token for <strong>{{.Name}}</strong>, shown only here. Use it as <code>LLL_TOKEN=…</code>, or persist it as <code>token = "…"</code> in <code>~/.config/lll/lll.toml</code> (never the committed <code>.lll.toml</code>).</p>
 <code class="access-token-value">{{.Token}}</code>
+<p class="set-note">Paste this prompt into the agent. Reloading clears it.</p>
+<pre id="access-agent-prompt" class="access-token-value" tabindex="0">{{.Prompt}}</pre>
+<button type="button" class="btn" data-copy-from="access-agent-prompt">Copy agent prompt</button>
 </div>{{end}}
 
 {{/* The row's delete control requests a server-rendered impact review.

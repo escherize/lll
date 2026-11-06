@@ -1460,6 +1460,8 @@ python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_viewer_reads.py "$LLL_ABS"
 # --- every registered non-GET board route refuses another origin (LLL-630) ---
 python3 "$REPO_ROOT"/scripts/test_board_origin.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_access_agent_prompt.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_access_agent_prompt.py "$LLL_ABS" lan
 # --- invite create + /join/<code>: single-use, bounded by the creator (LLL-544) ---
 python3 "$REPO_ROOT"/scripts/test_invites.py "$LLL_ABS"
 # --- the real invites migration on a board with names differing only by case ---
