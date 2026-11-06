@@ -32,6 +32,14 @@ fn timestamps_become_rfc3339_at_any_depth_and_nothing_else_moves() {
 }
 
 #[test]
+fn last_activity_uses_the_same_rfc3339_contract_as_other_dates() {
+  let raw = "{\"last_activity\":\"2026-11-06 09:00:00.123Z\",\"items\":[{\"last_activity\":\"2026-11-06 09:01:00.456Z\"}]}"
+  let out = contract_json(raw.bytes() as json.RawMessage, 0) as string
+  assert out.contains("\"last_activity\":\"2026-11-06T09:00:00.123Z\"")
+  assert out.contains("\"last_activity\":\"2026-11-06T09:01:00.456Z\"")
+}
+
+#[test]
 fn an_issue_carries_its_key_and_claim() {
   let record = "{\"id\":\"i1\",\"number\":12,\"title\":\"t\",\"created\":\"2026-10-08 03:02:11.982Z\",\"expand\":{\"team\":{\"key\":\"ENG\"}}}"
   let unclaimed = issue_json(record.bytes() as json.RawMessage, None).unwrap_or(Map.new<string, json.RawMessage>())
