@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory(prefix='lll-658-') as directory:
             # The link viewer's PocketBase token never reaches the browser.
             assert 'eyJ' not in body and 'eyJ' not in str(headers), f'link {path} carries a token'
         for path in ['/t/BETA/', '/t/BETA', '/t/ALPHA/issue/BETA-1', '/issue/BETA-1', '/events?team=BETA',
-                     '/events?page=issue&key=BETA-1', '/t/BETA/search?q=zebra']:
+                     '/events?page=issue&key=BETA-1', '/events?team=beta', '/t/BETA/search?q=zebra']:
             assert page(path, link)[0] == 404, path
         assert 'zebra' in page('/t/BETA/', BOARD_TOKEN)[1], 'control: the board token sees BETA'
 

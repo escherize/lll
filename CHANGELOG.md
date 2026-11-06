@@ -8,6 +8,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Fixed
 
+- Board event subscriptions normalize team keys, so mixed-case URLs receive their initial snapshot and later updates without changing visibility checks.
+
 - Fleet wrappers leave the agent label unset instead of attributing every
   worker to Codex, and still discard inherited controller labels (LLL-727).
 
