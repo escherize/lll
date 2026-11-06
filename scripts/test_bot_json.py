@@ -57,6 +57,7 @@ def credentials(result, name, team=''):
 # No configured/visible team is needed. A known-invalid configured context
 # must not be mistaken for an access restriction or trigger attachment.
 first = credentials(cli('bot', 'create', 'bot-json-owner', '--json'), 'bot-json-owner')
+credentials(cli('bot', 'bot-json-bare', '--json'), 'bot-json-bare')
 created = members()['bot-json-owner']
 assert created['owner'] and created['kind'] == 'bot'
 owner_id = created['owner']
@@ -99,13 +100,14 @@ try:
         failure = cli('bot', verb, 'bot-json-bad-format', '--json', '--env', expected=2,
                       extra={'LLL_URL': f'http://127.0.0.1:{guard.server_port}'})
         assert not failure.stdout
-    cli('bot', 'create', 'bot-json-empty-context', '--json', '--team', '', expected=2,
-        extra={'LLL_URL': f'http://127.0.0.1:{guard.server_port}'})
     assert RejectIO.calls == 0, 'invalid format reached the server'
 finally:
     guard.shutdown()
     guard.server_close()
     thread.join(timeout=5)
+before = set(members())
+cli('bot', 'create', 'bot-json-empty-context', '--json', '--team', '', expected=2)
+assert set(members()) == before, 'empty context wrote a member'
 
 # Output format changes no authority. Another person and the bot itself
 # cannot rotate it; the human owner can, and the previous token retires.
@@ -147,7 +149,7 @@ for verb, name in [('rotate', 'bot-json-owner'), ('create', 'bot-json-lost-creat
     process.stdout = None
     _, error = process.communicate(timeout=30)
     error = error.decode()
-    assert process.returncode != 0 and 'not written anywhere' in error
+    assert process.returncode != 0 and 'not written anywhere' in error, f'output-loss exit={process.returncode}, stderr_empty={not error}'
     assert f'lll bot rotate {name} --json' in error and not jwt.search(error)
     assert name in members(), 'committed bot was hidden after output loss'
     credentials(cli('bot', 'rotate', name, '--json'), name)

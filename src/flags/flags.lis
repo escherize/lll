@@ -34,6 +34,9 @@ pub struct Flag {
   /// --password and --create'), so the parser does not call such a pair a
   /// stdin conflict first.
   pub excludes: Slice<string>,
+  /// When nonempty, reject excludes during parsing, before login renewal
+  /// or version discovery. Empty keeps the verb's existing custom refusal.
+  pub conflict_message: string,
 }
 
 pub struct Parsed {
@@ -181,6 +184,11 @@ pub fn parse_n(
   }
   let piped = spec.filter(|f| f.stdin && vals.get(f.name).unwrap_or([]).contains("-")).map(|f| f.name)
   let given = |name: string| vals.get(name).is_some()
+  for fl in spec {
+    if fl.conflict_message != "" && given(fl.name) && fl.excludes.any(given) {
+      return Err(usage_error(fl.conflict_message))
+    }
+  }
   let exclusive = spec.any(|f| given(f.name) && f.excludes.any(given))
   if piped.length() > 1 && !exclusive {
     return Err(usage_error(f"only one of {strings.Join(piped, " and ")} can read stdin ('-'); pass the other as a value"))
