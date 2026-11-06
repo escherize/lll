@@ -92,6 +92,28 @@ refused. Case 14 gets nothing from conn.txt: the CLI reads a seeded, broken
 config (wrong URL, expired token) in the worker's HOME, which the worker
 repairs. Cases 15 and 19 honour a worker-set `LLL_TOKEN` or `LLL_CONFIG_HOME`
 (inside the worker directory) so a worker can act as a second identity; the
-URL always comes from conn.txt. Cases 15 and 19 use a person identity: case15
+URL always comes from conn.txt.
+
+Before launching cases 15 and 19, clear ambient `LLL_TOKEN` and
+`LLL_CONFIG_HOME` from the worker environment. These override-mode wrappers
+honour inherited credentials as intentional identity switches; an operator's
+valid token for another board will therefore cause authentication failures.
+If the agent runner cannot set its tool environment, launch each shell call
+through a clean child, for example:
+
+```sh
+env -u LLL_TOKEN -u LLL_CONFIG_HOME sh -c './lll member access bot-helper-01'
+# For an intentional helper identity, set its exports inside the clean child:
+env -u LLL_TOKEN -u LLL_CONFIG_HOME sh -c 'sh as-helper.sh ./helper-01.env'
+```
+
+Keep using the supplied wrapper from the worker directory. Do not print token
+files or silently fall back to the fixture identity after a rejected helper
+token: the revoked-token check must still fail. Record and retain a
+contaminated launch as harness evidence, then use a fresh instance and worker.
+This changes the launch environment, not lll's credential precedence or the
+wrapper's server/config boundaries.
+
+Cases 15 and 19 use a person identity: case15
 exercises human-owned token provisioning, and case19 invites a person. A bot must never provision a person
 account; that would evade its owner's access boundary.
