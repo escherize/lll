@@ -13,8 +13,7 @@ syscall.Write/Syscall, os.Stdout and os.Stderr outside comments and string
 literals, and fails on any not inside a function ALLOW names. CALLERS then
 says who may call each allowed writer, so a verb cannot borrow one. A helper in another module that prints is the same
 bypass as a verb that prints, so the scan is not limited to src/commands.
-ALLOW is {
-    ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): {('src/commands/bot_lifecycle.lis', 'bot_remove_owned')},(path, fn): reason} for output that cannot wait for a return value:
+ALLOW is {(path, fn): reason} for output that cannot wait for a return value:
 a stream that runs until interrupted, progress of a long run, an interactive
 prompt that needs its answer first, a child process whose output passes
 straight through, and the renderer itself. An entry that no longer writes
@@ -79,6 +78,7 @@ ALLOW: dict[tuple[str, str], str] = {
 # and write into its own --json. Keyed like ALLOW; values are the functions
 # (path, fn) that may name it, by call or as a value.
 CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
+    ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): {('src/commands/bot_lifecycle.lis', 'bot_remove_owned')},
     ('src/main.lis', 'render'): {('src/main.lis', 'main')},
     ('src/main.lis', 'write'): {('src/main.lis', 'render')},
     ('src/commands/watch.lis', 'watch_stream'): {('src/commands/watch.lis', 'watch')},
