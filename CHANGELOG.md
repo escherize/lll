@@ -6,6 +6,45 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-06
+
+### Added
+
+- Break work into parent/child issues with `issue create/update --parent`,
+  list direct children with `--parent` or a whole subtree with `--under`,
+  and see parent links and child progress on the board. Trees stay within
+  one team; closing with open descendants requires explicit force. Mirror
+  exports preserve parent links across restored issue numbering (LLL-177).
+- Request bot credentials with `bot create/rotate --json`, including the
+  bare `bot NAME --json` spelling. Output is one packet with name, URL,
+  token and optional explicit team context. Team context changes no grants;
+  mixed output formats refuse before contacting the server (LLL-766).
+- Issue JSON carries `last_activity` for committed issue, comment and claim
+  activity, including renewal and expiry. Scripts can check inactivity
+  without per-issue reads. Comment/claim-only changes leave `updated` and
+  `issue list --since` semantics intact; older servers omit the field.
+  Backfill uses retained history (LLL-770).
+
+### Fixed
+
+- A closed stdout pipe no longer bypasses one-time credential recovery.
+  Bot create/rotate report lost output and name the recovery command in
+  the requested format without printing the token to stderr (LLL-767).
+- Bot rotation help now describes current ownership restrictions rather
+  than warning about an already-prevented ownership transfer (LLL-765).
+- Mirror documentation explains that restored issues receive new numbers
+  while relation links are reconstructed from saved keys (LLL-763).
+
+### Changed
+
+- Setup, agent-workflow and release guides have diagrams, in-page maps
+  and less repeated explanation (LLL-760).
+- Fleet verification includes scoped credential helpers, paired reader
+  barriers, guarded replacement checks and strict activity-date allowances.
+  Timeout checks measure the intended transfer phase, and the environment
+  guard distinguishes enum match arms from assignments (LLL-696, LLL-762,
+  LLL-768, LLL-772).
+
 ## [1.4.1] - 2026-11-06
 
 ### Fixed
