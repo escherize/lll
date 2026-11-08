@@ -13,7 +13,8 @@ syscall.Write/Syscall, os.Stdout and os.Stderr outside comments and string
 literals, and fails on any not inside a function ALLOW names. CALLERS then
 says who may call each allowed writer, so a verb cannot borrow one. A helper in another module that prints is the same
 bypass as a verb that prints, so the scan is not limited to src/commands.
-ALLOW is {(path, fn): reason} for output that cannot wait for a return value:
+ALLOW is {
+    ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): {('src/commands/bot_lifecycle.lis', 'bot_remove_owned')},(path, fn): reason} for output that cannot wait for a return value:
 a stream that runs until interrupted, progress of a long run, an interactive
 prompt that needs its answer first, a child process whose output passes
 straight through, and the renderer itself. An entry that no longer writes
@@ -58,6 +59,7 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/commands/demo.lis', 'seed_demo'): 'lll up --demo: boot banner lines',
     ('src/commands/demo.lis', 'point_cli_at_demo'): 'lll up --demo: boot banner lines',
     ('src/commands/delete.lis', 'confirmed'): 'interactive [y/N] prompt before a delete',
+    ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): 'interactive removal confirmation must be visible before reading terminal input; stderr preserves JSON stdout',
     ('src/commands/login.lis', 'ask_email'): 'interactive email prompt',
     ('src/commands/issue_write.lis', 'pr_cmd'): 'lll issue pr: gh pr create output passes straight through',
     ('src/commands/import.lis', 'gh_issue_list'): 'lll import github: gh issue list stderr passes straight through',
