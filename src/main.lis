@@ -184,6 +184,9 @@ Commands are grouped by noun, such as 'lll issue list' and 'lll doc view'.
 
 Usage:
   lll issue <command>     work with issues (see 'lll issue --help')
+  lll comment list        current comments across issues; --project filters,
+                          --since continues a page (see 'lll comment list --help')
+  lll claim list          current claims across issues (see 'lll claim list --help')
   lll search <text>       full-text search: issues, comments, docs, ranked, with context
   lll bot create bot-<name>
                           an agent identity in one command: member + token, printed
@@ -252,8 +255,7 @@ Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict,
 5 nothing to do, 6 not authenticated. They and the --json fields scripts may
 rely on are the CLI contract: 'lll help contract' prints it.
 
-Scoped commands (issue, project, label, doc, finding, import, export, watch,
-search, webhook) accept --team KEY.
+Team-scoped commands accept --team KEY; see each command's --help.
 It overrides LLL_TEAM for this invocation and never writes configuration.
 Explicit issue IDs still target their own team.
 
