@@ -34,7 +34,7 @@ fn top_level() -> Slice<string> {
   let mut out: Slice<string> = []
   for n in nouns() { out = out.append(n.name) }
   for n in nouns() { out = out.append(strings.Fields(n.alias)...) }
-  out
+  out.append("--json-errors")
 }
 
 /// The noun's verbs, every accepted spelling but a hidden verb's (TASK-307:
@@ -101,14 +101,16 @@ fn bash_script() -> string {
 # Add to ~/.bashrc:  eval \"$(lll completions bash)\"
 _lll() {
   local cur=${COMP_WORDS[COMP_CWORD]}
-  local noun=${COMP_WORDS[1]-}
-  local verb=${COMP_WORDS[2]-}
+  local offset=1
+  if [ \"${COMP_WORDS[1]-}\" = --json-errors ]; then offset=2; fi
+  local noun=${COMP_WORDS[offset]-}
+  local verb=${COMP_WORDS[offset+1]-}
   local words=
-  if [ $COMP_CWORD -eq 1 ]; then
+  if [ $COMP_CWORD -eq $offset ]; then
     words='" +
   all_nouns +
   "'
-  elif [ $COMP_CWORD -eq 2 ]; then
+  elif [ $COMP_CWORD -eq $((offset+1)) ]; then
     case $noun in
 " +
   verb_cases +
@@ -132,13 +134,15 @@ fn zsh_script() -> string {
 # Add to ~/.zshrc (after compinit):  eval \"$(lll completions zsh)\"
 _lll() {
   local -a comps
-  local noun=${words[2]-}
-  local verb=${words[3]-}
-  if (( CURRENT == 2 )); then
+  local offset=2
+  if [[ ${words[2]-} == --json-errors ]]; then offset=3; fi
+  local noun=${words[offset]-}
+  local verb=${words[offset+1]-}
+  if (( CURRENT == offset )); then
     comps=(" +
   all_nouns +
   ")
-  elif (( CURRENT == 3 )); then
+  elif (( CURRENT == offset+1 )); then
     case $noun in
 " +
   verb_cases +
@@ -160,6 +164,7 @@ fn fish_script() -> string {
   let mut out = "# lll fish completions
 # Add to ~/.config/fish/config.fish:  lll completions fish | source
 complete -c lll -f
+complete -c lll -n '__fish_use_subcommand' -l json-errors
 "
   out += f"complete -c lll -n '__fish_use_subcommand' -a '{all_nouns}'\n"
   for n in nouns().map(|n| n.name) {
