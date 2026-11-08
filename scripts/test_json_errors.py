@@ -34,6 +34,7 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
         return error
 
     refusal(run('not-a-command'), 2, 'usage', 0)
+    refusal(run('whoami', extra={'LLL_TOKEN': 'not-a-lll-token'}), 6, 'not_authenticated', 0)
     parts = env['LLL_TOKEN'].split('.')
     assert len(parts) == 3
     parts[2] = ('A' if parts[2][0] != 'A' else 'B') + parts[2][1:]
