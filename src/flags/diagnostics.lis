@@ -1,0 +1,6 @@
+/// A prefix belongs to the invocation, not a command's values. In particular,
+/// `-b --json-errors` must remain a literal body rather than enable this mode.
+pub fn diagnostic_args(args: Slice<string>) -> (Slice<string>, bool) {
+  if args.get(1).unwrap_or("") != "--json-errors" { return (args, false) }
+  ([args[0]].append(args[2..]...), true)
+}
