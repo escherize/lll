@@ -62,7 +62,8 @@ Repeat on `Guarded release notes (workers AA and BB)`, with the same two lines:
 5. Read back until both lines are present, with the same bounded wait above.
 
 The artifacts are two descriptions, each with the original first line and
-both worker lines exactly once. The guarded issue must also have an audited
+both worker lines exactly once. Each must contain exactly three lines, with
+no extra blank line or terminal newline character. The guarded issue must also have an audited
 stale-write refusal and successful guarded updates by both roles. Touch nothing
 else. A missing partner is a harness blocker, not an lll failure. The barriers
 force overlapping read/write intentions; they do not force an internal HTTP
