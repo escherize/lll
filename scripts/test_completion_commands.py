@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,4 +49,32 @@ with tempfile.TemporaryDirectory(prefix='lll-completion-commands-') as directory
                                             'completion-probe', str(path), *words],
                                            cwd=directory, env=env, text=True).splitlines()
         assert all(value in completed for value in expected), (words, completed)
-print('Completion commands: search/bot flags and rotation, existing issue candidates, all shell output passed')
+    if shutil.which('zsh'):
+        path = Path(directory, 'completion.zsh')
+        path.write_text(scripts['zsh'])
+        probe = '''compdef() { :; }
+compadd() { shift; print -rl -- "$@"; }
+source "$1"
+shift
+words=("$@")
+CURRENT=${#words}
+_lll
+'''
+        for words, expected in cases:
+            completed = subprocess.check_output(['zsh', '-f', '-c', probe,
+                'completion-probe', str(path), *words], cwd=directory, env=env, text=True).splitlines()
+            assert all(value in completed for value in expected), (words, completed)
+    else:
+        print('Native zsh completion probes skipped: zsh is not installed')
+    if shutil.which('fish'):
+        path = Path(directory, 'completion.fish')
+        path.write_text(scripts['fish'])
+        for words, expected in cases:
+            completed = subprocess.check_output(['fish', '-c',
+                'source $argv[1]; complete -C $argv[2]', str(path), ' '.join(words)],
+                cwd=directory, env=env, text=True).splitlines()
+            completed = [line.split('\t')[0] for line in completed]
+            assert all(value in completed for value in expected), (words, completed)
+    else:
+        print('Native fish completion probes skipped: fish is not installed')
+print('Completion commands: existing candidates, diagnostic-prefix root/verbs/flags, all shell output and available native shells passed')
