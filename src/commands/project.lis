@@ -130,6 +130,10 @@ fn project_delete_spec() -> Slice<flags.Flag> {
   flags.with_team([
     flags.Flag { name: "--force", help: "delete even while issues belong to the project", .. },
     flags.Flag { name: "--yes", help: "skip the delete confirmation (asked only on a terminal)", .. },
+    flags.Flag { name: "--cascade", help: "delete the project and its issues atomically; protect claims and external references", .. },
+    flags.Flag { name: "--dry-run", help: "preview --cascade without changing records", .. },
+    flags.Flag { name: "--if-preview", value: true, hint: "REVISION", help: "refuse --cascade unless the prior preview still matches", .. },
+    flags.Flag { name: "--json", help: "print the cascade preview or deletion receipt as JSON", .. },
   ])
 }
 
@@ -221,7 +225,11 @@ fn project_delete(input: flags.CommandInput) -> Result<output.Output, pb.CliErro
   let Some(name) = nonempty(p.first()) else {
     return Err(flags.usage_error(f"usage: {usage}"))
   }
+  if p.given("--cascade") && p.given("--force") || !p.given("--cascade") && (p.given("--dry-run") || p.given("--if-preview") || p.given("--json")) {
+    return Err(flags.usage_error("--dry-run, --if-preview and --json require --cascade; --force detaches instead and cannot be combined"))
+  }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
+  if p.given("--cascade") { return project_cascade(input, project.id.string()) }
   let used = records.entity_issue_count(ctx, records.Classifier.Project(project.id))?
   if used > 0 && !p.given("--force") {
     return Err(refuse_delete("project", name, used))
