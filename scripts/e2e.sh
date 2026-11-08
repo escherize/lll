@@ -1475,6 +1475,7 @@ python3 "$REPO_ROOT"/scripts/test_team_refs.py "$LLL_ABS"
 # --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_bot_json.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_bot_lifecycle.py "$LLL_ABS" "$URL"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---
 python3 "$REPO_ROOT"/scripts/test_upgrade.py "$LLL_ABS"
 # --- a Homebrew lll older than its server updates itself in the background (LLL-721) ---
