@@ -323,11 +323,7 @@ fn issue_view_json(
   let mut fields = issue_json(record.bytes() as json.RawMessage, claim)?.clone()
   let mut named_comments: Slice<Map<string, json.RawMessage>> = []
   for comment in comments {
-    let mut named = Map.new<string, json.RawMessage>()
-    let raw = encode_json(comment, "comment")?
-    json.Unmarshal(raw, &named).map_err(|e| pb.failed(f"decoding comment: {e}"))?
-    named["author_name"] = encode_json(display.member_name(comment.author, comment.expand.author.name, ""), "comment author name")?
-    named_comments = named_comments.append(named)
+    named_comments = named_comments.append(named_comment_json(comment)?)
   }
   fields["comments"] = contract_json(encode_json(named_comments, "comments")?, 0)
   let mut issue = models.Issue { .. }
