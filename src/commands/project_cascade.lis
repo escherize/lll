@@ -26,9 +26,6 @@ struct CascadePreview {
 }
 
 #[json]
-struct CascadeRequest { revision: string }
-
-#[json]
 struct CascadeReceipt {
   project: string,
   deleted: bool,
@@ -126,14 +123,8 @@ fn project_cascade(
     issues.length(),
   )?
   if !accepted { return Err(aborted()) }
-  let body = json
-    .Marshal(CascadeRequest { revision: preview.revision })
-    .map_err(|e| pb.failed(f"encoding cascade: {e}"))?
-  let reply = ctx
-    .post(f"/api/lll/projects/{id}/cascade", body as string)
-    .map_err(|e| e.with_message(
-      f"{e.message}\nThe response may have been lost; inspect the project before retrying.",
-    ))?
+  let reply = writes.cascade_project(ctx, id, preview.revision)
+    .map_err(|e| e.with_message(f"{e.message}\nThe response may have been lost; inspect the project before retrying."))?
   let mut receipt = CascadeReceipt { .. }
   let decoded = json.Unmarshal(reply.bytes(), &receipt)
   if decoded.is_err() || receipt.project != id || !receipt.deleted {
