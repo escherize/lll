@@ -23,6 +23,10 @@ pub enum ErrorKind {
   Failed,
 }
 
+/// A refusal decided locally, without inventing an HTTP status or a code
+/// supposedly received from the server.
+pub enum RefusalReason { NotClaimed, Conflict }
+
 /// A failure with its kind, the HTTP status behind it (0 when none) and the
 /// server's stable code (data.code; None when there is none, or lll does not
 /// know it). `message` is the human text, which is not part of the contract.
@@ -34,6 +38,7 @@ pub struct CliError {
   pub kind: ErrorKind,
   pub status: int,
   pub code: Option<ServerCode>,
+  pub refusal: Option<RefusalReason>,
   pub message: string,
   /// What the command had to say before it failed (LLL-683): main renders
   /// it, then the error, so a command that stops partway still says what it
@@ -149,7 +154,11 @@ pub fn kind_of_status(status: int, code: Option<ServerCode>, envelope: bool) -> 
 
 /// A command's own failure of a known kind, with no HTTP status behind it.
 pub fn fail(kind: ErrorKind, message: string) -> CliError {
-  CliError { kind, status: 0, code: None, message, said: None }
+  CliError { kind, status: 0, code: None, refusal: None, message, said: None }
+}
+
+pub fn refused(reason: RefusalReason, message: string) -> CliError {
+  CliError { refusal: Some(reason), ..fail(ErrorKind.Refused, message) }
 }
 
 /// A failure with no more specific kind: exit 1.

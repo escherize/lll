@@ -1,0 +1,14 @@
+import "output"
+
+#[test]
+fn local_refusals_preserve_reason_without_fabricating_server_provenance() {
+  let err = refused(RefusalReason.Conflict, "private input")
+    .with_message("a new private message")
+    .after(output.line("committed data"))
+  assert err.refusal == Some(RefusalReason.Conflict)
+  assert err.status == 0 && err.code.is_none() && exit_code(err.kind) == 4
+  let packet = error_diagnostic(err, false, "")
+  assert packet.contains("\"reason\":\"conflict\"")
+  assert !packet.contains("private") && !packet.contains("committed data")
+  assert err.output().data() == "committed data\n"
+}

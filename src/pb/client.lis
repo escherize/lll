@@ -1143,6 +1143,7 @@ pub fn http_error(what: string, status: int, status_line: string, body: string) 
       kind: kind_of_status(status, None, false),
       status,
       code: None,
+      refusal: None,
       message: f"{what}: {status_line}: {body}" + wrong_port_hint(what, status, body),
       said: None,
     }
@@ -1153,7 +1154,7 @@ pub fn http_error(what: string, status: int, status_line: string, body: string) 
   let mut message = envelope.message
   for field in fields { message += f"\n{field}" }
   if status >= 500 { message = f"{what}: {status_line}: {message}" }
-  CliError { kind: kind_of_status(status, code, true), status, code, message, said: None }
+  CliError { kind: kind_of_status(status, code, true), status, code, message, said: None, refusal: None }
 }
 
 /// The suffix for a 404 that came from something other than PocketBase's API.

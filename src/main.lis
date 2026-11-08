@@ -20,7 +20,8 @@ fn main() {
 
   // --team is taken off the arguments before the settings are built, so the
   // team it names is a flag override like any other.
-  let scoped = commands.scoped_args(os.Args)
+  let (args, json_errors) = flags.diagnostic_args(os.Args)
+  let scoped = commands.scoped_args(args)
   let team_flag = match scoped {
     Ok((_, team)) => team,
     Err(_) => None,
@@ -35,15 +36,15 @@ fn main() {
   let call = match parsed {
     Ok(flags.Invocation.Run(call)) => call,
     Ok(flags.Invocation.Help(topic)) => {
-      render(output.none(), Ok(help(topic, env)), None)
+      render(output.none(), Ok(help(topic, env)), None, json_errors)
       return
     },
     Err(e) => {
-      render(output.none(), Err(e), None)
+      render(output.none(), Err(e), None, json_errors)
       return
     },
   }
-  let noun = os.Args.get(1).unwrap_or("")
+  let noun = args.get(1).unwrap_or("")
   let resolved = config.resolve(env, config.Overrides { team: team_flag, .. })
   // LLL-441: before anything reads the token, renew a login token near
   // expiry - only for nouns that talk to the server anyway, so --help,
@@ -56,7 +57,7 @@ fn main() {
   let ctx = pb.Client.new(settings)
   let skew = commands.version_skew_check(ctx, noun)
   let result = flags.run_call(ctx, call)
-  render(renewal, result, skew.receive().unwrap_or(None))
+  render(renewal, result, skew.receive().unwrap_or(None), json_errors)
 }
 
 /// A help page: the top page and the contract need what only main has.
@@ -79,7 +80,12 @@ fn help(topic: flags.Topic, env: config.Env) -> output.Output {
 /// read as success. A command that had already failed keeps its own message
 /// and exit code. Notices are best effort: a broken stderr must not cost a
 /// script the data on stdout (the key 'issue next --claim' just claimed).
-fn render(before: output.Output, result: Result<output.Output, pb.CliError>, skew: Option<string>) {
+fn render(
+  before: output.Output,
+  result: Result<output.Output, pb.CliError>,
+  skew: Option<string>,
+  json_errors: bool,
+) {
   // Let output errors reach the renderer's one-time-token recovery hint.
   // Do this after the handler: spawned commands and the running server
   // keep their normal signal behavior.
@@ -88,38 +94,62 @@ fn render(before: output.Output, result: Result<output.Output, pb.CliError>, ske
     Ok(out) => out,
     Err(err) => err.output(),
   }
-  let wrote = match write(before) {
-    Ok(_) => write(out),
+  let wrote = match write(before, json_errors) {
+    Ok(_) => write(out, json_errors),
     Err(e) => Err(e),
   }
   let unwritten = wrote.is_err()
-  if let Err(e) = wrote {
-    let lost = if out.lost == "" { "" } else { f"\n{out.lost}" }
-    let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}{lost}")
-  }
-  if let Some(line) = skew {
-    let _ = fmt.Fprintln(os.Stderr, line)
+  if !json_errors {
+    if let Err(e) = wrote {
+      let lost = if out.lost == "" { "" } else { f"\n{out.lost}" }
+      let _ = fmt.Fprintln(os.Stderr, f"Error: writing output: {e}{lost}")
+    }
+    if let Some(line) = skew { let _ = fmt.Fprintln(os.Stderr, line) }
   }
 
   if let Err(err) = result {
+    if json_errors {
+      let recovery = if unwritten { out.lost } else { "" }
+      let _ = fmt.Fprintln(
+        os.Stderr,
+        pb.error_diagnostic(err, unwritten, recovery),
+      )
+      os.Exit(pb.exit_code(err.kind))
+    }
     // Every failing exit is decided here, by the error's kind (LLL-645,
     // docs/cli-contract.md): scripts branch on the code, not the text.
     // Exit 5 is an outcome, not a failure (fleet case 13): "Error:" belongs
     // only to real errors.
-    let prefix = if let pb.ErrorKind.NothingToDo = err.kind { "Nothing to do" } else { "Error" }
+    let prefix = if let pb.ErrorKind.NothingToDo = err.kind {
+      "Nothing to do"
+    } else {
+      "Error"
+    }
     let _ = fmt.Fprintln(os.Stderr, f"{prefix}: {err.message}")
     os.Exit(pb.exit_code(err.kind))
   }
-  if unwritten { os.Exit(pb.exit_code(pb.ErrorKind.Failed)) }
+  if unwritten {
+    if json_errors {
+      let _ = fmt.Fprintln(
+        os.Stderr,
+        pb.error_diagnostic(pb.failed(""), true, out.lost),
+      )
+    }
+    os.Exit(pb.exit_code(pb.ErrorKind.Failed))
+  }
 }
 
 /// Write `out`'s parts in order. Only a data write can fail it; a notice
 /// that cannot be written is dropped and the data still goes out.
-fn write(out: output.Output) -> Result<(), error> {
+fn write(out: output.Output, json_errors: bool) -> Result<(), error> {
   for part in out.written() {
     match part {
-      output.Part.Data(s) => { fmt.Print(s)?; },
-      output.Part.Notice(s) => { let _ = fmt.Fprintln(os.Stderr, s); },
+      output.Part.Data(s) => {
+        fmt.Print(s)?
+      },
+      output.Part.Notice(s) => {
+        if !json_errors { let _ = fmt.Fprintln(os.Stderr, s) }
+      },
     }
   }
   Ok(())
@@ -216,6 +246,7 @@ Usage:
   lll --version, -v       print the version
   lll --help              show this help
   lll help contract       the CLI contract: exit codes, --json fields, spellings
+  lll --json-errors ...   final typed error JSON on stderr; exit codes unchanged
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 refused or conflict,
 5 nothing to do, 6 not authenticated. They and the --json fields scripts may

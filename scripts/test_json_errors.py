@@ -3,6 +3,7 @@
 import http.server
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -33,7 +34,10 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
         return error
 
     refusal(run('not-a-command'), 2, 'usage', 0)
-    refusal(run('whoami', extra={'LLL_TOKEN': 'invalid-fixture-token'}), 6, 'not_authenticated')
+    parts = env['LLL_TOKEN'].split('.')
+    assert len(parts) == 3
+    parts[2] = ('A' if parts[2][0] != 'A' else 'B') + parts[2][1:]
+    refusal(run('whoami', extra={'LLL_TOKEN': '.'.join(parts)}), 6, 'not_authenticated')
     assert run('team', 'create', '--key', 'ERRJSON', '-n', 'Structured errors').returncode == 0
     empty = run('issue', 'next')
     refusal(empty, 5, 'nothing_to_do', 0)
@@ -42,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
     key = json.loads(created.stdout)['key']
     for args in [('issue', 'release', key), ('issue', 'claim', key, '--renew')]:
         error = refusal(run(*args), 4, 'not_claimed', 0)
-        assert error['server_code'] == 'not_claimed'
+        assert error['server_code'] == ''
     refusal(run('issue', 'view', 'ERRJSON-999999'), 3, 'not_found')
     refusal(run('issue', 'update', key, '-t', 'Never applied', '--if-unchanged-since',
                 '2000-01-01T00:00:00Z'), 4, 'conflict')
@@ -92,14 +96,42 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
             result = run('api', 'GET', '/failure', '--fail', extra=other)
             expected = {401: 6, 404: 3, 409: 4, 412: 4, 403: 4, 400: 4, 500: 1}[status]
             packet = refusal(result, expected, reason, status, stdout=result.stdout)
+            assert json.loads(result.stdout)['message'] == Answers.secret
             assert Answers.secret not in result.stderr
             assert packet['server_code'] == (code if code in {'not_claimed', 'claim_changed'} else '')
         before = Answers.calls
         refusal(run('issue', 'list', '--not-a-flag', extra=other), 2, 'usage', 0)
         assert Answers.calls == before, 'usage validation made an HTTP request'
+        Answers.status, Answers.code = 409, ''
+        lost = subprocess.Popen([binary, '--json-errors', 'api', 'GET', '/failure', '--fail'],
+            env=env | other, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        lost.stdout.close()
+        lost.stdout = None
+        _, diagnostic = lost.communicate(timeout=30)
+        assert lost.returncode == 4, 'output failure replaced the original refusal exit'
+        error = json.loads(diagnostic)['error']
+        assert error['reason'] == 'conflict' and error['output_failed']
+        assert Answers.secret.encode() not in diagnostic
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+    lost = subprocess.Popen([binary, '--json-errors', 'bot', 'create',
+        'bot-error-output-lost', '--json'], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    lost.stdout.close()
+    lost.stdout = None
+    _, diagnostic = lost.communicate(timeout=30)
+    assert lost.returncode == 1
+    error = json.loads(diagnostic)['error']
+    assert error['reason'] == 'error' and error['output_failed']
+    assert 'lll bot rotate bot-error-output-lost' in error['recovery']
+    assert not re.search(rb'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', diagnostic)
+    claimed = subprocess.Popen([binary, '--json-errors', 'issue', 'next', '--claim'], env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    claimed.stderr.close()
+    claimed.stderr = None
+    answer, _ = claimed.communicate(timeout=30)
+    assert claimed.returncode == 0 and answer.decode().strip() == key
 
 print('JSON errors: native typed refusals, unchanged exits/stdout, secret-free diagnostics, old-code fallback and no-I/O usage passed')

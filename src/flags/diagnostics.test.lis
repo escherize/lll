@@ -1,0 +1,10 @@
+#[test]
+fn diagnostic_prefix_does_not_consume_a_command_value() {
+  let (args, enabled) = diagnostic_args(["lll", "--json-errors", "issue", "list"])
+  assert enabled && args.equals(["lll", "issue", "list"])
+  let body = ["lll", "issue", "comment", "ENG-1", "-b", "--json-errors"]
+  let (same, disabled) = diagnostic_args(body)
+  assert !disabled && same.equals(body)
+  let (empty, off) = diagnostic_args([])
+  assert !off && empty.is_empty()
+}

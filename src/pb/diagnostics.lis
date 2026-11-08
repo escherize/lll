@@ -1,0 +1,84 @@
+import "go:encoding/json"
+
+#[json]
+struct DiagnosticEnvelope { error: Diagnostic }
+
+#[json]
+struct Diagnostic {
+  reason: string,
+  exit_code: int,
+  http_status: int,
+  server_code: string,
+  output_failed: bool,
+  recovery: string,
+}
+
+fn server_code_name(code: Option<ServerCode>) -> string {
+  match code {
+    Some(ServerCode.ClaimHeld) => "claim_held",
+    Some(ServerCode.NeedsForce) => "needs_force",
+    Some(ServerCode.OpenDescendants) => "open_descendants",
+    Some(ServerCode.ClaimChanged) => "claim_changed",
+    Some(ServerCode.NotClaimed) => "not_claimed",
+    Some(ServerCode.BotExceedsOwner) => "bot_exceeds_owner",
+    Some(ServerCode.OldPasswordRejected) => "old_password_rejected",
+    None => "",
+  }
+}
+
+fn diagnostic_reason(err: CliError) -> string {
+  match err.kind {
+    ErrorKind.Usage => "usage",
+    ErrorKind.NotFound => "not_found",
+    ErrorKind.NothingToDo => "nothing_to_do",
+    ErrorKind.Auth => "not_authenticated",
+    ErrorKind.Network => "network_error",
+    ErrorKind.Server => "server_error",
+    ErrorKind.Failed => "error",
+    ErrorKind.Refused => {
+      if let Some(reason) = err.refusal {
+        return match reason {
+          RefusalReason.NotClaimed => "not_claimed",
+          RefusalReason.Conflict => "conflict",
+        }
+      }
+      match err.code {
+        Some(ServerCode.NotClaimed) => "not_claimed",
+        Some(ServerCode.ClaimChanged) => "conflict",
+        Some(ServerCode.ClaimHeld) => "claim_held",
+        Some(ServerCode.NeedsForce) => "needs_force",
+        Some(ServerCode.OpenDescendants) => "open_descendants",
+        _ => if err.status == 409 || err.status == 412 {
+          "conflict"
+        } else {
+          "refused"
+        },
+      }
+    },
+  }
+}
+
+/// Deliberately excludes message: server bodies, URLs and user input can
+/// contain secrets. Classification comes only from the typed boundary.
+pub fn error_diagnostic(
+  err: CliError,
+  output_failed: bool,
+  recovery: string,
+) -> string {
+  let packet = DiagnosticEnvelope {
+    error: Diagnostic {
+      reason: diagnostic_reason(err),
+      exit_code: exit_code(err.kind),
+      http_status: err.status,
+      server_code: server_code_name(err.code),
+      output_failed,
+      recovery,
+    },
+  }
+  // This packet contains only strings, integers and booleans; json.Marshal
+  // cannot encounter an unsupported value or a cycle.
+  match json.Marshal(packet) {
+    Ok(raw) => raw as string,
+    Err(_) => "{\"error\":{\"reason\":\"error\",\"exit_code\":1,\"http_status\":0,\"server_code\":\"\",\"output_failed\":false,\"recovery\":\"\"}}",
+  }
+}

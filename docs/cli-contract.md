@@ -56,6 +56,49 @@ Errors print on stderr as `Error: ` and a message; exit 5 prints `Nothing to do:
 instead, because it is an outcome, not an error. The message is for people:
 it names the cause and the fix, and it can change in any release.
 
+### Structured diagnostics
+
+Put `--json-errors` immediately after `lll` to request a final JSON diagnostic
+on stderr. It changes neither the seven exit codes nor stdout:
+
+```sh
+lll --json-errors issue release ENG-12 2>diagnostic.json
+```
+
+```json
+{"error":{"reason":"not_claimed","exit_code":4,"http_status":0,"server_code":"","output_failed":false,"recovery":""}}
+```
+
+| Field | Covered meaning |
+|---|---|
+| `reason` | Typed classification below; never inferred from human text |
+| `exit_code` | The process exit code |
+| `http_status` | Underlying HTTP status, or `0` for a local decision |
+| `server_code` | A recognized server code, or `""` when absent or unknown |
+| `output_failed` | A stdout write failed; committed work may already exist |
+| `recovery` | One-time-output recovery hint when needed, otherwise `""`; wording is not covered |
+
+Reasons are `usage`, `not_found`, `not_authenticated`, `nothing_to_do`,
+`not_claimed`, `conflict`, `claim_held`, `needs_force`, `open_descendants`,
+`refused`, `network_error`, `server_error` and `error`. Future reasons may be
+added: handle unknown ones using `exit_code`. HTTP 409/412 and a changed claim
+are conflicts; a stale update caught locally has status `0`. An older server
+without a recognized code can yield generic `refused`; no specific cause is
+guessed. `server_code` is empty for local decisions, including an unclaimed
+issue caught before a request.
+
+The diagnostic excludes raw messages, server bodies, URLs and input values.
+Renderer notices, login-renewal notes and version-skew warnings are suppressed
+in this mode. On success it emits no diagnostic. Streaming commands and child
+processes may write their own stderr first; the final diagnostic is the last
+line on a failing exit. Partial stdout remains intact, including `api --fail`
+response bodies. If writing stdout also fails, the original command failure
+keeps its exit code; an otherwise successful command exits `1`.
+
+This is a prefix, not a command flag: `-b --json-errors` still supplies that
+literal body. Clients predating this feature reject the prefix with ordinary
+usage output; they cannot provide this diagnostic format.
+
 ## Output streams
 
 Data goes to stdout: a key, a record, a list. Notices go to stderr. Capture
