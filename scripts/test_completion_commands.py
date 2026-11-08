@@ -25,6 +25,7 @@ with tempfile.TemporaryDirectory(prefix='lll-completion-commands-') as directory
         assert 'rotate' in output, shell
         assert ('--refresh' if shell != 'fish' else '-l refresh') in output, shell
         assert ('--duration' if shell != 'fish' else '-l duration') in output, shell
+        assert ('--json-errors' if shell != 'fish' else '-l json-errors') in output, shell
     path = Path(directory, 'completion.bash')
     path.write_text(scripts['bash'])
     cases = [
@@ -37,6 +38,10 @@ with tempfile.TemporaryDirectory(prefix='lll-completion-commands-') as directory
         (['lll', 'bot', 'bot-probe', '--'], ['--duration']),
         (['lll', 'bot', 'rotate', 'bot-probe', '--'], ['--duration']),
         (['lll', 'issue', 'c'], ['create', 'close', 'claim', 'comment']),
+        (['lll', '--json-e'], ['--json-errors']),
+        (['lll', '--json-errors', 's'], ['search']),
+        (['lll', '--json-errors', 'issue', 'c'], ['create', 'close', 'claim', 'comment']),
+        (['lll', '--json-errors', 'issue', 'list', '--'], ['--json', '--team']),
     ]
     for words, expected in cases:
         completed = subprocess.check_output(['bash', '--noprofile', '--norc', '-c', probe,
