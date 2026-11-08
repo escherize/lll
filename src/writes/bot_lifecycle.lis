@@ -1,0 +1,41 @@
+import "pb"
+
+#[json]
+struct BotLifecycleRequest { id: string, name: string, force: bool }
+
+pub fn disable_owned_bot(
+  ctx: pb.Client,
+  id: string,
+  name: string,
+) -> Result<string, pb.CliError> {
+  change_owned_bot(ctx, id, name, false, "disable")
+}
+
+pub fn remove_owned_bot(
+  ctx: pb.Client,
+  id: string,
+  name: string,
+  force: bool,
+) -> Result<string, pb.CliError> {
+  change_owned_bot(ctx, id, name, force, "remove")
+}
+
+fn change_owned_bot(
+  ctx: pb.Client,
+  id: string,
+  name: string,
+  force: bool,
+  action: string,
+) -> Result<string, pb.CliError> {
+  require_capability(
+    ctx,
+    "bots.lifecycle",
+    "/api/lll/bots/lifecycle",
+    "owned bot lifecycle; upgrade the server before retrying",
+  )?
+  let body = encode(
+    BotLifecycleRequest { id, name, force },
+    "bot lifecycle request",
+  )?
+  ctx.post(f"/api/lll/bots/{action}", body)
+}

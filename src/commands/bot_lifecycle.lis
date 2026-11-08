@@ -15,9 +15,6 @@ import "writes"
 struct OwnedBotRef { id: string, name: string, has_references: Option<bool> }
 
 #[json]
-struct BotLifecycleRequest { id: string, name: string, force: bool }
-
-#[json]
 struct BotLifecycleReply {
   id: string,
   name: string,
@@ -137,14 +134,14 @@ fn change_owned_bot(
   action: string,
   force: bool,
 ) -> Result<BotLifecycleReply, pb.CliError> {
-  let body = json
-    .Marshal(BotLifecycleRequest { id: bot.id, name: bot.name, force })
-    .map_err(|e| pb.failed(f"encoding the bot lifecycle request: {e}"))?
-  let raw = ctx
-    .post(f"/api/lll/bots/{action}", body as string)
-    .map_err(|e| e.with_message(
-      f"{e.message}\nThe request may have completed; check the bot before retrying.",
-    ))?
+  let changed = if action == "disable" {
+    writes.disable_owned_bot(ctx, bot.id, bot.name)
+  } else {
+    writes.remove_owned_bot(ctx, bot.id, bot.name, force)
+  }
+  let raw = changed.map_err(|e| e.with_message(
+    f"{e.message}\nThe request may have completed; check the bot before retrying.",
+  ))?
   let mut reply = BotLifecycleReply { .. }
   let decoded = json.Unmarshal(raw.bytes(), &reply)
   if decoded.is_err() || reply.id != bot.id || reply.name != bot.name {
