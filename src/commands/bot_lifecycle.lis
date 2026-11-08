@@ -1,0 +1,232 @@
+import "go:bufio"
+import "go:encoding/json"
+import "go:fmt"
+import "go:golang.org/x/term"
+import "go:net/url"
+import "go:os"
+import "go:strings"
+
+import "flags"
+import "output"
+import "pb"
+import "writes"
+
+#[json]
+struct OwnedBotRef { id: string, name: string, has_references: Option<bool> }
+
+#[json]
+struct BotLifecycleRequest { id: string, name: string, force: bool }
+
+#[json]
+struct BotLifecycleReply {
+  id: string,
+  name: string,
+  disabled: Option<bool>,
+  removed: Option<bool>,
+  had_references: Option<bool>,
+}
+
+#[json]
+struct BotDisabledReceipt { id: string, name: string, disabled: bool }
+
+#[json]
+struct BotRemovedReceipt {
+  id: string,
+  name: string,
+  removed: bool,
+  had_references: bool,
+}
+
+pub fn bot_lifecycle_commands() -> Slice<flags.Command> {
+  [
+    flags.Command {
+      name: "disable",
+      access: flags.Access.Write,
+      summary: "revoke your bot's access and existing tokens; keep its identity and work",
+      page: "Usage:
+  lll bot disable bot-NAME [--json] [--url URL]
+
+The owner or an administrator can disable a bot. Its current tokens stop
+working, and its access becomes read-only with no teams. Its identity,
+authorship and work stay. Workers it created cannot retain wider access.
+An administrator can grant access again; rotate replaces a token while
+keeping access instead.",
+      spec: bot_lifecycle_spec(),
+      positional: "bot-NAME",
+      run: bot_disable_owned,
+      ..,
+    },
+    flags.Command {
+      name: "remove",
+      alias: "delete",
+      access: flags.Access.Write,
+      summary: "remove your bot's identity; refuses references unless explicitly forced",
+      page: "Usage:
+  lll bot remove bot-NAME [--force] [--yes] [--json] [--url URL]
+
+The owner or an administrator can remove a bot. References protect an identity
+that has work or workers: disable keeps it, while --force explicitly permits
+clearing its references. Written issue/comment/doc bodies stay. Workers keep
+their human owner and cannot gain access by losing their creator.
+--force never grants authority or skips confirmation. --yes skips the terminal
+confirmation; scripts do not prompt. JSON data stays on stdout.",
+      spec: bot_remove_owned_spec(),
+      positional: "bot-NAME",
+      run: bot_remove_owned,
+      ..,
+    },
+  ]
+}
+
+fn bot_lifecycle_spec() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--json",
+      help: "print the lifecycle receipt as JSON",
+      ..,
+    },
+    flags.Flag {
+      name: "--url",
+      value: true,
+      hint: "URL",
+      help: "server for this invocation",
+      ..,
+    },
+  ]
+}
+
+fn bot_remove_owned_spec() -> Slice<flags.Flag> {
+  bot_lifecycle_spec().append(
+    flags.Flag {
+      name: "--force",
+      help: "explicitly clear references when removing the bot",
+      ..,
+    },
+    flags.Flag { name: "--yes", help: "skip the terminal confirmation", .. },
+  )
+}
+
+fn resolve_owned_bot(
+  input: flags.CommandInput,
+) -> Result<(pb.Client, OwnedBotRef), pb.CliError> {
+  let name = strings.TrimSpace(input.parsed.first())
+  require_bot_prefix("lll bot", name)?
+  let ctx = point_at_url(input.ctx, input.parsed.one("--url"))?
+  let cfg = ctx.settings.config().map_err(pb.failed)?
+  if cfg.token == "" { return Err(ctx.not_logged_in_message()) }
+  writes.require_capability(
+    ctx,
+    "bots.lifecycle",
+    "/api/lll/bots/lifecycle",
+    "owned bot lifecycle; upgrade the server before retrying",
+  )?
+  let raw = ctx.get(f"/api/lll/bots/owned?name={url.QueryEscape(name)}")?
+  let mut found = OwnedBotRef { .. }
+  let decoded = json.Unmarshal(raw.bytes(), &found)
+  if decoded.is_err() || found.id == "" || !strings.EqualFold(found.name, name) || found.has_references.is_none() {
+    return Err(pb.failed(
+      "the owned bot lookup returned an incomplete or different identity; nothing was changed",
+    ))
+  }
+  Ok((ctx, found))
+}
+
+fn change_owned_bot(
+  ctx: pb.Client,
+  bot: OwnedBotRef,
+  action: string,
+  force: bool,
+) -> Result<BotLifecycleReply, pb.CliError> {
+  let body = json
+    .Marshal(BotLifecycleRequest { id: bot.id, name: bot.name, force })
+    .map_err(|e| pb.failed(f"encoding the bot lifecycle request: {e}"))?
+  let raw = ctx
+    .post(f"/api/lll/bots/{action}", body as string)
+    .map_err(|e| e.with_message(
+      f"{e.message}\nThe request may have completed; check the bot before retrying.",
+    ))?
+  let mut reply = BotLifecycleReply { .. }
+  let decoded = json.Unmarshal(raw.bytes(), &reply)
+  if decoded.is_err() || reply.id != bot.id || reply.name != bot.name {
+    return Err(pb.failed(
+      "the lifecycle response was unreadable or named a different bot; check the bot before retrying",
+    ))
+  }
+  Ok(reply)
+}
+
+fn bot_disable_owned(
+  input: flags.CommandInput,
+) -> Result<output.Output, pb.CliError> {
+  let (ctx, bot) = resolve_owned_bot(input)?
+  let reply = change_owned_bot(ctx, bot, "disable", false)?
+  if reply.disabled != Some(true) {
+    return Err(pb.failed(
+      "the server did not confirm the disable; check the bot before retrying",
+    ))
+  }
+  if input.parsed.given("--json") {
+    return json_value(
+      BotDisabledReceipt { id: bot.id, name: bot.name, disabled: true },
+      "disabled bot",
+    )
+  }
+  Ok(output.line(
+    f"Disabled {bot.name}; its tokens were revoked. Identity and work kept.",
+  ))
+}
+
+fn bot_remove_owned(
+  input: flags.CommandInput,
+) -> Result<output.Output, pb.CliError> {
+  let (ctx, bot) = resolve_owned_bot(input)?
+  let force = input.parsed.given("--force")
+  if bot.has_references == Some(true) && !force {
+    return Err(pb.fail(
+      pb.ErrorKind.Refused,
+      "the bot has references; use 'lll bot disable' to keep attribution, or explicitly force removal with --force",
+    ))
+  }
+  let accepted = confirm_bot_remove(input.parsed.given("--yes"), bot.name)?
+  if !accepted { return Err(aborted()) }
+  let reply = change_owned_bot(ctx, bot, "remove", force)?
+  let Some(referenced) = reply.had_references else {
+    return Err(pb.failed(
+      "the removal response was incomplete; check the bot before retrying",
+    ))
+  }
+  if reply.removed != Some(true) {
+    return Err(pb.failed(
+      "the server did not confirm removal; check the bot before retrying",
+    ))
+  }
+  if input.parsed.given("--json") {
+    return json_value(
+      BotRemovedReceipt {
+        id: bot.id,
+        name: bot.name,
+        removed: true,
+        had_references: referenced,
+      },
+      "removed bot",
+    )
+  }
+  Ok(output.line(
+    f"Removed {bot.name}; its identity and credentials no longer exist.",
+  ))
+}
+
+// Match the existing delete policy; put the interactive question on stderr
+// so a JSON receipt remains one document. Always finish the prompt's line.
+fn confirm_bot_remove(yes: bool, name: string) -> Result<bool, pb.CliError> {
+  if yes || !term.IsTerminal(os.Stdin.Fd() as int) { return Ok(true) }
+  let _ = fmt
+    .Fprint(os.Stderr, f"remove bot {name}? [y/N] ")
+    .map_err(|e| pb.failed(f"could not display the confirmation: {e}"))?
+  let mut scanner = bufio.NewScanner(os.Stdin)
+  let read = scanner.Scan()
+  let _ = fmt.Fprintln(os.Stderr, "")
+  if !read { return Ok(false) }
+  let answer = strings.ToLower(strings.TrimSpace(scanner.Text()))
+  Ok(answer == "y" || answer == "yes")
+}
