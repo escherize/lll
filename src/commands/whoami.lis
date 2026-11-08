@@ -117,7 +117,7 @@ fn whoami(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     if strings.Split(cfg.token, ".").length() == 3 {
       return Err(ctx.corrupted_token_message())
     }
-    return Err(pb.failed("the configured token is not an lll auth token; use 'lll login', or 'lll token create' for an agent"))
+    return Err(pb.fail(pb.ErrorKind.Auth, "the configured token is not an lll auth token; use 'lll login', or 'lll token create' for an agent"))
   }
   if pb.token_expired(cfg.token) {
     // Both faults at once (1.0 fleet): an expired token beside a dead url

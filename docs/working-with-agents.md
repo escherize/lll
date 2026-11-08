@@ -55,6 +55,27 @@ Someone who only wants to follow along can open a view-only board link without
 an account or CLI installation. Watching is different from permission to edit:
 use an invite when they need to participate.
 
+## Retire an agent without losing its work
+
+As its owner, choose the operation that matches what happened:
+
+| Intent | Command | What stays |
+|---|---|---|
+| Replace a leaked credential | `lll bot rotate bot-NAME` | Identity, access and work |
+| Stop a bot | `lll bot disable bot-NAME` | Identity, attribution and written work |
+| Remove an unused identity | `lll bot remove bot-NAME` | Written work, if any |
+
+Disabling retires its current tokens and leaves it read-only with no teams.
+Workers it created lose any wider access too. An administrator can grant access
+again; disabling is not token rotation.
+
+Removal refuses an identity with references. Prefer disabling when attribution
+matters. Explicit `--force` permits clearing references, including assignments
+and claims; issue and comment bodies remain. Workers keep their human owner
+and cannot gain access when their creator disappears. `--yes` skips the terminal
+confirmation; it grants no additional permission. These commands need a server
+that supports bot lifecycle operations and safely refuse an older server.
+
 ## How much workflow do you need?
 
 Use the board with your existing way of working. The bundled

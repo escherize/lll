@@ -258,7 +258,7 @@ fn update(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   if let Some(stamp) = since {
     if issue.updated != stamp {
       let now = display.rfc3339(issue.updated)
-      return Err(pb.fail(pb.ErrorKind.Refused, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {now}; check what changed ('lll issue view {key}'), then\nretry with the current stamp: {retry_command(input.args, now)}"))
+      return Err(pb.refused(pb.RefusalReason.Conflict, f"{key} changed since {display.rfc3339(stamp)}: its 'updated' is now {now}; check what changed ('lll issue view {key}'), then\nretry with the current stamp: {retry_command(input.args, now)}"))
     }
   }
   // Surgical description edits (LLL-391, after veans): a replace must match
