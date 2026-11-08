@@ -76,7 +76,7 @@ lll --json-errors issue release ENG-12 2>diagnostic.json
 | `http_status` | Underlying HTTP status, or `0` for a local decision |
 | `server_code` | A recognized server code, or `""` when absent or unknown |
 | `output_failed` | A stdout write failed; committed work may already exist |
-| `recovery` | One-time-output recovery hint when needed, otherwise `""`; wording is not covered |
+| `recovery` | `"one_time_output_lost"` when one-time credential/invite output was lost, otherwise `""` |
 
 Reasons are `usage`, `not_found`, `not_authenticated`, `nothing_to_do`,
 `not_claimed`, `conflict`, `claim_held`, `needs_force`, `open_descendants`,

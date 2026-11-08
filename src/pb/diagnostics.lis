@@ -63,8 +63,11 @@ fn diagnostic_reason(err: CliError) -> string {
 pub fn error_diagnostic(
   err: CliError,
   output_failed: bool,
-  recovery: string,
+  one_time_output_lost: bool,
 ) -> string {
+  // Human recovery hints can contain request values. Keep that text out of
+  // this projection entirely; the caller already knows its command/target.
+  let recovery = if output_failed && one_time_output_lost { "one_time_output_lost" } else { "" }
   let packet = DiagnosticEnvelope {
     error: Diagnostic {
       reason: diagnostic_reason(err),

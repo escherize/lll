@@ -53,6 +53,11 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
     # The opt-in is a prefix, never an extractor that steals a literal body.
     body = run('issue', 'comment', key, '-b', '--json-errors', '--json', machine=False)
     assert body.returncode == 0 and json.loads(body.stdout)['body'] == '--json-errors'
+    for noun, count in [('comment', 1), ('claim', 0)]:
+        page = run(noun, 'list', '--json', '--team', 'ERRJSON')
+        assert page.returncode == 0 and not page.stderr
+        assert len(json.loads(page.stdout)['items']) == count
+    refusal(run('comment', 'list', '--since', 'do-not-echo-this-cursor'), 2, 'usage', 0)
     ordinary = run('issue', 'release', key, machine=False)
     assert ordinary.returncode == 4 and ordinary.stderr.startswith('Error: ')
 

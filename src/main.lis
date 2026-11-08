@@ -109,10 +109,10 @@ fn render(
 
   if let Err(err) = result {
     if json_errors {
-      let recovery = if unwritten { out.lost } else { "" }
+      let one_time_lost = unwritten && out.lost != ""
       let _ = fmt.Fprintln(
         os.Stderr,
-        pb.error_diagnostic(err, unwritten, recovery),
+        pb.error_diagnostic(err, unwritten, one_time_lost),
       )
       os.Exit(pb.exit_code(err.kind))
     }
@@ -132,7 +132,7 @@ fn render(
     if json_errors {
       let _ = fmt.Fprintln(
         os.Stderr,
-        pb.error_diagnostic(pb.failed(""), true, out.lost),
+        pb.error_diagnostic(pb.failed(""), true, out.lost != ""),
       )
     }
     os.Exit(pb.exit_code(pb.ErrorKind.Failed))
