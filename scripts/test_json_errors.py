@@ -125,7 +125,8 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
     assert lost.returncode == 1
     error = json.loads(diagnostic)['error']
     assert error['reason'] == 'error' and error['output_failed']
-    assert 'lll bot rotate bot-error-output-lost' in error['recovery']
+    assert error['recovery'] == 'one_time_output_lost'
+    assert b'bot-error-output-lost' not in diagnostic, 'machine diagnostic copied an input value'
     assert not re.search(rb'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', diagnostic)
     claimed = subprocess.Popen([binary, '--json-errors', 'issue', 'next', '--claim'], env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
