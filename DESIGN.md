@@ -633,14 +633,14 @@ ink type, and the product's near-black ground below it.
 - **The band spends orange as a ground.** Ember Orange (#f0883e) fills the
   whole header. Everything on it is Ember Ink (#1a0f06) or **Landing Ink
   Voice** (`--ink-2`), the band's secondary text: nav links, the lede, the
-  local door's tag, the machine names under the chips. The band has its own
+  starter guidance and the machine names under the chips. The band has its own
   hairline, **Landing Ink Hairline**, used for the top-bar rule, the seam
   between the doors and the version tag's border. The same ink at 0.1 alpha
   (**Landing Ink Wash**, 0.18 on hover) fills the version tag. Selection and
   focus invert inside the band: ink selection with orange text, and an ink
   focus outline.
 - **Ink surfaces carry warm light text.** On the ink panels inside the band
-  (the online door, the local door's code block, the harness chips), text is
+  (the starter command block and harness chips), text is
   **Landing Door Text**, a warm off-white, never the product's cool
   text-primary.
 - **Harness identity reuses the avatar palette.** Each harness keeps one hue
@@ -665,8 +665,6 @@ is 16px/1.6 (the product's 13px is too small for reading copy at page width).
 - **Display** (landing-display): the h1 only, balanced wrapping.
 - **Lede** (landing-lede): the one line under the h1, ink-2 with the harness clause in ink at 650.
 - **Chip** (landing-chip): the harness chips on the band, 15px 600.
-- **Door command** (landing-door-command): the two door headings ("lll up",
-  "One binary. One volume.").
 - **Headline** (landing-headline): section titles, max 18ch, balanced.
 - **Intro** (landing-intro): the paragraph under each section title, text-2
   with text-primary `strong`, measure 62ch. The lede under the h1 is
@@ -688,9 +686,16 @@ Weight-Not-Size Rule still governs the product.
   padding and the board screenshot pulls up 164px into it, so the real board
   raster sits across the band's lower edge (120px / -96px under 900px). The
   frame widens to 1240px, past the text column.
-- **Two doors, one seam.** The local and online doors sit in a two-column
-  grid divided by a 1px ink seam, bottom-aligned. Under 900px they stack and
-  the seam goes away.
+- **One starter path.** A command block, max 720px, leads with installation
+  and `lll new`, followed by the keep-running instruction, an existing-board
+  link and the next agent step. Hosting choices live in the setup guide.
+- **Retained-knowledge handoff.** A three-step ordered sequence follows the
+  board screenshot: investigate, record against a path, retrieve before editing.
+  A shared hairline and light vertical dividers connect the desktop steps;
+  below 700px they stack with horizontal separators. No card containers.
+- **Native disclosures.** Historical fleet charts/ledger and the exit-code
+  table and secondary documentation references are closed by default, with a visible summary and their existing
+  section anchors. They remain usable with keyboard navigation and without JS.
 - **Harness row.** Five chips in a five-column grid, each with its machine
   name below, wired into the board by an SVG of curved ink strokes (1.25px,
   0.55 opacity, non-scaling) that converge on three arrow tips. The wires are
@@ -704,10 +709,8 @@ Weight-Not-Size Rule still governs the product.
 The product's tonal ladder and card whisper apply below the band. The page
 adds two shadows, both on hero objects only:
 
-- **Door shadow**: ink-tinted, under the online door
-  (`0 18px 40px -20px rgba(26,15,6,0.7)`) and, lighter, under the local door's
-  code block (`0 12px 28px -14px rgba(26,15,6,0.55)`). The ink color keeps the
-  shadow warm against the orange.
+- **Starter command shadow**: ink-tinted, under the command block
+  (`0 12px 28px -14px rgba(26,15,6,0.55)`), warm against the orange.
 - **Board frame**: `0 40px 80px -30px rgba(0,0,0,0.7), 0 2px 6px rgba(0,0,0,0.35)`
   on the screenshot frame, lifting the board off the band edge.
 
@@ -725,14 +728,11 @@ also adds **12px** (landing-frame) for the board screenshot frame alone.
 
 ### Components
 
-- **Doors.** Each door is a heading unit: the door command, then a trailing
-  outlined tag in currentColor (12px/600, 5px radius, raised 0.3em), then a code
-  block with dimmed (0.55) unselectable `$` prompts and hanging indents. The
-  local door sits on the band with an ink code block. The online door is an
-  ink panel with an orange command and tag, and its code block is a
-  white-alpha inset.
-- **Version tag.** A monospace "1.0" link set beside the h1: ink wash, ink
-  hairline, 6px radius.
+- **Starter commands.** An ink block with warm light monospace text at 14px,
+  1.8 line height, 16px/20px padding and 8px radius. Prompts are dimmed and
+  unselectable. The task title uses the display role; no competing deployment
+  headline or version tag. The agent setup follows the handoff example and
+  uses the current README's private prompt flow.
 - **Harness chip.** An ink pill with warm light text and an 8px dot in the
   harness hue. It labels identity and is not a control.
 - **Terminal-to-board playback.** A terminal panel and a four-column mini
