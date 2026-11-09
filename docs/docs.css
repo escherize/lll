@@ -35,6 +35,7 @@ a:hover { text-decoration-thickness: 2px; }
 .skip:focus { left: 1rem; top: 0.5rem; z-index: 5; background: var(--bg); padding: 0.5rem; }
 .docs-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 1.5rem;
   min-height: 4rem;

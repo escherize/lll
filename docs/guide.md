@@ -26,9 +26,12 @@ Keep a readable copy of the record with [Markdown export](export-mirror.md).
 
 ## Run your own server
 
+Use [server operations](server-operations.md) for startup settings and access.
 Read [deployment](ci-deployment.md), [safe upgrades](upgrading.md), and
 [backup and recovery](hosted-recovery.md) before changing a hosted board.
 
-Contributing to lll? Start with [development](development.md). The
+## Contribute
+
+Start with [development](development.md). The
 [release checklist](release-checklist.md) and [agent DX fleet](agent-dx-fleet/how-to-run.md)
 explain how changes are verified and shipped.

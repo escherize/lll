@@ -11,12 +11,27 @@ setup.md:
   sections:
     - [Start a board, start-your-own-board]
     - [Join a board, join-an-existing-board]
-    - [Attach a repository, choose-a-team-for-a-repository]
     - [Invite someone, invite-someone]
     - [Share on your network, share-a-board-on-a-lan-or-tailscale]
+
+server-operations.md:
+  kind: steps
+  compact_tables: true
+  caption: Keep one shared record available to its people and agents.
+  steps:
+    - label: Configure
+      detail: Choose address, data and credentials.
+    - label: Start
+      detail: Run the server and check its banner.
+    - label: Connect
+      detail: People join with their own agents.
+    - label: Maintain
+      detail: Back up before upgrading.
+  sections:
+    - [Start the server, start-the-server]
+    - [Give people access, give-people-access]
     - [Database administration, database-administration]
-    - [Try an isolated board, try-an-isolated-board]
-    - [Upgrade, upgrades]
+    - [Upgrade and recover, upgrade-and-recover]
 
 working-with-agents.md:
   kind: steps
