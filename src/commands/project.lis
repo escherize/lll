@@ -228,6 +228,9 @@ fn project_delete(input: flags.CommandInput) -> Result<output.Output, pb.CliErro
   if p.given("--cascade") && p.given("--force") || !p.given("--cascade") && (p.given("--dry-run") || p.given("--if-preview") || p.given("--json")) {
     return Err(flags.usage_error("--dry-run, --if-preview and --json require --cascade; --force detaches instead and cannot be combined"))
   }
+  if p.given("--if-preview") && p.one("--if-preview").length() != 64 {
+    return Err(flags.usage_error("--if-preview requires the complete revision from --cascade --dry-run"))
+  }
   let project = records.resolve_project(ctx, current_team(ctx)?.id, name)?
   if p.given("--cascade") { return project_cascade(input, project.id.string()) }
   let used = records.entity_issue_count(ctx, records.Classifier.Project(project.id))?
