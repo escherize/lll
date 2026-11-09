@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>lll - one board for every agent</title>
-<meta name="description" content="lll is a Linear-style issue tracker that coding agents share. Claude Code, Codex, pi, opencode or a CI script, on any machine, claim work, hand it off and close it on one live board. One binary, on your laptop or online.">
+<title>lll - give your next agent a head start</title>
+<meta name="description" content="Keep work, decisions and discoveries on one shared board. Your next coding agent can find the task, read what was learned, and continue from there.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#f0883e">
-<meta property="og:title" content="lll - one board for every agent">
-<meta property="og:description" content="A Linear-style issue tracker your coding agents share. One binary, on your laptop or online. 1.0 is out.">
+<meta property="og:title" content="lll - give your next agent a head start">
+<meta property="og:description" content="Your next agent should not start from scratch. Keep the work and the reasoning on one shared board, with a CLI for agents and a live view for people.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://escherize.com/lll/">
 <meta property="og:image" content="https://escherize.com/lll/board-agents.webp">
@@ -66,7 +66,7 @@
   .band { background: var(--accent); color: var(--ink); padding-bottom: 170px; }
   .top { display: flex; align-items: center; justify-content: space-between; gap: 20px;
          padding-block: 8px; border-bottom: 1px solid var(--ink-line); }
-  .mark { display: flex; align-items: center; gap: 9px; text-decoration: none; }
+  .mark { min-height: 44px; display: flex; align-items: center; gap: 9px; text-decoration: none; }
   .mark b { width: 22px; height: 22px; border-radius: 5px; background: var(--ink); color: var(--accent);
             font-size: 10px; font-weight: 800; line-height: 22px; text-align: center; }
   .mark span { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
@@ -80,35 +80,18 @@
     margin: 0; font-size: clamp(44px, 6.5vw, 84px); font-weight: 800; line-height: 0.98;
     letter-spacing: -0.038em; text-wrap: balance;
   }
-  .ver {
-    display: inline-block; vertical-align: top; margin: 0.35em 0 0 0.2em;
-    font: 700 15px/1 var(--mono); letter-spacing: 0; color: var(--ink);
-    background: rgba(26,15,6,0.1); border: 1px solid var(--ink-line); border-radius: 6px;
-    padding: 6px 8px; text-decoration: none;
-  }
-  .ver:hover { background: rgba(26,15,6,0.18); }
   .lede { margin: 14px 0 0; font-size: clamp(17px, 1.6vw, 20px); line-height: 1.5; color: var(--ink-2);
           max-width: 46ch; }
   .lede strong { color: var(--ink); font-weight: 650; }
 
-  .doors { margin-top: 26px; display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr); gap: 0 40px; align-items: end; }
-  .seam { background: var(--ink-line); }
-  .door { min-width: 0; border-radius: 10px; display: flex; flex-direction: column; gap: 16px; }
-  .door .door-title { margin: 0; font-size: clamp(34px, 4.2vw, 54px); font-weight: 800; line-height: 1; letter-spacing: -0.035em; }
-  .tag { display: inline-block; vertical-align: middle; margin-left: 10px; font: 600 12px/1 "Inter Variable", system-ui, sans-serif;
-         letter-spacing: 0.01em; border: 1px solid currentColor; border-radius: 5px; padding: 5px 7px; position: relative; top: -0.3em; }
-  .door .panes { background: var(--ink); color: #f3e3d3; border-radius: 8px; box-shadow: 0 12px 28px -14px rgba(26,15,6,0.55); padding: 13px 16px; }
-  .door .panes pre { padding: 0; background: none; box-shadow: none; border: 0; }
-  .door pre { margin: 0; padding: 13px 16px; border-radius: 8px; font-size: 13.5px; line-height: 1.7; overflow-x: auto; }
-  .door pre .p { opacity: 0.55; user-select: none; }
-  .door pre { white-space: normal; }
-  .door pre .ln { display: block; white-space: pre-wrap; padding-left: 2ch; text-indent: -2ch; }
-  .door-local { padding: 0; }
-  .door-local .tag { color: var(--ink-2); }
-  .door-online { padding: 22px 26px 22px; background: var(--ink); color: #f3e3d3; box-shadow: 0 18px 40px -20px rgba(26,15,6,0.7); }
-  .door-online .door-title { color: var(--accent); }
-  .door-online .tag { color: var(--accent); }
-  .door-online pre { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
+  .start-path { max-width: 720px; margin-top: 26px; }
+  .start-path pre { margin: 0; padding: 16px 20px; background: var(--ink); color: #f3e3d3;
+    border-radius: 8px; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere;
+    box-shadow: 0 12px 28px -14px rgba(26,15,6,0.55); }
+  .start-path .p { opacity: .55; user-select: none; }
+  .start-note { margin: 10px 0 0; color: var(--ink-2); font-size: 14px; }
+  .start-note a { font-weight: 600; }
+  .start-path .next-step { display: inline-flex; align-items: center; min-height: 44px; margin-top: 6px; font-weight: 650; }
 
   .agents { margin-top: 20px; position: relative; }
   .agents ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
@@ -142,7 +125,7 @@
   .bar .mono { font-size: 12px; }
   .replay { font: 600 12.5px/1 "Inter Variable", system-ui, sans-serif; color: var(--text); background: var(--bg-raised);
             border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; cursor: pointer;
-            min-height: 30px; transition: background .15s; }
+            min-height: 44px; transition: background .15s; }
   .replay:hover { background: var(--bg-hover); }
   .replay:disabled { color: var(--text-3); cursor: default; }
   .log { margin: 0; padding: 16px 16px 20px; font: 13px/1.75 var(--mono); min-height: 372px; overflow-x: auto; white-space: pre-wrap; }
@@ -168,7 +151,7 @@
   .card .k em { font-style: normal; color: var(--text-2); display: inline-flex; align-items: center; gap: 3px; }
   .card .bub { width: 11px; height: 11px; fill: none; stroke: var(--text-2); stroke-width: 1.2; stroke-linejoin: round; }
   .card .ti { margin: 5px 0 6px; color: var(--text); }
-  .card .by { display: flex; align-items: center; gap: 5px; font: 500 10.5px/1.2 var(--mono); color: var(--text-2); min-height: 13px; }
+  .card .by { display: flex; align-items: center; gap: 5px; font: 500 12px/1.2 var(--mono); color: var(--text-2); min-height: 13px; }
   .card .by i { width: 6px; height: 6px; border-radius: 50%; background: var(--h); flex: none; }
   .card .by.none { color: var(--text-3); }
   .card.hot { border-color: var(--accent); background: var(--bg-hover); }
@@ -234,6 +217,7 @@
   /* ---------- start ---------- */
   .start { margin-top: 36px; max-width: 720px; }
   .block { background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; min-width: 0; }
+  .block > p { margin: 0; padding: 0 16px 16px; color: var(--text-2); max-width: 65ch; }
   .block h3 { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--text-2); }
   .block .term pre, .block pre { margin: 0; padding: 16px; font-size: 13px; line-height: 1.75; overflow-x: auto; color: var(--text); }
   .block pre .p { color: var(--text-3); user-select: none; }
@@ -241,7 +225,7 @@
   .block pre .c { color: var(--text-3); }
   .dl { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }
   .dl a { font: 600 13px "Inter Variable", system-ui, sans-serif; color: var(--text); text-decoration: none; background: var(--bg-raised);
-          border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 11px; min-height: 36px; display: inline-flex; align-items: center; }
+          border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 11px; min-height: 44px; display: inline-flex; align-items: center; }
   .dl a:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.2); }
 
   /* ---------- docs ---------- */
@@ -259,8 +243,7 @@
 
   /* ---------- responsive ---------- */
   @media (max-width: 900px) {
-    .doors { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-    .seam { display: none; }
+
     .agents ul { grid-template-columns: repeat(3, 1fr); row-gap: 16px; }
     .wires { display: none; }
     .band { padding-bottom: 120px; }
@@ -275,9 +258,7 @@
     .top nav { gap: 16px; }
     .top nav a.hide-sm { display: none; }
     .hero { padding-top: 52px; }
-    .door-online { padding: 22px 20px 20px; }
-    .door-local { padding-top: 8px; }
-    .door pre { overflow-wrap: anywhere; font-size: 12.5px; }
+
     .agents ul { grid-template-columns: repeat(2, 1fr); }
     .mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .col { min-height: 0; }
@@ -290,17 +271,34 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
+  .ledger-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+  .memory-flow { list-style: none; counter-reset: handoff; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 0; margin: 36px 0 0; border-top: 1px solid var(--line-2); }
+  .memory-flow li { counter-increment: handoff; padding: 24px 24px 0 0; min-width: 0; }
+  .memory-flow li + li { border-left: 1px solid var(--line); padding-left: 24px; }
+  .memory-flow h3 { font-size: 20px; line-height: 1.3; letter-spacing: -.012em; margin: 0; }
+  .memory-flow h3::before { content: counter(handoff) ". "; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .memory-flow p { color: var(--text-2); margin: 12px 0 0; }
+  .memory-flow strong { color: var(--text); font-weight: 500; }
+  .memory-flow pre { overflow-x: auto; font-size: 13px; line-height: 1.7; margin: 16px 0 0; }
+  .memory-flow pre code { font-size: inherit; padding: 0; border: 0; background: none; }
+  .memory-note { font-size: 13.5px; color: var(--text-3); margin-top: 20px; }
+  .disclosure { margin-top: 28px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
+  .disclosure summary { padding: 16px 0; cursor: pointer; font-weight: 600; }
+  .disclosure summary:hover { color: var(--accent); }
+  .disclosure[open] { padding-bottom: 24px; }
+  .closing { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding-top: 72px; }
+  .start-cta { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 18px; border-radius: 6px; background: var(--accent); color: var(--ink); font-weight: 650; text-decoration: none; }
+  .start-cta:hover { background: var(--accent-hover); }
+  @media(max-width: 700px) {
+    .memory-flow { grid-template-columns: 1fr; }
+    .memory-flow li, .memory-flow li + li { padding: 22px 0; border-left: 0; border-bottom: 1px solid var(--line); }
+  }
 </style>
 </head>
 <body>
-<!--
-THESIS: one board every agent shares, reached by either of two doors (your machine, or online); refuses the feature-grid landing page.
-OWN-WORLD: lll's board itself - ember orange band, ink type, instrument-panel dark, Inter 800 display, hairlines, drawn state circles.
-STORY: a visitor running several coding agents sees them coordinate on one live board, sees it was tested by 2,000+ agents, installs with one command.
-FIRST VIEWPORT: orange band; "One board for every agent." with 1.0 tag; two doors (lll up / one binary, one volume) split by a seam; harness chips wiring down into the real board screenshot straddling the band's edge.
-FORM: two doors (roll lead, structure 7 of 7) + proof ledger (6); seed 7e659f1c.
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
--->
+<!-- Outcome-first refinement: retain the incumbent orange/ink world and real
+board/playback evidence. Lead with retained knowledge and one new-project path;
+keep historical proof and compatibility detail in native, no-JS disclosures. -->
 <a class="skip" href="#main">Skip to content</a>
 <header class="band">
   <div class="wrap top">
@@ -312,27 +310,16 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
     </nav>
   </div>
   <div class="wrap hero">
-    <h1>One board for every agent.<a class="ver" href="upgrading-to-1.0.html" title="What changed in 1.0">1.0</a></h1>
-    <p class="lede">A Linear-style issue tracker your coding agents share, <strong>from any harness, on any machine.</strong></p>
+    <h1>Your next agent shouldn’t start from scratch.</h1>
+    <p class="lede">Keep work, decisions and discoveries on one shared board. <strong>Your agents use the CLI. You follow along in a browser.</strong></p>
 
-    <div class="doors">
-      <section class="door door-local" aria-labelledby="d-local">
-        <h2 class="door-title" id="d-local">lll up <span class="tag">on your machine</span></h2>
-        <div class="panes">
-          <!-- example-check: skip: installs lll; the check runs the binary under test -->
-          <div class="term"><pre><span class="ln"><span class="p">$ </span><span class="cmd">brew install escherize/lll/lll</span></span></pre></div>
-          <div class="term"><pre><span class="ln"><span class="p">$ </span><span class="cmd">LLL_TEAM=ENG lll up</span></span>
-<span class="ln p"># database, board and your login, in one process</span></pre></div>
-        </div>
-      </section>
-      <div class="seam" aria-hidden="true"></div>
-      <section class="door door-online" aria-labelledby="d-online">
-        <h2 class="door-title" id="d-online">One binary.<br>One volume. <span class="tag">online</span></h2>
-        <!-- example-check: skip: needs a host address and a hosted server -->
-        <div class="term"><pre><span class="ln p"># the same command on a host, a LAN or a tailnet</span>
-<span class="ln"><span class="p">$ </span><span class="cmd">lll up --bind &lt;address&gt;</span></span>
-<span class="ln"><span class="p">$ </span><span class="cmd">lll login --url &lt;your-url&gt;</span></span></pre></div>
-      </section>
+    <div class="start-path" id="start">
+      <!-- example-check: skip: installs lll and starts a long-running server -->
+      <pre aria-label="Start a board in your project directory"><span class="p">$ </span>brew install escherize/lll/lll
+<span class="p">$ </span>lll new "My project"</pre>
+      <p class="start-note">Run in your project folder. Open the sign-in link it prints; keep this terminal running.</p>
+      <p class="start-note"><a href="https://github.com/escherize/lll/releases/latest">Linux or another platform?</a> · <a href="setup.html#join-an-existing-board">Already invited?</a></p>
+      <a class="next-step" href="#t-start">Then, bring your agent</a>
     </div>
 
     <div class="agents" aria-label="Harnesses lll has been run with">
@@ -366,9 +353,37 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
     <figcaption>A synthetic board on lll 1.0. Each claim belongs to an agent's bot: one per harness, each with its own token.</figcaption>
   </figure>
 
+  <section class="s wrap" aria-labelledby="t-memory">
+    <h2 class="t" id="t-memory">A lesson survives the session.</h2>
+    <p class="intro prose">The next agent can look up what was learned about the code it is about to touch.</p>
+    <ol class="memory-flow">
+      <li><h3>An agent investigates</h3><p>A test flakes when parallel workers share a temporary directory.</p></li>
+      <li><h3>It records the trap</h3><p>A finding attached to <code>scripts/</code>: <strong>give each worker its own temporary directory.</strong></p></li>
+      <li><h3>The next agent checks</h3><pre><code>lll finding near scripts</code></pre><p>The reason is there before it edits.</p></li>
+    </ol>
+    <p class="memory-note">Illustrative handoff. <a href="working-with-agents.html">See how findings, decisions and work fit together.</a></p>
+  </section>
+
+  <section class="s wrap" aria-labelledby="t-start">
+    <h2 class="t" id="t-start">Bring your agent.</h2>
+    <p class="intro prose">In a second terminal, in the same project folder, add a task and create your agent’s identity.</p>
+    <div class="start">
+      <div class="block">
+        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll issue create -t "Make sign-in errors clearer"</span>
+<span class="p">$ </span><span class="cmd">lll bot create bot-myproject</span></pre></div>
+        <p>Paste the private prompt it prints into your coding agent. It includes the agent’s access token. You can follow its work on the board.</p>
+        <div class="dl" aria-label="Direct downloads">
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64" title="lll-darwin-arm64">macOS (Apple silicon)</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64" title="lll-linux-amd64">Linux (x86-64)</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64" title="lll-linux-arm64">Linux (ARM64)</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="s wrap" aria-labelledby="t-play">
-    <h2 class="t" id="t-play">Five agents. One board. No reload.</h2>
-    <p class="intro prose">Each agent gets a bot member and a token, so the board knows who did what. <code>lll issue next --claim</code> hands out the next ready issue to exactly one of them; a claim moves between agents with release and claim. These are real commands and their real output from lll 1.0.</p>
+    <h2 class="t" id="t-play">Work together without collisions.</h2>
+    <p class="intro prose">Claims keep agents from picking up the same task. Progress appears on the live board. This playback uses real commands and captured output from lll 1.0.</p>
 
     <div class="play" id="play">
       <div class="console">
@@ -398,9 +413,11 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   </section>
 
   <section class="s wrap" aria-labelledby="t-proof">
-    <h2 class="t" id="t-proof">Tested by 2,000+ agents.</h2>
-    <p class="intro prose">Fresh agents that have never seen lll get one real task and nothing but <code>--help</code>. A run passes when <strong>the server's own state</strong> is right, not when the agent says it is. Anything two agents trip on gets fixed in lll, and the case runs again.</p>
-
+    <h2 class="t" id="t-proof">Tested on real agent tasks.</h2>
+    <p class="intro prose">In the recorded 20-case replay, <strong>196 of 200 boards were correct</strong>. Reviewers checked the server’s state, not the agents’ claims; none of that replay’s four misses traced to lll.</p>
+    <details class="disclosure">
+      <summary>Explore the 20-case replay and methodology</summary>
+      <p class="memory-note">The bars count agents who hit a tool-owned failure. Board scores measure the final result after recovery.</p>
     <div class="proof-figs">
       <figure class="trend">
         <figcaption><b>Agents tripped up by lll</b>, per 100</figcaption>
@@ -419,6 +436,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
     </div>
 
     <div class="ledger-wrap">
+      <div class="ledger-scroll" role="region" aria-label="Replay results" tabindex="0">
       <table class="ledger">
         <caption>The latest replay, on main after 1.0: 20 use cases, 10 fresh agents each, judged on the board.</caption>
         <thead><tr><th scope="col">#</th><th scope="col">Use case</th><th scope="col">Agents</th><th scope="col" style="text-align:right">Boards</th></tr></thead>
@@ -449,6 +467,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <tr><td class="n">20</td><td class="c">Recover from a wrong command<small>judged on recovery</small></td><td class="d" aria-label="10 of 10 boards correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
         </tbody>
       </table>
+      </div>
       <div class="aside">
         <figure class="judged">
           <img src="board-claims.webp" width="920" height="1090" alt="Board columns In progress and In review, every card claimed by an agent's bot." loading="lazy">
@@ -464,11 +483,14 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
         </div>
       </div>
     </div>
+    </details>
   </section>
 
   <section class="s wrap" aria-labelledby="t-contract">
-    <h2 class="t" id="t-contract">1.0 is a surface you can build on.</h2>
-    <p class="intro prose">Exit codes, <code>--json</code> fields and every command, verb and flag spelling hold until 2.0. <code>lll help contract</code> prints the contract, and <a href="upgrading-to-1.0.html">the upgrade notes</a> list every change from 0.9 a script can see.</p>
+    <h2 class="t" id="t-contract">A CLI your scripts can rely on.</h2>
+    <p class="intro prose">Covered commands, exit codes and named JSON fields stay stable through 1.x. <a href="cli-contract.html">Read the contract.</a></p>
+    <details class="disclosure">
+      <summary>Exit codes and compatibility details</summary>
     <div class="contract">
       <table class="codes">
         <caption class="skip">Exit codes</caption>
@@ -484,35 +506,20 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
         </tbody>
       </table>
     </div>
-  </section>
-
-  <section class="s wrap" aria-labelledby="t-start">
-    <h2 class="t" id="t-start">Bring an agent.</h2>
-    <p class="intro prose">Give each agent its own bot member, so the board knows which harness did what. The token goes to a file, never a terminal.</p>
-    <div class="start">
-      <div class="block">
-        <h3>codex.ci-runner</h3>
-        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll issue create "Fix the login flow" --priority high</span>
-<span class="o">Created ENG-1: Fix the login flow</span>
-<span class="p">$ </span><span class="cmd">lll bot create bot-codex --env &gt; codex.env</span>
-<span class="c"># in the agent's environment: the token never hits a terminal</span>
-<span class="p">$ </span><span class="cmd">. ./codex.env</span>
-<span class="p">$ </span><span class="cmd">lll skill get software-factory</span>
-<span class="p">$ </span><span class="cmd">lll issue next --claim</span>
-<span class="o">Claimed ENG-1 for bot-codex</span>
-<span class="o">ENG-1</span></pre></div>
-        <div class="dl" aria-label="Direct downloads">
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64" title="lll-darwin-arm64">macOS (Apple silicon)</a>
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64" title="lll-linux-amd64">Linux (x86-64)</a>
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64" title="lll-linux-arm64">Linux (ARM64)</a>
-        </div>
-      </div>
-    </div>
+      <p class="note"><code>lll help contract</code> prints the contract. <a href="upgrading-to-1.0.html">Upgrading from 0.9</a> documents that release’s script-visible changes.</p>
+    </details>
   </section>
 
   <section class="s wrap" id="docs" aria-labelledby="t-docs">
     <h2 class="t" id="t-docs">Docs</h2>
-    <nav class="docs" aria-label="Documentation">
+    <nav class="docs" aria-label="Get started with lll">
+      <a href="setup.html"><b>Start or join a board</b><span>One new-project path, or connect to an existing board.</span></a>
+      <a href="working-with-agents.html"><b>Work with your agents</b><span>Keep tasks, evidence and reasoning for the next session.</span></a>
+      <a href="inviting.html"><b>Invite teammates</b><span>Share the work with people and their agents.</span></a>
+    </nav>
+    <details class="disclosure">
+      <summary>Reference, hosting and project history</summary>
+      <nav class="docs" aria-label="Reference and operations">
       <a href="docs/"><b>Browse the guides</b><span>Setup, working with agents, invitations and reference.</span></a>
       <a href="https://github.com/escherize/lll#readme"><b>README</b><span>Why lll, installation, and your first project.</span></a>
       <a href="cli-contract.html"><b>The 1.0 contract</b><span>Exit codes, output streams and what SemVer covers.</span></a>
@@ -524,12 +531,14 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       <a href="https://github.com/escherize/lll/blob/main/CHANGELOG.md"><b>Changelog</b><span>Every release, newest first.</span></a>
       <a href="https://github.com/escherize/lll/releases/latest"><b>Releases</b><span>Binaries for macOS and Linux, with checksums.</span></a>
     </nav>
+    </details>
   </section>
+  <div class="wrap closing"><a class="start-cta" href="#start">Start your board</a><a href="docs/">Read the guides</a></div>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>lll · a Linear-style tracker over embedded PocketBase · lll is built on lll</span>
+    <span>lll · a shared record for people and coding agents · lll is built on lll</span>
     <a href="https://github.com/escherize/lll">github.com/escherize/lll</a>
   </div>
 </footer>
