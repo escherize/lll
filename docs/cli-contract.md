@@ -244,6 +244,14 @@ or an atomic snapshot. Ordinary member visibility rules still apply.
 
 ### Other records
 
+`bot disable --json` returns `{id, name, disabled: true}`.
+`bot remove --json` (alias `delete`) returns
+`{id, name, removed: true, had_references: boolean}`. These operations require
+`bots.lifecycle` support. They emit no token; terminal confirmation goes to
+stderr. A declined confirmation or referenced removal without `--force` is
+exit 4. Disabling preserves attribution and work; forced removal permits
+native reference clearing, including assignments and claims.
+
 `bot create --json` and `bot rotate --json` print one credential object:
 
 | Field | Type | Notes |
@@ -420,3 +428,14 @@ without a returned link), and boolean `complete`. Partial failure exits nonzero
 and preserves that JSON on stdout; stderr carries the error. A failed request
 may have committed, so creation retries are not idempotent. See
 [Inviting people and agents](inviting.md).
+
+### Project cascade
+
+`project delete NAME --cascade --dry-run --json` returns `project` (id),
+`name`, `issues` (`id`, `key`, `title`, `state`), `blockers` (`kind`, `count`)
+and an opaque `revision`. Preview writes nothing. `--if-preview REVISION`
+requires that exact preview on execution; a stale revision exits 4. A successful
+cascade JSON receipt has `project`, `deleted: true` and the deleted `issues`.
+Claims and external references block execution, including administrator calls.
+The server advertises `projects.cascade`; neither a missing capability nor a
+refused cascade falls back to detaching or deleting cards one by one.

@@ -32,7 +32,7 @@ fn check_status_accepts_every_lifecycle_status() {
 #[test]
 fn project_verb_spec_covers_the_new_verbs() {
   assert strings.Join(flags.tokens(flags.command_spec(project_commands(), "edit")), " ") == "-n --name -b --body -d --description --status --json --team"
-  assert strings.Join(flags.tokens(flags.command_spec(project_commands(), "delete")), " ") == "--force --yes --team"
+  assert strings.Join(flags.tokens(flags.command_spec(project_commands(), "delete")), " ") == "--force --yes --cascade --dry-run --if-preview --json --team"
 }
 
 /// --force takes no value: `lll project delete Apollo --force` must not

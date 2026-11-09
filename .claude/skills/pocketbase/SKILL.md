@@ -102,8 +102,12 @@ Some mutations remain server-owned:
   would skip that check. The expiry sweep deletes through the Go app, which
   collection rules do not apply to.
 - `members.deleteRule` is `null` (`1789200000_member_delete_admin.js`, LLL-341).
-  Deleting an account is a superuser act, because a browser-only check would
-  leave direct API deletion as a bypass.
+  Generic account deletion is a superuser act. Owned-bot disable/remove use
+  dedicated routes in `gopb/bot_lifecycle.go`: fresh caller token key, current
+  owner and ID/name binding are checked inside the write transaction. Creator
+  status alone grants no lifecycle authority. Removal checks PocketBase relation
+  metadata; explicit force permits native reference clearing and claim release.
+  Keep the generic rule locked; a browser-only check would leave an API bypass.
 - `users` is `null` across the board. lll does not use that collection, and
   PocketBase's stock `createRule` is public self-registration nobody asked for.
 

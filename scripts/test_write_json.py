@@ -27,7 +27,6 @@ WITHOUT_JSON = {
     ('team', 'delete'): DELETE,
     ('member', 'delete'): DELETE,
     ('member', 'remove'): DELETE,
-    ('project', 'delete'): DELETE,
     ('label', 'delete'): DELETE,
     ('doc', 'delete'): DELETE,
     ('webhook', 'remove'): DELETE,

@@ -1,0 +1,151 @@
+import "go:bufio"
+import "go:encoding/json"
+import "go:fmt"
+import "go:golang.org/x/term"
+import "go:os"
+import "go:strings"
+
+import "flags"
+import "output"
+import "pb"
+import "writes"
+
+#[json]
+struct CascadeIssue { id: string, key: string, title: string, state: string }
+
+#[json]
+struct CascadeBlocker { kind: string, count: int }
+
+#[json]
+struct CascadePreview {
+  project: string,
+  name: string,
+  issues: Option<Slice<CascadeIssue>>,
+  blockers: Option<Slice<CascadeBlocker>>,
+  revision: string,
+}
+
+#[json]
+struct CascadeReceipt {
+  project: string,
+  deleted: bool,
+  issues: Option<Slice<CascadeIssue>>,
+}
+
+fn cascade_confirm(
+  yes: bool,
+  name: string,
+  count: int,
+) -> Result<bool, pb.CliError> {
+  if yes || !term.IsTerminal(os.Stdin.Fd() as int) { return Ok(true) }
+  let _ = fmt
+    .Fprint(os.Stderr, f"delete project {name} and {count} issue(s)? [y/N] ")
+    .map_err(|e| pb.failed(f"could not display confirmation: {e}"))?
+  let mut scanner = bufio.NewScanner(os.Stdin)
+  let read = scanner.Scan()
+  let _ = fmt.Fprintln(os.Stderr, "")
+  if !read { return Ok(false) }
+  let answer = strings.ToLower(strings.TrimSpace(scanner.Text()))
+  Ok(answer == "y" || answer == "yes")
+}
+
+fn project_cascade(
+  input: flags.CommandInput,
+  id: string,
+) -> Result<output.Output, pb.CliError> {
+  let ctx = input.ctx
+  let p = input.parsed
+  writes.require_capability(
+    ctx,
+    "projects.cascade",
+    "/api/lll/projects/cascade-support",
+    "project cascade; upgrade the server before retrying",
+  )?
+  let raw = ctx.get(f"/api/lll/projects/{id}/cascade")?
+  let mut preview = CascadePreview { .. }
+  let decoded = json.Unmarshal(raw.bytes(), &preview)
+  if decoded.is_err() || preview.project != id || preview.revision.length() != 64 {
+    return Err(pb.failed(
+      "the cascade preview was incomplete; nothing was changed",
+    ))
+  }
+  let Some(issues) = preview.issues else {
+    return Err(pb.failed(
+      "the cascade preview omitted its issue set; nothing was changed",
+    ))
+  }
+  let Some(blockers) = preview.blockers else {
+    return Err(pb.failed(
+      "the cascade preview omitted its reference checks; nothing was changed",
+    ))
+  }
+  for issue in issues {
+    if issue.id == "" || issue.key == "" || issues
+      .filter(|other| other.id == issue.id)
+      .length() != 1 {
+      return Err(pb.failed(
+        "the cascade preview has an incomplete or duplicate issue; nothing was changed",
+      ))
+    }
+  }
+  let expected = p.one("--if-preview")
+  if expected != "" && expected != preview.revision {
+    return Err(pb.fail(
+      pb.ErrorKind.Refused,
+      "project changed since that preview; preview again before deleting",
+    ))
+  }
+  if p.given("--dry-run") {
+    if p.given("--json") { return json_value(preview, "cascade preview") }
+    let mut lines = [
+      f"Would delete project {preview.name} and {issues.length()} issue(s):",
+    ]
+    for issue in issues {
+      lines = lines.append(f"  {issue.key}  {issue.title}")
+    }
+    for blocker in blockers {
+      lines = lines.append(
+        f"Blocked: {blocker.count} {blocker.kind} reference(s); release or detach them first",
+      )
+    }
+    lines = lines.append(f"Preview: {preview.revision}")
+    return Ok(output.line(strings.Join(lines, "\n")))
+  }
+  if !blockers.is_empty() {
+    return Err(pb.fail(
+      pb.ErrorKind.Refused,
+      "project has claims or external references; use --cascade --dry-run to inspect, then release or detach them",
+    ))
+  }
+  let accepted = cascade_confirm(
+    p.given("--yes"),
+    preview.name,
+    issues.length(),
+  )?
+  if !accepted { return Err(aborted()) }
+  let reply = writes.cascade_project(ctx, id, preview.revision)
+    .map_err(|e| e.with_message(f"{e.message}\nThe response may have been lost; inspect the project before retrying."))?
+  let mut receipt = CascadeReceipt { .. }
+  let decoded = json.Unmarshal(reply.bytes(), &receipt)
+  if decoded.is_err() || receipt.project != id || !receipt.deleted {
+    return Err(pb.failed(
+      "the cascade response was incomplete; inspect the project before retrying",
+    ))
+  }
+  let Some(deleted_issues) = receipt.issues else {
+    return Err(pb.failed(
+      "the cascade response omitted its issue set; inspect the project before retrying",
+    ))
+  }
+  if deleted_issues.length() != issues.length() || issues
+    .find(|issue| deleted_issues.filter(|row| row.id == issue.id).length() != 1)
+    .is_some() {
+    return Err(pb.failed(
+      "the cascade response named a different issue set; inspect the project before retrying",
+    ))
+  }
+  if p.given("--json") { return json_value(receipt, "cascade receipt") }
+  Ok(output.line(
+    f"Deleted project {preview.name} and {deleted_issues.length()} issue(s)",
+  ))
+}
