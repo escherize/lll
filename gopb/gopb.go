@@ -157,6 +157,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		registerActivityRoutes(e.Router)
 		registerClaimRoutes(e.Router, &issueUpdates)
 		registerBotRoutes(e.Router)
+		registerProjectCascadeRoutes(e.Router)
 		registerAccessRoute(e.Router)
 		registerLinkTokenRoute(e.Router)
 		registerInviteRoutes(e.Router)
@@ -344,5 +345,5 @@ func apiDiscovery(version, boardURL string) map[string]any {
 // feature ships; never remove or rename one. A server without the list
 // predates it, so the CLI asks that feature's own support route instead.
 func Capabilities() []string {
-	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents", "bots.lifecycle"}
+	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents", "bots.lifecycle", "projects.cascade"}
 }

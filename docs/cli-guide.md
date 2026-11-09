@@ -152,3 +152,22 @@ An agent can read the working conventions with `lll skill get lll`. They
 cover claiming an issue before work, leaving findings and decisions, and
 closing with evidence. The [CLI contract](cli-contract.md) describes the
 stable command names, exit codes and JSON fields for automation.
+
+## Delete a disposable project
+
+`lll project delete NAME --force` keeps its cards and removes their project.
+To delete the cards too, preview the cascade first:
+
+```sh
+lll project delete NAME --cascade --dry-run --json
+lll project delete NAME --cascade --if-preview REVISION --yes --json
+```
+
+Use the preview's `revision` in the second command. A changed card, comment or
+reference invalidates it. Execution is atomic and refuses claims or external
+references (including children, blockers, linked docs and webhook filters);
+release or detach those first. Preview performs no writes and works for
+read-only members who can see the project. Without `--if-preview`, execution
+still checks its fresh preview again inside the delete transaction. Terminal
+confirmation goes to stderr; scripts do not prompt. Older servers refuse the
+operation before writes.

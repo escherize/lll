@@ -428,3 +428,14 @@ without a returned link), and boolean `complete`. Partial failure exits nonzero
 and preserves that JSON on stdout; stderr carries the error. A failed request
 may have committed, so creation retries are not idempotent. See
 [Inviting people and agents](inviting.md).
+
+### Project cascade
+
+`project delete NAME --cascade --dry-run --json` returns `project` (id),
+`name`, `issues` (`id`, `key`, `title`, `state`), `blockers` (`kind`, `count`)
+and an opaque `revision`. Preview writes nothing. `--if-preview REVISION`
+requires that exact preview on execution; a stale revision exits 4. A successful
+cascade JSON receipt has `project`, `deleted: true` and the deleted `issues`.
+Claims and external references block execution, including administrator calls.
+The server advertises `projects.cascade`; neither a missing capability nor a
+refused cascade falls back to detaching or deleting cards one by one.

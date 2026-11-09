@@ -1,0 +1,24 @@
+import "go:net/url"
+
+import "pb"
+
+#[json]
+struct ProjectCascadeRequest { revision: string }
+
+pub fn cascade_project(
+  ctx: pb.Client,
+  id: string,
+  revision: string,
+) -> Result<string, pb.CliError> {
+  require_capability(
+    ctx,
+    "projects.cascade",
+    "/api/lll/projects/cascade-support",
+    "project cascade; upgrade the server before retrying",
+  )?
+  let body = encode(
+    ProjectCascadeRequest { revision },
+    "project cascade request",
+  )?
+  ctx.post(f"/api/lll/projects/{url.PathEscape(id)}/cascade", body)
+}
