@@ -29,6 +29,8 @@ with tempfile.TemporaryDirectory(prefix='lll-cascade-cli-') as home:
     comment = packet('issue','comment',issue['key'],'-b','Keep until cascade','--json')
     preview = packet('project','delete','Tear down','--cascade','--dry-run','--json')
     assert preview['issues'][0]['id'] == issue['id'] and preview['blockers'] == []
+    for invalid in ['', 'truncated']:
+        cli('project','delete','Tear down','--cascade','--if-preview',invalid,'--yes',expected=2)
     # A read-only preview leaves the entire current issue and comment unchanged.
     before = packet('issue','view',issue['key'],'--json')
     assert packet('project','delete','Tear down','--cascade','--dry-run','--json') == preview
