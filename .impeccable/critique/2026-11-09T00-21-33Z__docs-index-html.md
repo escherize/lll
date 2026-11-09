@@ -1,6 +1,6 @@
 ---
 target: landing outcome and hierarchy
-total_score: 27
+total_score: 24
 max_score: 32
 na_heuristics: 7,9
 p0_count: 0
@@ -14,7 +14,7 @@ closed: true
 ---
 Method: dual-agent (A: critique759_a · B: critique759_b)
 
-# Design health:27/32, Good
+# Design health:24/32, Good
 
 | Heuristic | Score | Finding |
 |---|---:|---|
@@ -54,3 +54,5 @@ CLI detector:4 warnings, cramped-padding3 and design-system-font1, all line0 wit
 Questions to consider: could a future hero show the retained reason directly? Which three guide routes best support a new owner?
 
 Questions skipped:2 Priority Issues, both within the already authorized onboarding/simplification scope.
+
+Arithmetic correction: the eight numeric scores sum to24/32. The assessor originally reported27; the table, findings and Good rating are unchanged.
