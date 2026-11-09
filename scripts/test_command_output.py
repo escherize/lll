@@ -58,6 +58,7 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/commands/demo.lis', 'seed_demo'): 'lll up --demo: boot banner lines',
     ('src/commands/demo.lis', 'point_cli_at_demo'): 'lll up --demo: boot banner lines',
     ('src/commands/delete.lis', 'confirmed'): 'interactive [y/N] prompt before a delete',
+    ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): 'interactive removal confirmation must be visible before reading terminal input; stderr preserves JSON stdout',
     ('src/commands/login.lis', 'ask_email'): 'interactive email prompt',
     ('src/commands/issue_write.lis', 'pr_cmd'): 'lll issue pr: gh pr create output passes straight through',
     ('src/commands/import.lis', 'gh_issue_list'): 'lll import github: gh issue list stderr passes straight through',
@@ -77,6 +78,7 @@ ALLOW: dict[tuple[str, str], str] = {
 # and write into its own --json. Keyed like ALLOW; values are the functions
 # (path, fn) that may name it, by call or as a value.
 CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
+    ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): {('src/commands/bot_lifecycle.lis', 'bot_remove_owned')},
     ('src/main.lis', 'render'): {('src/main.lis', 'main')},
     ('src/main.lis', 'write'): {('src/main.lis', 'render')},
     ('src/commands/watch.lis', 'watch_stream'): {('src/commands/watch.lis', 'watch')},

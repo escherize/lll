@@ -244,6 +244,14 @@ or an atomic snapshot. Ordinary member visibility rules still apply.
 
 ### Other records
 
+`bot disable --json` returns `{id, name, disabled: true}`.
+`bot remove --json` (alias `delete`) returns
+`{id, name, removed: true, had_references: boolean}`. These operations require
+`bots.lifecycle` support. They emit no token; terminal confirmation goes to
+stderr. A declined confirmation or referenced removal without `--force` is
+exit 4. Disabling preserves attribution and work; forced removal permits
+native reference clearing, including assignments and claims.
+
 `bot create --json` and `bot rotate --json` print one credential object:
 
 | Field | Type | Notes |

@@ -133,6 +133,7 @@ func checkMemberKind(record *core.Record, creating bool) error {
 // would have if it knew about ownership - or the bot that created it. Superuser-only is not enough:
 // the human who created the bot is the one who saw a token leak.
 func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
+	registerBotLifecycle(routes)
 	routes.POST("/api/lll/bots/rotate", func(re *core.RequestEvent) error {
 		var body struct {
 			Name     string `json:"name"`

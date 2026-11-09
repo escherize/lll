@@ -411,7 +411,7 @@ pub fn bot_commands() -> Slice<flags.Command> {
       run: bot_rotate,
       ..,
     },
-  ]
+  ].append(bot_lifecycle_commands()...)
 }
 
 fn bot_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {

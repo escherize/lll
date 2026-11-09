@@ -1476,6 +1476,7 @@ python3 "$REPO_ROOT"/scripts/test_team_refs.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_whoami_malformed.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_bot_json.py "$LLL_ABS" "$URL"
+python3 "$REPO_ROOT"/scripts/test_bot_lifecycle.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_json_errors.py "$LLL_ABS" "$URL"
 # --- lll upgrade picks its command from how lll was installed (LLL-608) ---
 python3 "$REPO_ROOT"/scripts/test_upgrade.py "$LLL_ABS"

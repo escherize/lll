@@ -344,5 +344,5 @@ func apiDiscovery(version, boardURL string) map[string]any {
 // feature ships; never remove or rename one. A server without the list
 // predates it, so the CLI asks that feature's own support route instead.
 func Capabilities() []string {
-	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents"}
+	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents", "bots.lifecycle"}
 }
