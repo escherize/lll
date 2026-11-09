@@ -182,6 +182,21 @@ read-only creator cannot mint tokens. Treat token output as a credential, not
 a report artifact. Existing API names and covered fields are separate from
 these authorization rules: client/server version equality grants no access.
 
+To stop a bot, its current human owner or an administrator uses
+`lll bot disable bot-NAME`: existing tokens are retired, access becomes
+read-only with no teams, and identity, attribution and written work remain.
+Workers it created cannot retain wider access. An administrator can grant
+access again; rotating a token alone preserves the disabled access.
+
+`lll bot remove bot-NAME` refuses an identity with references. Prefer disable
+when attribution matters. Explicit `--force` permits clearing references,
+including assignments and claims; written bodies remain. Workers keep their
+human owner and cannot gain access by losing a creator. Their credentials
+may need rotation after their owner reviews access. Creator status alone
+cannot disable or remove a worker. `--yes` skips only terminal confirmation;
+it grants no authority. `--json` returns a receipt, never a credential.
+Older servers must refuse these operations before writes.
+
 ## What agents specifically need
 
 **Read a URL, not a scrape.** Any command taking `KEY-12` also takes a pasted
@@ -250,6 +265,14 @@ the releaser; the raw claim's `member` is the holder. Expiry is system-authored.
 An older server or an indirect operation may have no actor: leave it unknown,
 never infer it from the holder. Hidden member names stay hidden.
 
+**Read comments and claims in bulk.** `lll comment list --json` and
+`lll claim list --json` read current records across the team's issues;
+`--project` narrows the query. Follow the JSON `next_cursor` using `--since`
+with the same server, team, project and list until it is empty. Here `--since`
+is a continuation, not a date. Totals can change; records added behind a
+cursor need a fresh scan. These lists are not a snapshot or change feed;
+use `activity` for ordered writes and deletions.
+
 **Watch is live-only; reconcile on start and reconnect.** Subscription readiness
 is acknowledged on stderr; JSON events go to stdout. Reconnects do not replay
 missed events. Keep the last handled event time and reconcile issue changes
@@ -274,6 +297,25 @@ Older servers without a list are checked through feature support endpoints.
 Equal version strings do not prove support, and skew warnings are advisory.
 An unsupported keyed write or activity webhook must not be retried as an
 unkeyed write or an issue-only registration: that changes the requested intent.
+
+**Choose machine-readable failures explicitly.** Put `--json-errors` first:
+`lll --json-errors issue view KEY-12 --json`. Stdout keeps its normal format;
+a handled failure ends stderr with an `error` object containing typed reason,
+exit/status and output-loss metadata. Branch on covered fields or exit codes,
+not message text. Earlier streaming/child stderr and partial stdout can exist.
+If `output_failed` is true, inspect the result before retrying a mutation.
+The fixed recovery code `one_time_output_lost` means a one-time handoff was
+not delivered; use the command's recovery procedure instead of duplicating it.
+`lll help contract` describes the fields and stream boundaries.
+
+**Preview project teardown.** Ordinary `lll project delete NAME --force`
+keeps the issues and detaches the project. To delete the issues too, first
+run `lll project delete NAME --cascade --dry-run --json`. Use its complete
+opaque `revision` with `--cascade --if-preview REVISION` when executing.
+Preview writes nothing. The server rechecks the state atomically and refuses
+changes, claims and external references. Handle those explicitly, then preview
+again. Do not replace a refused cascade with individual deletes or a force
+fallback: those change the requested operation.
 
 **Make retried creates idempotent.** Use `lll issue create --idempotency-key KEY`
 when a run might lose the creation response. Derive the key once from the

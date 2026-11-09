@@ -6,6 +6,44 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-08
+
+### Added
+
+- Read current comments and claims in bulk with `comment list` and `claim list`.
+  Scoped pages carry opaque continuation cursors; they are current records,
+  not an activity log or a snapshot (LLL-769).
+- Request typed failures on stderr with the first-argument prefix
+  `--json-errors`. Exit codes and stdout stay unchanged; one-time output
+  failures include a fixed recovery code without echoing request values.
+  Shell completions recognize the prefix (LLL-771).
+- Owners can disable their bots, retiring credentials while keeping their
+  work, or remove them with explicit reference checks. Authority follows the
+  current human owner; creating a bot is not deletion authority. Existing
+  worker ownership does not widen access (LLL-775).
+- Preview project deletion with `project delete --cascade --dry-run`, then
+  require that exact revision with `--if-preview`. Claims, changed previews
+  and external references refuse the atomic deletion. Existing `--force`
+  continues to detach issues (LLL-776).
+
+### Fixed
+
+- `whoami` classifies malformed local identity tokens as authentication
+  failures (exit 6), matching the documented contract (LLL-777).
+
+### Changed
+
+- The landing page leads with the next agent's context and one start path.
+  Replay, historical evidence and secondary references remain available in
+  native disclosures (LLL-759).
+- Setup is a shorter start/join/invite/share guide, with server operation
+  details in a separate reference. Existing setup anchors remain valid;
+  navigation wraps with enlarged text on narrow screens (LLL-758).
+- Portable agent guidance explains bulk cursors, diagnostic streams, bot
+  lifecycle boundaries and revision-guarded project deletion (LLL-779).
+- The paired-edit DX case states its exact three-line artifact requirement
+  without requiring an unstated terminal newline (LLL-774).
+
 ## [1.5.0] - 2026-11-06
 
 ### Added
