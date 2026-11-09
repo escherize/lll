@@ -1,197 +1,114 @@
 # Setting up lll
 
-Start a board, join an existing one, or share yours with a team. For command
-and configuration details, see [the CLI guide](cli-guide.md).
+Start a board, join one, or share yours. Server settings and administrator
+procedures are in [server operations](server-operations.md).
 
 ## Start your own board
+
+Install lll ([other platforms](https://github.com/escherize/lll/releases/latest)):
+
+<!-- example-check: skip: installs lll; checks use the binary under test -->
+```sh
+brew install escherize/lll/lll
+```
+
+Run in a project directory:
 
 ```sh
 mkdir my-project && cd my-project
 lll new "Payments rewrite"
 ```
 
-This starts a local board, attaches the directory and logs its CLI in. Open the
-sign-in link it prints, and keep the command running. In a second terminal in
-this directory, create work with `lll issue create -t "First issue"`.
+Open the sign-in link it prints. Keep this terminal running; in a second
+terminal in the same directory, add a task:
 
-The team key comes from the title: `PAY` gives you `PAY-1`, `PAY-2`, and so on.
-`--key` picks your own key. Data lives in `~/.config/lll/boards/pay`; run the
-same command again to reopen the board. A key already used by another title
-or a directory already attached to another board is refused rather than
-silently replaced. Ctrl-C stops the server.
+```sh
+lll issue create -t "First issue"
+```
+
+Stop the server with Ctrl-C; its data stays. The directory remembers its board.
+Run the same `lll new` command to reopen
+it after stopping the server. The title chooses the team key (`PAY` here);
+`--key` chooses another. [Server operations](server-operations.md#start-the-server)
+explains data locations, existing logins and explicit settings.
 
 ### Hosting with explicit server settings
 
-Use `lll up` when you want to choose the server settings yourself:
-
-```sh
-LLL_TEAM=APP lll up
-```
-
-On a fresh setup it creates the team, writes `.lll.toml` here, and creates a
-member named after `$USER`. A taken port moves to the next free one. If an lll
-server already answers at the API URL, `lll up` uses it, unless only a repo
-`.lll.toml` chose that URL: then it stops with exit 4. A named board started by
-`lll new` keeps its own data directory and does not adopt an existing server.
-
-`lll up` prints one line per fact:
-
-| Line | Says |
-|---|---|
-| `lll` | the installed version |
-| `api` | the server's API url, with `(already running)` when it reused one |
-| `team` | the team the board shows |
-| `member` | the member the board and the CLI act as |
-| `admin` | where the administrator credentials are kept, never the password |
-| `cli` | whether it logged your CLI in, or why not |
-| `board` | the board's url |
-| `board  login` | a link that signs your browser in; `lll board` prints it again |
-| `agent` | a prompt to paste into a coding agent on this machine (only when it logged your CLI in), then how to give an agent its own member with `lll bot create` |
-
-With `LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` unset, the first boot
-generates a password for `admin@local.dev`. Read it with
-`jq -r .password pb/pb_data/.lll-admin.json` (for `lll new`, in
-`~/.config/lll/boards/<key>/`). `lll up` logs the CLI in only
-when your home config holds no token and names no other server; it never
-replaces a login. `lll new` also logs in the directory it ran in, even when
-you are logged in to another server: `.lll.toml` names the board's url, and
-its token goes to `~/.config/lll/logins.toml` (0600), never to `.lll.toml`.
-Commands in that directory reach the new board; everywhere else keeps your
-other login, and `lll logout` there removes only the board's. A `.lll.toml`
-that already attaches the directory to another team or server is refused
-(exit 4) rather than rewritten.
-
+Use `lll up` for direct control over the address, data directory and startup
+identity. Follow [server startup](server-operations.md#start-the-server), or
+[deployment](ci-deployment.md) for a hosted board.
 
 ## Join an existing board
 
-If someone sent you an invite, open it and follow the setup page's exact CLI
-login command. It uses the token shown there; you do not need to create a
-password. Skip attachment when your repository already names the correct team
-and server.
+1. Open your invitation and join. If already signed in, you keep that account.
+2. Run the setup page’s exact CLI login command; it uses the token shown
+   there, so you do not need a password.
+3. In your repository, [attach the team](#choose-a-team-for-a-repository) only
+   if it is not already configured for the correct board and team.
 
-| Actor | Once | Writes |
-|---|---|---|
-| Server | `lll up` with server settings in env (on a host: secrets) | the database |
-| Your machine | `lll login --url https://your-host --token -`, then paste your token | your local login |
-| Each repo or directory | `lll attach --key KEY` | the attachment in `.lll.toml` |
-| Each agent | a member runs `lll bot create bot-NAME` | a private prompt with the agent's identity and token |
-
-An existing email-and-password account can instead use
-`lll login --url https://your-host --email you@example.com`.
-
-Plain `lll login` needs an existing member, and without `--url` it refuses (exit 2)
-a url that only a repo `.lll.toml` or `LLL_URL` chose. The superuser is not
-a member.
-
-With the server's admin credentials, one command creates your member and logs
-in:
-
-<!-- example-check: skip: needs a hosted server and its administrator credentials -->
-```sh
-lll login --url https://your-host --email you@example.com \
-  --create --password <pick one> \
-  --admin-email <admin> --admin-password <admin pw>
-```
-
-`LLL_ADMIN_EMAIL` and `LLL_ADMIN_PASSWORD` can replace the admin flags only
-when no token is configured. The member is named after your email's local
-part unless you pass `--name`.
-
-Without them, someone who has them invites you. The command prints a
-temporary password, shown once, and the login line to send:
-
-<!-- example-check: skip: needs a hosted server -->
-```sh
-lll member invite NAME --email their@email --url https://your-host
-```
-
-Add `--team KEY` (repeatable) to limit the member to those teams, and
-`--read-only` to forbid writes. A member's bots never get more than their
-owner. `lll member access NAME` shows and changes a member's scope.
+An existing email-and-password member can use
+`lll login --url https://your-host --email you@example.com`; the command asks
+for the password privately. A superuser is an administrator, not a member.
+See [account administration](server-operations.md#give-people-access) for that role.
 
 ## Choose a team for a repository
 
-`lll attach --key KEY` writes `team = "KEY"` to `.lll.toml`, creating team
-KEY if it is missing. In a git repository the file goes at the repo root;
-commit it, and every clone and worktree is attached. Outside a repository it
-goes in the working directory, and subdirectories inherit it. Without
-`--key`, a server with one team picks that team.
+If your invitation names team `PAY`, run:
 
-Use a separate team when you want a separate backlog. A directory does not
-need to be a Git repository to have one. When a team's work is finished,
-`lll team archive KEY` hides it from the active list while retaining its
-issues and links. `lll team unarchive KEY` makes it writable again.
+```sh
+lll attach --key PAY
+```
+
+This writes the attachment to `.lll.toml` at the repository root; commit it
+so clones and worktrees use the same board. Outside Git, it attaches the
+working directory and its subdirectories. Use your board’s team key; it creates that team if missing;
+without `--key`, a server with one team selects that team.
+
+Separate teams keep separate backlogs. `lll team archive KEY` hides a finished
+team while retaining its work and links; `lll team unarchive KEY` restores it.
 
 ## Invite someone
 
-Invite a colleague with a single-use link, or with an email and a temporary
-password:
+The board must be reachable by your teammate. If it is local-only,
+[share it first](#share-a-board-on-a-lan-or-tailscale). Then:
 
 ```sh
-lll invite create --team APP    # prints <board>/join/<code>
-lll member invite kim --email kim@example.com
+lll invite create --team PAY --for Alice --for Bob
 ```
 
-The link leads to `/me`, which shows a CLI token for
-`lll login --url <board> --token -`. A loopback board works only on this
-machine; see [Share a board](#share-a-board-on-a-lan-or-tailscale).
+Send each person their own single-use link. Their setup page explains CLI
+login and creating their agent. Keep their private token out of shared
+messages. [Inviting people and agents](inviting.md) covers access choices.
 
 
 ## Share a board on a LAN or Tailscale
 
+Stop the running server, then reopen the same board with sharing enabled:
+
 <!-- example-check: skip: needs a LAN or Tailscale address -->
 ```sh
-lll new "Hack night" --share   # prints a sign-in link per LAN and Tailscale address
-# in a second terminal, in the same directory:
-lll member passes --count 10 --prefix hack
+lll new "Payments rewrite" --share
 ```
 
-`--share` listens on this machine's LAN address and, when Tailscale is
-connected, its Tailscale address; it never listens on every interface. Without
-Tailscale it says so and shares on the LAN only. The board token is kept in the
-board's directory, so the links survive a restart. To pick one address
-yourself: `LLL_TEAM=HACK lll up --bind <your-LAN-or-Tailscale-IP>`.
-
-`lll member passes` writes a private handoff file (mode 0600) with ten member
-tokens, the API address and a board login link. Send each teammate only their
-own block and the link. Browser edits act as the board process's identity,
-not as each teammate. Do not publish the handoff file or the data directory.
-
+This prints sign-in links for the machine’s LAN and connected Tailscale
+addresses. It does not bind every interface; without Tailscale it shares on
+the LAN only. The board keeps its token across restarts. To choose an address or create private
+handoffs, see [server operations](server-operations.md).
 
 ## Database administration
 
-The lll web board is the interface for everyday work. The separate database
-administration console can change records, collection rules and the schema,
-so lll does not expose it through the board unless you enable it deliberately.
-Start with `lll up --admin-ui` to make it available at the board's `/_/` path.
-It requires the server's administrator credentials, not a regular board login.
-The option controls the board's proxy; the separate API listener retains its
-own administration routes.
+The optional database console is for operators. See
+[administration](server-operations.md#database-administration) for enabling it
+and the credentials it requires.
 
 ## Try an isolated board
 
-`lll up --scratch` starts a throwaway board that ignores your home config and
-inherited `LLL_*` settings. Its banner names the temporary data directory;
-stop the server and delete that directory when finished.
+`lll up --scratch` starts a throwaway board without your existing settings.
+Its banner names the temporary directory; stop the server and delete that
+directory when finished.
 
 ## Upgrades
 
-Run `lll upgrade`. On Homebrew it runs `brew upgrade lll`; other installs
-print the appropriate command. If you run a server, stop it and back up its
-data before upgrading. See [the upgrade guide](upgrading.md) for server-first
-rollout, migration checks and restoring a backup.
-
-A Homebrew install updates itself. Once a day per server, lll checks the
-server's version. When the server is newer, lll starts `brew upgrade lll` in
-the background, prints one line on stderr and finishes your command
-unchanged:
-
-    lll: updating 1.2.0 -> 1.3.0 in the background (log: ~/.config/lll/auto-update.log). Disable: LLL_AUTO_UPDATE=0
-
-To switch this off, set `LLL_AUTO_UPDATE=0` or put `auto_update = false` in
-`~/.config/lll/lll.toml`. It is off when `CI` is set. It is also off on a
-machine that runs the server: where `lll up` has run (it leaves
-`board-login-url` beside the config) or where a Homebrew `lll up` is running.
-There, and on every install that is not Homebrew, lll prints the warning
-`... Upgrade: lll upgrade` instead. A machine that starts `lll up` with
-another config directory should set `auto_update = false`.
+Run `lll upgrade`. Server operators should read
+[upgrading and recovery](server-operations.md#upgrade-and-recover), including
+backups and the client auto-update settings.

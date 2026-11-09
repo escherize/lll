@@ -20,12 +20,16 @@
       url: /api.html
 - title: Run and maintain
   pages:
+    - title: Operate a server
+      url: /server-operations.html
     - title: Upgrade safely
       url: /upgrading.html
     - title: Deploy a server
       url: /ci-deployment.html
     - title: Backup and recovery
       url: /hosted-recovery.html
+- title: Contribute
+  pages:
     - title: Development
       url: /development.html
     - title: Release checklist
