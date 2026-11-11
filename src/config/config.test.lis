@@ -741,3 +741,21 @@ fn auto_update_is_read_from_the_config_files() {
   let assert Ok(cfg) = load_from(root, home)
   assert cfg.url == "http://home:9999"
 }
+
+#[test]
+fn attachment_proof_reads_only_a_private_login_for_the_exact_endpoint() {
+  let url = "http://192.168.1.10:8100"
+  let mut tokens = Map.new<string, string>()
+  tokens[url] = "private-login"
+  let settings = given_logins(
+    Config { url, token: "repo-token", .. },
+    Sources { .. },
+    Env { token: "ambient-token", .. },
+    Logins { path: "/h/lll/logins.toml", tokens },
+  )
+  assert settings.saved_logins_for(url).length() == 1
+  assert settings.saved_logins_for(url)[0] == "private-login"
+  assert settings.saved_logins_for(url + "/")[0] == "private-login"
+  assert settings.saved_logins_for("http://192.168.1.11:8100").is_empty()
+  assert given(Config { url, token: "repo-token", .. }, Sources { .. }, Env { token: "ambient-token", .. }).saved_logins_for(url).is_empty()
+}

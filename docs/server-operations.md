@@ -10,9 +10,11 @@ an invitation, use [setup](setup.md). For a public deployment, follow
 
 `lll new "Payments rewrite"` chooses key `PAY`; `--key` chooses another.
 Its data lives in `~/.config/lll/boards/pay`. Run the same command to reopen
-a local board. If its saved network URL is refused after sharing, reopen the
-same title from an unattached directory outside the repository; this reuses
-the saved board data. A key used by a different title, or a directory attached to another board,
+a local or shared board. A shared attachment is recognized by verifying its
+privately saved member login against the cached database, without contacting
+the network address. If that proof is missing or retired, the command keeps the
+attachment unchanged: remove its URL as the refusal explains, or use an
+unattached directory to reopen the saved data, then attach deliberately. A key used by a different title, or a directory attached to another board,
 is refused rather than silently replaced. Ctrl-C stops the server.
 
 ### Explicit server settings

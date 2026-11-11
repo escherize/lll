@@ -172,6 +172,19 @@ pub struct Logins {
 }
 
 impl Settings {
+  /// Private logins explicitly saved for this endpoint. These establish
+  /// local database identity, not credential precedence for network calls.
+  /// Ambient and repository tokens do not establish that binding. Keep
+  /// both sources: a stale cache must not mask a valid home login, or vice versa.
+  pub fn saved_logins_for(self, url: string) -> Slice<string> {
+    let mut tokens: Slice<string> = []
+    if let Ok(home) = self.load_home() {
+      if same_url(home.url, url) && home.token != "" { tokens = tokens.append(home.token) }
+    }
+    if let Some(token) = saved_login(self.logins, url) { tokens = tokens.append(token) }
+    tokens
+  }
+
   /// The effective configuration and the origin of every field. A home
   /// config token is absent when the effective url is not the one it was
   /// saved with (`withheld`), so nothing that reads it can send it there.
