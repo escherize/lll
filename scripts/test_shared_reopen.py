@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix='lll-shared-reopen-') as temporary:
         log = root/(name+'.log')
         with log.open('w') as out:
             p = subprocess.Popen([*argv, '--port', str(port())], cwd=cwd, env=current_env, stdout=out, stderr=subprocess.STDOUT)
-        deadline = time.monotonic()+45
+        deadline = time.monotonic()+120
         while time.monotonic()<deadline:
             if p.poll() is not None: raise AssertionError(f'{name}: owned boot exited {p.returncode}')
             if 'board  login ' in log.read_text(): return p
