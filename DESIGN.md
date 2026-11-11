@@ -747,10 +747,11 @@ also adds **12px** (landing-frame) for the board screenshot frame alone.
   the run ends. Under `prefers-reduced-motion` the whole script renders at once
   in its final state, with no typing and no movement; without JavaScript a
   `<noscript>` transcript stands in.
-- **Recent verification.** The visible release ledger names its date window and
-  counts all retained attempts, including misses. Concise unboxed columns
-  explain origin, retry and upgrade checks; their counts stay separate from
-  real-agent runs. Historical research remains in its own closed disclosure.
+- **Verification hierarchy.** The landing leads with the documented research
+  scale and concise unboxed origin, retry and upgrade checks. Small release
+  cohorts live on the evidence page, with dates, source and retained misses.
+  Historical replay outcomes remain in a closed disclosure; paired workers
+  share boards, so its per-agent outcomes are not independent-board counts.
 - **Proof ledger.** A table with tabular numerals: two-digit case numbers,
   the use case with an optional text-3 note, a row of 11px dots (one per
   agent) and a right-aligned count. A correct board is a filled State Done dot;
