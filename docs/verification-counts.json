@@ -1,6 +1,6 @@
 {
   "checked_at": "2026-11-11",
-  "scope": "All retained real-agent attempts for published 1.4.1, 1.5.0 and 1.6.0; 6\u20139 November 2026. No scripted workers or unfinished 1.6.1 runs included.",
+  "scope": "All retained real-agent attempts for published1.4.1,1.5.0,1.6.0 and1.6.1; 6\u201311 November2026. Separate from historical research and scripted controls.",
   "releases": [
     {
       "version": "1.4.1",
@@ -203,14 +203,62 @@
           "total": 1
         }
       ]
+    },
+    {
+      "version": "1.6.1",
+      "issue": "LLL-781",
+      "cut": "1d71cb180359fc1c221360c24ca80e0510454197",
+      "workers": 5,
+      "audited_calls": 36,
+      "nonzero_exits": 5,
+      "board_artifacts_passed": 5,
+      "board_artifacts_total": 5,
+      "tool_owned_failed_calls": 0,
+      "classification_source": "Fresh independent reviewer; original reports, audits and all13 unchanged collections retained.",
+      "bundle_sha256": "1b622cbf021959a34f4c0372a1564d679654d1ebc6a2f662a0dfcd0ac30100de",
+      "audits": [
+        {
+          "path": "01/calls.jsonl",
+          "sha256": "26edab08b0ab7ca9df34551335eca266d4234078be791b04ad5c9718d9d68130",
+          "calls": 7
+        },
+        {
+          "path": "02/calls.jsonl",
+          "sha256": "1a67be40afe62783982ecd1aa3d8a90d324376b9c842adec451309249f99a094",
+          "calls": 7
+        },
+        {
+          "path": "03/calls.jsonl",
+          "sha256": "ef0c797905e04ff687ca357df491e814998e5c938777bed8d9d794a2a1d72234",
+          "calls": 8
+        },
+        {
+          "path": "04/calls.jsonl",
+          "sha256": "f656ccf9ca7cd9d3ef604bcde23deccf28d2192e5a2ce3b997ef259ed8a5df92",
+          "calls": 7
+        },
+        {
+          "path": "05/calls.jsonl",
+          "sha256": "f53c7da20700f2520653e579f0fd5c1b7c0797359d41f6de886019670a860d80",
+          "calls": 7
+        }
+      ],
+      "judges": [
+        {
+          "path": "ground-truth.json",
+          "sha256": "ab43be4e0c7e7700b924059b3bbbb9ea809edfe4d6c034e732f5efc54ee39c9e",
+          "passed": 5,
+          "total": 5
+        }
+      ]
     }
   ],
   "totals": {
-    "workers": 17,
-    "audited_calls": 208,
-    "nonzero_exits": 12,
-    "board_artifacts_passed": 11,
-    "board_artifacts_total": 12,
+    "workers": 22,
+    "audited_calls": 244,
+    "nonzero_exits": 17,
+    "board_artifacts_passed": 16,
+    "board_artifacts_total": 17,
     "tool_owned_failed_calls": 0
   },
   "scripted_controls_source": "530e3a1e6705d540ccb3d221cda9b2a620fa87a7",
@@ -220,5 +268,22 @@
     "refused_origin_probes": 434,
     "issue_retry_calls": 24,
     "comment_retry_calls": 12
+  },
+  "historical_research": {
+    "basis": "Reported historical aggregate, not a new independent recount; do not sum with release cohorts.",
+    "reported_source_date": "2026-10-12",
+    "reported_claude_code_worker_trials": 2061,
+    "reported_fleet_runs": 145,
+    "reported_first_harness_workers": 36,
+    "landing_rounded_lower_bound": 2000,
+    "source_pr": "https://github.com/escherize/lll/pull/353",
+    "source_commit": "4443c315aeacf4c75b1f68ba28ce6b553d056266",
+    "replay": {
+      "scenarios": 20,
+      "workers_per_scenario": 10,
+      "correct_worker_outcomes": 196,
+      "total_worker_outcomes": 200,
+      "paired_workers_share_boards": true
+    }
   }
 }

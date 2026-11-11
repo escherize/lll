@@ -4,10 +4,31 @@ Agents exercise the CLI. An independent reviewer compares their reports with
 captured calls and the board’s actual records. Scripted tests separately probe
 concurrency, access boundaries and upgrade recovery.
 
+## Research at scale
+
+The original research record documents **2,061 Claude Code agent trials across
+145 fleet runs**, plus 36 workers in the first `gpt-5.6-luna` harness. The
+landing page rounds the main research count down to **2,000+ agent trials**.
+These are worker runs, including retries and failures, not unique people or
+2,061 successful outcomes.
+
+This historical aggregate was published in the
+[original landing-page PR](https://github.com/escherize/lll/pull/353) and
+[12 October 2026 source](https://github.com/escherize/lll/blob/4443c315aeacf4c75b1f68ba28ce6b553d056266/docs/index.html).
+It is a reported research total, not a new recount of every historical audit.
+We keep it separate from the independently recounted release cohorts below;
+we do not add potentially overlapping campaigns into a new lifetime total.
+
+One recorded research replay covered **20 scenarios with 10 fresh workers
+each** and reported **196/200 correct agent outcomes**. Paired workers shared
+a board: those 200 outcomes are not 200 independent boards. That historical
+replay is retained in the landing page’s expandable ledger. It is not a
+current-build pass rate.
+
 ## Recent published releases
 
 Checked 11 November 2026. These are the retained release checks for 1.4.1,
-1.5.0 and 1.6.0, run on 6–9 November. They are a bounded sample, not a lifetime
+1.5.0, 1.6.0 and 1.6.1, run on 6–11 November. They are a bounded sample, not a lifetime
 total or a rerun of the older 200-agent research replay.
 
 | Release | Fresh agents, all attempts | Audited CLI calls | Exact board artifacts | Tool-owned failed calls |
@@ -15,7 +36,8 @@ total or a rerun of the older 200-agent research replay.
 | [1.4.1](https://github.com/escherize/lll/releases/tag/v1.4.1) | 5 | 40 | 3/3 | 0 |
 | [1.5.0](https://github.com/escherize/lll/releases/tag/v1.5.0) | 7 | 74 | 4/5 | 0 |
 | [1.6.0](https://github.com/escherize/lll/releases/tag/v1.6.0) | 5 | 94 | 4/4 | 0 |
-| **All attempts** | **17** | **208** | **11/12** | **0** |
+| [1.6.1](https://github.com/escherize/lll/releases/tag/v1.6.1) | 5 | 36 | 5/5 | 0 |
+| **All attempts** | **22** | **244** | **16/17** | **0** |
 
 A pair shares one board, so agents and board artifacts have different
 denominators. The workers were fresh `gpt-6-luna` agents, with at most three
@@ -24,10 +46,10 @@ active at once, followed by a fresh reviewer using the parent model.
 The failed 1.5.0 paired edit included a terminal newline where the checker
 required exactly three lines. A fresh pair passed on the same binary after the
 brief was clarified. Both attempts remain in the totals. The final selected
-cohorts were 15 workers, 186 calls and 11/11 board artifacts; the table above
+cohorts were 20 workers, 222 calls and 16/16 board artifacts; the table above
 also includes the original failed pair.
 
-Across all attempts there were **12 nonzero exits**: 11 expected controls
+Across all attempts there were **17 nonzero exits**: 16 expected controls
 (expired or retired credentials and stale writes) and one worker-owned
 refusal after a duplicate bot-create command. Zero were classified as caused
 by lll. A successful command can still leave the wrong artifact; that is why
@@ -77,6 +99,7 @@ board (sign-in required):
 - [LLL-755: 1.4.1 evidence](https://escherize-lll.fly.dev/issue/LLL-755)
 - [LLL-773: 1.5.0 evidence](https://escherize-lll.fly.dev/issue/LLL-773)
 - [LLL-779: 1.6.0 evidence](https://escherize-lll.fly.dev/issue/LLL-779)
+- [LLL-781: 1.6.1 evidence](https://escherize-lll.fly.dev/issue/LLL-781)
 
 Executable sources: [board origin](https://github.com/escherize/lll/blob/530e3a1e6705d540ccb3d221cda9b2a620fa87a7/scripts/test_board_origin.py),
 [issue retries](https://github.com/escherize/lll/blob/530e3a1e6705d540ccb3d221cda9b2a620fa87a7/scripts/test_issue_idempotency.py),
