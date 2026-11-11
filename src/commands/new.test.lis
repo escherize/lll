@@ -135,17 +135,17 @@ fn home_login_free_only_without_another_login() {
 fn attach_refusal_keeps_another_teams_or_servers_file() {
   let path = "/r/.lll.toml"
   let title = "Payments rewrite"
-  assert attach_refusal(path, config.Config { .. }, "PAY", title).is_none()
-  assert attach_refusal(path, config.Config { team: "PAY", .. }, "PAY", title).is_none()
-  assert attach_refusal(path, config.Config { team: "PAY", url: "http://127.0.0.1:8091", .. }, "PAY", title).is_none()
-  let Some(why) = attach_refusal(path, config.Config { team: "LLL", url: "https://lll.example.com", .. }, "PAY", title) else {
+  assert attach_refusal(path, config.Config { .. }, "PAY", title, false).is_none()
+  assert attach_refusal(path, config.Config { team: "PAY", .. }, "PAY", title, false).is_none()
+  assert attach_refusal(path, config.Config { team: "PAY", url: "http://127.0.0.1:8091", .. }, "PAY", title, false).is_none()
+  let Some(why) = attach_refusal(path, config.Config { team: "LLL", url: "https://lll.example.com", .. }, "PAY", title, false) else {
     panic("expected a refusal")
   };
   assert why.contains(path)
   assert why.contains("team LLL at https://lll.example.com")
-  assert attach_refusal(path, config.Config { team: "LLL", .. }, "PAY", title).is_some()
-  assert attach_refusal(path, config.Config { team: "PAY", url: "https://lll.example.com", .. }, "PAY", title).is_some()
-  assert attach_refusal(path, config.Config { url: "http://127.0.0.1:8091", .. }, "PAY", title).is_some()
+  assert attach_refusal(path, config.Config { team: "LLL", .. }, "PAY", title, false).is_some()
+  assert attach_refusal(path, config.Config { team: "PAY", url: "https://lll.example.com", .. }, "PAY", title, false).is_some()
+  assert attach_refusal(path, config.Config { url: "http://127.0.0.1:8091", .. }, "PAY", title, false).is_some()
 }
 
 // A stopped Tailscale still prints its IP; listening on it would fail the
@@ -156,4 +156,13 @@ fn a_tailscale_ip_counts_only_while_an_interface_holds_it() {
   assert holds_address(up, "100.89.101.60")
   assert !holds_address(["127.0.0.1/8", "192.168.68.82/22"], "100.89.101.60")
   assert !holds_address(up, "100.89.101.6")
+}
+
+#[test]
+fn shared_attachment_requires_local_proof_and_matching_explicit_team() {
+  let file = config.Config { team: "PAY", url: "http://192.168.1.10:8100", .. }
+  assert attach_refusal("/repo/.lll.toml", file, "PAY", "Payments", false).is_some()
+  assert attach_refusal("/repo/.lll.toml", file, "PAY", "Payments", true).is_none()
+  assert attach_refusal("/repo/.lll.toml", file, "OTHER", "Other", true).is_some()
+  assert attach_refusal("/repo/.lll.toml", config.Config { team: "", ..file }, "PAY", "Payments", true).is_some()
 }
