@@ -21,6 +21,9 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   matching the installed CLI and current website (LLL-780).
 - Shipped agent guidance explains shared named-board restarts and the
   missing-proof recovery boundary (LLL-781).
+- The landing page shows recent release audits and security, retry and
+  upgrade checks, with dated counts, retained misses and linked evidence.
+  The older replay is clearly historical (LLL-782).
 
 ## [1.6.0] - 2026-11-08
 
