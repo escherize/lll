@@ -6,6 +6,25 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-11
+
+### Fixed
+
+- Reopening a named board shared with `lll new --share` accepts its saved
+  network attachment when a private login proves ownership of the cached
+  database. Data and identity survive port changes; foreign attachments and
+  missing or invalid proof still refuse before startup (LLL-778).
+
+### Changed
+
+- Homebrew describes lll as a shared record for people and coding agents,
+  matching the installed CLI and current website (LLL-780).
+- Shipped agent guidance explains shared named-board restarts and the
+  missing-proof recovery boundary (LLL-781).
+- The landing page shows recent release audits and security, retry and
+  upgrade checks, with dated counts, retained misses and linked evidence.
+  The older replay is clearly historical (LLL-782).
+
 ## [1.6.0] - 2026-11-08
 
 ### Added

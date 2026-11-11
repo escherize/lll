@@ -747,6 +747,10 @@ also adds **12px** (landing-frame) for the board screenshot frame alone.
   the run ends. Under `prefers-reduced-motion` the whole script renders at once
   in its final state, with no typing and no movement; without JavaScript a
   `<noscript>` transcript stands in.
+- **Recent verification.** The visible release ledger names its date window and
+  counts all retained attempts, including misses. Concise unboxed columns
+  explain origin, retry and upgrade checks; their counts stay separate from
+  real-agent runs. Historical research remains in its own closed disclosure.
 - **Proof ledger.** A table with tabular numerals: two-digit case numbers,
   the use case with an optional text-3 note, a row of 11px dots (one per
   agent) and a right-aligned count. A correct board is a filled State Done dot;

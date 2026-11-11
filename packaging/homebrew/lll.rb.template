@@ -11,7 +11,7 @@
 # the tap push and this template is the source of truth to copy by hand.
 
 class Lll < Formula
-  desc "Linear-style issue tracker that runs from a single binary"
+  desc "Shared record for people and coding agents"
   homepage "https://github.com/escherize/lll"
   version "__VERSION__"
 

@@ -30,6 +30,11 @@ Use [server operations](server-operations.md) for startup settings and access.
 Read [deployment](ci-deployment.md), [safe upgrades](upgrading.md), and
 [backup and recovery](hosted-recovery.md) before changing a hosted board.
 
+## Check the evidence
+
+[How lll is verified](verification.md) shows recent release runs, hardening
+checks and the limits of each number.
+
 ## Contribute
 
 Start with [development](development.md). The
