@@ -399,6 +399,16 @@ Link existing evidence instead of repeating it. This is for interruptions and
 transfers, not a ceremony after every small task. Follow the repo's isolation
 and claim rules when returning the work to the queue or another worker.
 
+## Reopen a named board
+
+Run `lll new "Title"` again to reopen that title's cached local board. For a
+board shared with `--share`, keep the private login saved for its URL: the
+command checks it against the local database before accepting a saved network
+attachment. A repository or environment token alone is not ownership proof.
+If that proof is missing, follow the refusal's explicit recovery instructions;
+never replace another board's attachment or create a duplicate identity to
+work around it. Changing ports does not require a new board.
+
 ## Side projects: attach, work, archive
 
 A team is cheap. Give every side project its own instead of piling issues
