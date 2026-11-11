@@ -286,6 +286,14 @@
   .disclosure summary { padding: 16px 0; cursor: pointer; font-weight: 600; }
   .disclosure summary:hover { color: var(--accent); }
   .disclosure[open] { padding-bottom: 24px; }
+  .verification-ledger { margin: 28px 0 0; width: 100%; }
+  .verification-ledger th:not(:first-child), .verification-ledger td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+  .verification-ledger tfoot { color: var(--text); font-weight: 600; }
+  .verification-ledger tbody th, .verification-ledger tfoot th { padding-block: 9px; font-size: 14.5px; text-transform: none; letter-spacing: normal; color: var(--text); }
+  .proof-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; padding: 0; margin: 32px 0 0; list-style: none; }
+  .proof-checks h3 { margin: 0; font-size: 18px; line-height: 1.35; }
+  .proof-checks p { margin: 10px 0 0; color: var(--text-2); }
+  @media(max-width: 700px) { .proof-checks { grid-template-columns: 1fr; gap: 24px; } }
   .closing { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding-top: 72px; }
   .start-cta { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 18px; border-radius: 6px; background: var(--accent); color: var(--ink); font-weight: 650; text-decoration: none; }
   .start-cta:hover { background: var(--accent-hover); }
@@ -414,9 +422,28 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
 
   <section class="s wrap" aria-labelledby="t-proof">
     <h2 class="t" id="t-proof">Tested on real agent tasks.</h2>
-    <p class="intro prose">In the recorded 20-case replay, <strong>196 of 200 boards were correct</strong>. Reviewers checked the server’s state, not the agents’ claims; none of that replay’s four misses traced to lll.</p>
+    <p class="intro prose">Recent release checks put <strong>17 fresh agents through 208 audited CLI calls</strong>. Independent reviewers found <strong>no failed calls caused by lll</strong> in those runs. They checked the server’s state, not just the agents’ reports.</p>
+    <div class="ledger-scroll" role="region" aria-label="Recent release verification" tabindex="0">
+      <table class="ledger verification-ledger">
+        <caption>Published releases · 6–9 November 2026 · all attempts</caption>
+        <thead><tr><th scope="col">Release</th><th scope="col">Agents</th><th scope="col">CLI calls</th><th scope="col">Boards</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="https://github.com/escherize/lll/releases/tag/v1.4.1">1.4.1</a></th><td>5</td><td>40</td><td>3/3</td></tr>
+          <tr><th scope="row"><a href="https://github.com/escherize/lll/releases/tag/v1.5.0">1.5.0</a></th><td>7</td><td>74</td><td>4/5</td></tr>
+          <tr><th scope="row"><a href="https://github.com/escherize/lll/releases/tag/v1.6.0">1.6.0</a></th><td>5</td><td>94</td><td>4/4</td></tr>
+        </tbody>
+        <tfoot><tr><th scope="row">All attempts</th><td>17</td><td>208</td><td>11/12</td></tr></tfoot>
+      </table>
+    </div>
+    <p class="memory-note">The missed board was a paired edit that failed an exact-text requirement. A fresh pair passed after the task brief was clarified; the original miss stays counted. <a href="verification.html">Read the evidence and limits.</a></p>
+    <ul class="proof-checks">
+      <li><h3>Unsafe writes refused</h3><p><strong>434 requests across 31 write routes</strong> are refused in the board-origin test, including requests with valid cookies.</p></li>
+      <li><h3>Retries without duplicates</h3><p><strong>24 issue-create calls and 12 comment calls</strong> race with shared retry keys. Lost-response retries are checked too.</p></li>
+      <li><h3>Upgrades rehearsed</h3><p><strong>Four old/new client-server pairs</strong>, a stopped backup restore, downloaded binaries and the actual Homebrew install are checked before a release is called done.</p></li>
+    </ul>
+    <p class="memory-note">The scripted harness also checks all 20 task scenarios against correct and deliberately wrong workers. Those controls are separate from the real-agent counts above. <a href="verification.html#hardening-checks">See what each check proves.</a></p>
     <details class="disclosure">
-      <summary>Explore the 20-case replay and methodology</summary>
+      <summary>Earlier 20-case replay and methodology</summary>
       <p class="memory-note">The bars count agents who hit a tool-owned failure. Board scores measure the final result after recovery.</p>
     <div class="proof-figs">
       <figure class="trend">
@@ -424,12 +451,12 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
         <table class="bars">
           <tr><th scope="row">First pass<small>run 1, before 1.0</small></th><td><span class="track"><span class="fill" style="--v: 24.2"></span></span><span class="val">24</span></td></tr>
           <tr><th scope="row">1.0.0 replay<small>run 10</small></th><td><span class="track"><span class="fill" style="--v: 11.1"></span></span><span class="val">11</span></td></tr>
-          <tr><th scope="row">Latest replay<small>run 20, main after 1.0</small></th><td><span class="track"><span class="fill" style="--v: 2.6"></span></span><span class="val">2.6</span></td></tr>
+          <tr><th scope="row">Post-1.0 replay<small>run 20, main after 1.0</small></th><td><span class="track"><span class="fill" style="--v: 2.6"></span></span><span class="val">2.6</span></td></tr>
         </table>
         <p class="note">190 fresh agents a round, counted when a reviewer traced a failed call to lll. Case 20 is left out: it makes agents guess wrong on purpose.</p>
       </figure>
       <figure class="waffle">
-        <figcaption><b>The latest replay</b>, one square per agent</figcaption>
+        <figcaption><b>The post-1.0 replay</b>, one square per agent</figcaption>
         <div class="cells" role="img" aria-label="200 agents: 196 boards correct, 4 missed for causes traced to the agent, none missed because of lll"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i class="m"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <p class="note"><b>196</b> correct, <b>4</b> missed (traced to the agent), <b>0</b> missed because of lll.</p>
       </figure>
@@ -438,7 +465,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
     <div class="ledger-wrap">
       <div class="ledger-scroll" role="region" aria-label="Replay results" tabindex="0">
       <table class="ledger">
-        <caption>The latest replay, on main after 1.0: 20 use cases, 10 fresh agents each, judged on the board.</caption>
+        <caption>The earlier replay, on main after 1.0: 20 use cases, 10 fresh agents each, judged on the board.</caption>
         <thead><tr><th scope="col">#</th><th scope="col">Use case</th><th scope="col">Agents</th><th scope="col" style="text-align:right">Boards</th></tr></thead>
         <tbody>
           <tr class="tier"><td colspan="4">Read</td></tr>
@@ -473,8 +500,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <img src="board-claims.webp" width="920" height="1090" alt="Board columns In progress and In review, every card claimed by an agent's bot." loading="lazy">
           <figcaption>Judged here: the server's own state.</figcaption>
         </figure>
-        <p>Since the first fleet, <strong>2,061 fresh Claude Code agents</strong> have run 145 fleets against lll, plus 36 <code>gpt-5.6-luna</code> workers in the first harness.</p>
-        <p>In the latest replay, <strong>196 of 200 boards</strong> came out right (the 1.0.0 replay: 197). None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which cost its partner the shared board), and one wrote a report that wasn't valid JSON.</p>
+        <p>In that earlier replay, <strong>196 of 200 boards</strong> came out right (the 1.0.0 replay: 197). None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which cost its partner the shared board), and one wrote a report that wasn't valid JSON.</p>
         <p>Where agents still guess wrong, the error names the command to run next. Case 20 is judged on that recovery.</p>
         <div class="key">
           <span><span class="dot" aria-hidden="true"></span> board correct</span>
@@ -527,7 +553,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       <a href="ci-deployment.html"><b>Hosting</b><span>Deploying the binary, CI, and the Dockerfile and fly.toml it ships with.</span></a>
       <a href="hosted-recovery.html"><b>Recovery</b><span>Backing up and restoring a hosted database.</span></a>
       <a href="api.html"><b>API</b><span>The PocketBase collections and the rules behind them.</span></a>
-      <a href="agent-dx-fleet/how-to-run.html"><b>How lll is tested</b><span>The agent fleet: use cases, rules and how a run is judged.</span></a>
+      <a href="verification.html"><b>How lll is tested</b><span>Recent release evidence, hardening checks and how a run is judged.</span></a>
       <a href="https://github.com/escherize/lll/blob/main/CHANGELOG.md"><b>Changelog</b><span>Every release, newest first.</span></a>
       <a href="https://github.com/escherize/lll/releases/latest"><b>Releases</b><span>Binaries for macOS and Linux, with checksums.</span></a>
     </nav>

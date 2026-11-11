@@ -8,6 +8,8 @@
       url: /working-with-agents.html
     - title: Invite your team
       url: /inviting.html
+    - title: How lll is verified
+      url: /verification.html
 - title: Use lll
   pages:
     - title: CLI guide

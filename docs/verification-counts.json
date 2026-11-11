@@ -1,0 +1,224 @@
+{
+  "checked_at": "2026-11-11",
+  "scope": "All retained real-agent attempts for published 1.4.1, 1.5.0 and 1.6.0; 6\u20139 November 2026. No scripted workers or unfinished 1.6.1 runs included.",
+  "releases": [
+    {
+      "version": "1.4.1",
+      "issue": "LLL-755",
+      "cut": "33cf057753f36345f1e41e4cbbc3a9648f26e061",
+      "workers": 5,
+      "audited_calls": 40,
+      "nonzero_exits": 1,
+      "board_artifacts_passed": 3,
+      "board_artifacts_total": 3,
+      "tool_owned_failed_calls": 0,
+      "classification_source": "Fresh independent reviewer of each release; zero is not inferred from exit status.",
+      "bundle_sha256": "c92d359d060801108aa5c73609c75d9ec37d7f40cf593a38e1e33cf94811a067",
+      "audits": [
+        {
+          "path": "lll-755-dx-33cf057/config-run1/case-14-run-1/01/calls.jsonl",
+          "sha256": "6218e97383d514f59d5fa1266b0fb45c48a76f91e51fdbdae9dba33c9bcbf91d",
+          "calls": 7
+        },
+        {
+          "path": "lll-755-dx-33cf057/handoff-run1/case-16-run-1/01/calls.jsonl",
+          "sha256": "5b99de5068d08763c6d332f42af2580f9ad417066eefbb17a5eaacf3b6194721",
+          "calls": 8
+        },
+        {
+          "path": "lll-755-dx-33cf057/handoff-run1/case-16-run-1/02/calls.jsonl",
+          "sha256": "9d775e13f665dfc2087570909d2241f346e7d5e3566c581055f3b0940c166e8a",
+          "calls": 7
+        },
+        {
+          "path": "lll-755-dx-33cf057/handoff-run2/case-16-run-2/01/calls.jsonl",
+          "sha256": "fd61fd737cd7992c583fd855a8acabd8683f5dcc15e61f499039a81bca8ced31",
+          "calls": 8
+        },
+        {
+          "path": "lll-755-dx-33cf057/handoff-run2/case-16-run-2/02/calls.jsonl",
+          "sha256": "ee8c88b884c81f3d9468bcbbb4b5654f8d6563d43654b077d80c0c34972a38ee",
+          "calls": 10
+        }
+      ],
+      "judges": [
+        {
+          "path": "lll-755-dx-33cf057/config-run1/case-14-run-1/ground-truth.json",
+          "sha256": "34dfb3994c7ee5a97248a951aa107656346630065b1c533d479dd50fe705fea3",
+          "passed": 1,
+          "total": 1
+        },
+        {
+          "path": "lll-755-dx-33cf057/handoff-run1/case-16-run-1/ground-truth.json",
+          "sha256": "0501ebbeba2a12470f04aa3e0afb2c720b6d6a6ab73e50d492abe22459314750",
+          "passed": 1,
+          "total": 1
+        },
+        {
+          "path": "lll-755-dx-33cf057/handoff-run2/case-16-run-2/ground-truth.json",
+          "sha256": "0501ebbeba2a12470f04aa3e0afb2c720b6d6a6ab73e50d492abe22459314750",
+          "passed": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "version": "1.5.0",
+      "issue": "LLL-773",
+      "cut": "2f9c7502e92356ee4e05cd13f26810992beb6c65",
+      "workers": 7,
+      "audited_calls": 74,
+      "nonzero_exits": 4,
+      "board_artifacts_passed": 4,
+      "board_artifacts_total": 5,
+      "tool_owned_failed_calls": 0,
+      "classification_source": "Fresh independent reviewer of each release; zero is not inferred from exit status.",
+      "bundle_sha256": "8ac027bfc47bfc5e076d5e723e0a7a627d6270aa28994f08c0546c938f5dc22d",
+      "audits": [
+        {
+          "path": "case-11/case-11-run-1/01/calls.jsonl",
+          "sha256": "c274a4c9ebd481a789c57eed8133c71c87ef411e014772d9a25f00b499d0f9d8",
+          "calls": 12
+        },
+        {
+          "path": "case-15/case-15-run-1/01/calls.jsonl",
+          "sha256": "f734e149f001dded7d1eba1deabab4903698b84e47fc06fba8161867c44d922c",
+          "calls": 7
+        },
+        {
+          "path": "case-15/case-15-run-1/02/calls.jsonl",
+          "sha256": "87496f6b4f868fc80a255e94be2ee29509d4393b72eb375221a108c6a49b12c5",
+          "calls": 11
+        },
+        {
+          "path": "case-17/case-17-run-1/01/calls.jsonl",
+          "sha256": "825639b7e1ed3678f68e3f719cae38f370e3da3e9d4037f4158051aa4760c676",
+          "calls": 12
+        },
+        {
+          "path": "case-17/case-17-run-1/02/calls.jsonl",
+          "sha256": "5d31609b98f87b4e44df55f55cc1c8bcec3ec7d72af3daefab34e625068718ca",
+          "calls": 10
+        },
+        {
+          "path": "case-17/case-17-run-2/01/calls.jsonl",
+          "sha256": "1d3b4b947f57fab46b1444df63d4963d35fe20a1c69df1b9ca79e5df71b75898",
+          "calls": 10
+        },
+        {
+          "path": "case-17/case-17-run-2/02/calls.jsonl",
+          "sha256": "39a62333afcb1e9d57051bfad75d1f7a7d52e9acb02a940873b51a6b22b82512",
+          "calls": 12
+        }
+      ],
+      "judges": [
+        {
+          "path": "case-11/case-11-run-1/ground-truth.json",
+          "sha256": "fc49c425b66794e90831221e5872f49c2fb45b336e6ec078e8a212d39afd6aa5",
+          "passed": 1,
+          "total": 1
+        },
+        {
+          "path": "case-15/case-15-run-1/ground-truth.json",
+          "sha256": "cefaca597ea12c133ea29d21c7bdd14ec104a63580d3ceb26c0b8181203f5976",
+          "passed": 2,
+          "total": 2
+        },
+        {
+          "path": "case-17/case-17-run-1/ground-truth.json",
+          "sha256": "684c7785429dd715bacfe08552f7a841d7c5ae238eaa4780ef47cecfbc81c936",
+          "passed": 0,
+          "total": 1
+        },
+        {
+          "path": "case-17/case-17-run-2/ground-truth.json",
+          "sha256": "a00cf54c5b77aa86b14401ecc125aacf0b54d1073c1b3875ad27a2b16cba4dd3",
+          "passed": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "version": "1.6.0",
+      "issue": "LLL-779",
+      "cut": "50b811d69f393e29925200d07616a749444c0d4e",
+      "workers": 5,
+      "audited_calls": 94,
+      "nonzero_exits": 7,
+      "board_artifacts_passed": 4,
+      "board_artifacts_total": 4,
+      "tool_owned_failed_calls": 0,
+      "classification_source": "Fresh independent reviewer of each release; zero is not inferred from exit status.",
+      "bundle_sha256": "7e0f1e9c37f01f10ca6e991b931e42753382432d775517b084ebd183483695bb",
+      "audits": [
+        {
+          "path": "09/01/calls.jsonl",
+          "sha256": "c13449b3a7ab63223e896f7dbfc65cd3ce645ee728e97b5f7f8d4c44815a993e",
+          "calls": 21
+        },
+        {
+          "path": "13/01/calls.jsonl",
+          "sha256": "dfd68ce0d59e13889d6a9c4ba51971c5983c4fba44e06c22bfde4f7e03be8419",
+          "calls": 30
+        },
+        {
+          "path": "15/01/calls.jsonl",
+          "sha256": "2fa8bf2885b03ac50130d387369ceb8f30c5ef90896feb5d0e4c31522be05da4",
+          "calls": 19
+        },
+        {
+          "path": "17/01/calls.jsonl",
+          "sha256": "8b9ca50eed7498d491ecea023563331f6397c7743f0442066c34f9431629a2c8",
+          "calls": 13
+        },
+        {
+          "path": "17/02/calls.jsonl",
+          "sha256": "3a60c540b5e268ecf2ebc8fd6519d87d3afad3b3131f3de21608a3b41189bf25",
+          "calls": 11
+        }
+      ],
+      "judges": [
+        {
+          "path": "09/ground-truth.json",
+          "sha256": "3e623eee72ab26fad8290d681b11c628425af80c0f5191350770ed317d607f64",
+          "passed": 1,
+          "total": 1
+        },
+        {
+          "path": "13/ground-truth.json",
+          "sha256": "708a0dba770dc297885eb86f6a7f6e86289f4749c73b956d3e62813874125ee1",
+          "passed": 1,
+          "total": 1
+        },
+        {
+          "path": "15/ground-truth.json",
+          "sha256": "26730b8d70f053774e170541795c4fd9a1ecfe688f12807a90028ba3cff73d4a",
+          "passed": 1,
+          "total": 1
+        },
+        {
+          "path": "17/ground-truth.json",
+          "sha256": "a00cf54c5b77aa86b14401ecc125aacf0b54d1073c1b3875ad27a2b16cba4dd3",
+          "passed": 1,
+          "total": 1
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "workers": 17,
+    "audited_calls": 208,
+    "nonzero_exits": 12,
+    "board_artifacts_passed": 11,
+    "board_artifacts_total": 12,
+    "tool_owned_failed_calls": 0
+  },
+  "scripted_controls_source": "530e3a1e6705d540ccb3d221cda9b2a620fa87a7",
+  "scripted_controls": {
+    "task_scenarios": 20,
+    "unsafe_write_routes": 31,
+    "refused_origin_probes": 434,
+    "issue_retry_calls": 24,
+    "comment_retry_calls": 12
+  }
+}
