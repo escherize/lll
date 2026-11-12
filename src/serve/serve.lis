@@ -533,6 +533,7 @@ fn board_mux(
   mux.HandleFunc("POST /priority", gated(ctx, flashing(ctx, priority_write)))
   mux.HandleFunc("POST /emoji", gated(ctx, flashing(ctx, emoji_write)))
   mux.HandleFunc("POST /title", gated(ctx, flashing(ctx, title_write)))
+  mux.HandleFunc("POST /description", gated(ctx, flashing(ctx, description_write)))
   mux.HandleFunc("POST /project", gated(ctx, flashing(ctx, project_write)))
   mux.HandleFunc("POST /assignee", gated(ctx, flashing(ctx, assignee_write)))
   mux.HandleFunc("POST /claim", gated(ctx, flashing(ctx, claim_write)))

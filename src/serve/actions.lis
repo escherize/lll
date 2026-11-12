@@ -359,6 +359,42 @@ fn title_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<
   patch_issue(who, active, writes.IssuePatch { title: Some(title), ..writes.IssuePatch.unchanged() })
 }
 
+/// Replace the description from the board's editor (LLL-784). `base` is the
+/// source the editor opened from. A save is refused when the stored
+/// description no longer matches it, so a concurrent edit is never silently
+/// overwritten. Other fields moving (a title, a state) does not refuse it:
+/// the check is the description, not the issue's `updated`. Each write
+/// carries the stamp of the read that did the check, so check and write are
+/// atomic; a 412 means something moved in between, so read again and
+/// re-check. Browsers submit textarea newlines as CRLF; both sides compare
+/// as LF.
+fn description_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
+  let key = r.FormValue("key")
+  let text = lf(r.FormValue("description"))
+  let base = lf(r.FormValue("base"))
+  let who = acting_as(v)?
+  let stale_msg = "the description changed since you opened the editor; your draft is still open, so copy it, reload and reapply it"
+  let patch = writes.IssuePatch { description: writes.DescriptionEdit.Whole(text), ..writes.IssuePatch.unchanged() }
+  // ponytail: three tries; each 412 is another writer's success, so only a storm exhausts it.
+  for _ in 0..3 {
+    let active = records.active_issue(who.issue(key)?)?
+    if lf(active.issue().description) != base { return Err(pb.failed(stale_msg)) }
+    let mut opts = writes.UpdateOptions.as_caller(who.caller)
+    opts.stamp = Some(active.issue().updated)
+    match writes.update_issue(who.reads, active.issue(), patch, opts) {
+      Ok(_) => return Ok(signals_event("{\"edit_desc\": false}")),
+      Err(writes.UpdateFailure.Changed(_)) => continue,
+      Err(writes.UpdateFailure.Failed(e)) => return Err(e),
+      Err(writes.UpdateFailure.ReplaceMatched(n)) => return Err(pb.failed(f"the description edit matched {n} times")),
+    }
+  }
+  Err(pb.failed(stale_msg))
+}
+
+fn lf(s: string) -> string {
+  strings.ReplaceAll(s, "\r\n", "\n")
+}
+
 fn project_write(_ctx: pb.Client, v: Viewing, r: mut Ref<http.Request>) -> Result<string, pb.CliError> {
   let key = r.FormValue("key")
   let id = r.FormValue("project")

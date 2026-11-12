@@ -275,12 +275,17 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             assert flash(path, rw_tok, {'key': 'ALPHA-1', 'on': 'true', 'name': 'x', 'query': ''})[0] == 403, path
 
         # --- a read-only viewer cannot write ---
-        for path in ['/title', '/comment', '/create', '/state', '/claim']:
+        for path in ['/title', '/description', '/comment', '/create', '/state', '/claim']:
             code, _ = flash(path, ro_tok, {'key': 'ALPHA-1', 'title': 'ro', 'body': 'ro', 'team': 'ALPHA', 'state': 'done'})
             assert code == 403, (path, code)
         assert call(api, f"/api/collections/issues/records/{ia['id']}", token=su)[1]['title'] == 'alpha by writer'
         assert 'Claim as writer' in page('/t/ALPHA/issue/ALPHA-2', rw_tok)[1], 'rw viewer is not offered its own claim'
         assert 'Claim as' not in page('/t/ALPHA/issue/ALPHA-2', ro_tok)[1], 'ro viewer offered a claim button'
+        # LLL-784: the description editor follows the same rule.
+        assert 'Edit description' in page('/t/ALPHA/issue/ALPHA-2', rw_tok)[1], 'rw viewer not offered the description editor'
+        assert 'Edit description' not in page('/t/ALPHA/issue/ALPHA-2', ro_tok)[1], 'ro viewer offered the description editor'
+        # ?description serves only the source a viewer can already read.
+        assert page('/t/ALPHA/issue/ALPHA-2?description', ro_tok)[0] == 200, 'ro viewer cannot read the source it can see'
 
         # --- two teams: both open; narrowing applies on the next request ---
         assert page('/t/BETA/', both_tok)[0] == 200 and 'zebra hidden plan two' in page('/t/BETA/', both_tok)[1]
