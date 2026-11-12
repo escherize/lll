@@ -432,13 +432,14 @@ input:focus, textarea:focus, select:focus {
   grid-template-areas:
     "main   props"
     "description props"
+    "descedit props"
     "attachments props"
     "upload props"
     "findings props"
     "thread props"
     "comp   props"
     ".      props";
-  grid-template-rows: auto auto auto auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto auto auto 1fr;
   min-height: 100%;
 }
 .issue-detail { display: contents; }
@@ -466,6 +467,11 @@ input:focus, textarea:focus, select:focus {
 }
 .issue-desc { grid-area: description; color: var(--text-2); max-width: 68ch; margin: 0 40px 24px; }
 .attachment-count { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; color: var(--text-3); font-size: 11px; }
+/* LLL-784: the description editor's row. */
+.desc-edit-bar, .desc-edit { grid-area: descedit; margin: 0 40px 16px; max-width: 68ch; }
+.desc-edit textarea { width: 100%; min-height: 160px; resize: vertical; font: inherit; }
+.desc-edit-foot { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px; }
+.desc-edit-foot .ni-hint { margin-right: auto; }
 .issue-attachments { grid-area: attachments; margin: 16px 40px; max-width: 680px; min-width: 0; }
 .issue-attachments h2 { font-size: 13px; margin-bottom: 12px; }
 .attachment-item { margin-bottom: 12px; }
@@ -801,8 +807,8 @@ input:focus, textarea:focus, select:focus {
   .doc-scroll { align-content: start; }
   .issue-scroll {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "main" "description" "attachments" "props" "upload" "findings" "thread" "comp";
-    grid-template-rows: auto auto auto auto auto auto auto auto;
+    grid-template-areas: "main" "description" "descedit" "attachments" "props" "upload" "findings" "thread" "comp";
+    grid-template-rows: auto auto auto auto auto auto auto auto auto;
   }
   .issue-main, .deleted { padding: 20px 16px 0; }
   .props { border-left: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 16px; }
@@ -810,6 +816,7 @@ input:focus, textarea:focus, select:focus {
   .composer { margin: 14px 16px 20px; }
   .attachment-upload, .issue-attachments { margin: 16px; }
   .issue-desc { margin: 0 16px 24px; }
+  .desc-edit-bar, .desc-edit { margin: 0 16px 16px; }
   .set-row { flex-wrap: wrap; }
   .set-field { flex-wrap: wrap; }
   .set-hint { flex-basis: 100%; padding-left: 82px; }

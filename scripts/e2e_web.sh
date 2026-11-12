@@ -559,6 +559,30 @@ code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
 out=$("$LIN" issue view ENG-3)
 assert_contains "$out" 'Quote " and \ slash' "quoted title persisted verbatim"
 
+# --- /description (LLL-784): the board's editor, guarded by the source it opened from ---
+desc_of() { "$LIN" issue view ENG-3 --json | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["description"])'; }
+base=$(desc_of)
+# The editor opens from ?description: the source alone, not the rendered page.
+[ "$(wcurl -sf "$WEB/issue/ENG-3?description")" = "$base" ] || fail "?description did not return the stored source"
+# A browser submits textarea newlines as CRLF; the stored body is LF.
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "base=$base" \
+  --data-urlencode "description=$(printf 'Line one\r\nLine two')" "$WEB/description")
+[ "$code" = 200 ] || fail "/description returned $code, want 200"
+[ "$(desc_of)" = "$(printf 'Line one\nLine two')" ] || fail "board description not stored as LF: $(desc_of | od -c | head -2)"
+# Another field moving does not make the editor's base stale.
+"$LIN" issue update ENG-3 --emoji 🧪 >/dev/null
+code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
+  --data-urlencode "key=ENG-3" --data-urlencode "base=$(printf 'Line one\r\nLine two')" \
+  --data-urlencode "description=Second save" "$WEB/description")
+[ "$code" = 200 ] || fail "/description after a title edit returned $code, want 200"
+[ "$(desc_of)" = "Second save" ] || fail "description after a title edit: $(desc_of)"
+# A base that no longer matches is refused, and the stored body is kept.
+out=$(wcurl -s -X POST --data-urlencode "key=ENG-3" --data-urlencode "base=stale" \
+  --data-urlencode "description=Clobber" "$WEB/description")
+assert_contains "$out" "the description changed since you opened the editor" "stale description base refused"
+[ "$(desc_of)" = "Second save" ] || fail "stale description save overwrote: $(desc_of)"
+
 # --- /emoji: the picker's write path, including the way back to none ---
 code=$(wcurl -s -o /dev/null -w '%{http_code}' -X POST \
   --data-urlencode "key=ENG-3" --data-urlencode "emoji=🚀" "$WEB/emoji")

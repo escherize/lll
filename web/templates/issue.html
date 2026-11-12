@@ -31,10 +31,11 @@
     <!-- Title-edit state lives here, OUTSIDE #issue-detail (the SSE morph
          target): $edit_title / $title_draft survive every wholesale morph,
          and data-bind repopulates the re-created input from $title_draft. -->
-    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:emo_open="false" data-signals:emo_q="''" data-signals:lab_open="false" data-signals:lab_q="''" data-computed:lab_lc="$lab_q.trim().toLowerCase()">
+    <div class="issue-wrap" data-signals:edit_title="false" data-signals:title_draft="''" data-signals:edit_desc="false" data-signals:desc_draft="''" data-signals:desc_base="''" data-signals:emo_open="false" data-signals:emo_q="''" data-signals:lab_open="false" data-signals:lab_q="''" data-computed:lab_lc="$lab_q.trim().toLowerCase()">
       <div class="issue-scroll">
         {{template "issue-detail" .Page}}
         {{template "issue-description" .Page.Description}}
+        {{template "description-editor" .Page}}
         {{template "attachment-upload" .Page.Key}}
         {{template "related-findings" .Page}}
         {{template "comments" .Page}}
@@ -66,6 +67,17 @@
 </section>{{end}}{{end}}
 
 {{define "issue-description"}}<div id="issue-description" class="issue-desc md"{{if not .}} hidden{{end}}>{{.}}</div>{{end}}
+
+{{/* LLL-784. Outside #issue-detail and #issue-description, so neither morph
+     touches it; the draft lives in $desc_draft on .issue-wrap. Opening reads
+     the source off #issue-description, which SSE keeps current, and keeps it
+     as $desc_base: the server refuses the save if the stored description no
+     longer matches it. The server closes the editor only on success. */}}
+{{define "description-editor"}}{{if not .ClaimReadOnly}}<div class="desc-edit-bar" data-show="!$edit_desc"><button type="button" class="btn desc-edit-open" data-on:click="fetch(location.pathname + '?description', {cache: 'no-store'}).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(t => { $desc_base = t; $desc_draft = t; $edit_desc = true }).catch(s => { const f = document.getElementById('flash'); f.textContent = 'could not load the description to edit (' + s + '); reload the page'; f.hidden = false })">Edit description</button></div>
+<form id="desc-form" class="desc-edit" style="display:none" data-show="$edit_desc"><input type="hidden" name="key" value="{{.Key}}"><input type="hidden" name="base" data-bind:desc_base>
+<textarea name="description" aria-label="Description" placeholder="Description - markdown, code fences and mermaid all render" data-bind:desc_draft data-effect="$edit_desc && setTimeout(() => el.focus(), 0)" data-on:keydown="evt.key === 'Escape' ? ($edit_desc = false) : (evt.metaKey || evt.ctrlKey) &amp;&amp; evt.key === 'Enter' &amp;&amp; (evt.preventDefault(), @post('/description', {contentType: 'form'}))"></textarea>
+<div class="desc-edit-foot"><span class="ni-hint">Cmd/Ctrl+Enter to save · Esc to cancel</span><button type="button" class="btn" data-on:click="$edit_desc = false">Cancel</button><button type="button" class="btn primary" data-on:click="@post('/description', {contentType: 'form'})">Save</button></div>
+</form>{{end}}{{end}}
 
 {{define "issue-attachments"}}{{if .Attachments}}<section class="issue-attachments" aria-label="Attachments">
 <h2>Attachments <span class="count">{{len .Attachments}}</span></h2>
