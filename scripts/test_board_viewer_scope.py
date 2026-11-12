@@ -6,6 +6,7 @@ cannot write; a bot's cookie is capped by its owner; the board token is
 unchanged."""
 import hashlib
 import hmac
+import http.cookiejar
 import json
 import re
 import os
@@ -352,9 +353,34 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
         assert code == 303 and 'Set-Cookie' not in headers, 'a /login POST replaced a signed-in cookie'
         code, _, headers = call(board, '/login', {'board_token': 'nope', 'next': '/'}, headers={'Origin': board}, form=True)
         assert code == 401 and 'Set-Cookie' not in headers
-        # The board-token login is unchanged, cookie or not.
+        # LLL-785: both board-token login paths keep the browser signed in
+        # beyond a week. Inspect the cookie as a browser would, without
+        # advancing the server clock or waiting for the expiry in real time.
+        def persistent_board_cookie(headers):
+            cookie = headers['Set-Cookie']
+            assert cookie.startswith(f"lll_board={env['LLL_BOARD_TOKEN']};"), cookie
+            assert 'Max-Age=31536000' in cookie and 'HttpOnly' in cookie, cookie
+            jar = http.cookiejar.CookieJar()
+            class CookieResponse:
+                def info(self):
+                    return headers
+            jar.extract_cookies(CookieResponse(), urllib.request.Request(board + '/'))
+            saved = next(c for c in jar if c.name == 'lll_board')
+            assert not saved.is_expired(time.time() + 8 * 24 * 3600), 'signed out after a week'
+            assert saved.is_expired(time.time() + 366 * 24 * 3600), 'cookie never expires'
+
         code, _, headers = call(board, f"/t/ALPHA/?board_token={env['LLL_BOARD_TOKEN']}", headers=as_cookie(rw_tok))
-        assert code == 303 and headers['Set-Cookie'].startswith(f"lll_board={env['LLL_BOARD_TOKEN']};"), dict(headers)
+        assert code == 303, (code, dict(headers))
+        persistent_board_cookie(headers)
+        code, _, headers = call(board, '/login', {'board_token': env['LLL_BOARD_TOKEN'], 'next': '/t/ALPHA/'},
+                                headers={'Origin': board}, form=True)
+        assert code == 303 and headers['Location'] == '/t/ALPHA/', (code, dict(headers))
+        persistent_board_cookie(headers)
+        # A visit upgrades an existing seven-day cookie without another login.
+        code, _, headers = page('/t/ALPHA/', env['LLL_BOARD_TOKEN'])
+        assert code == 200
+        persistent_board_cookie(headers)
+        assert page('/t/ALPHA/', 'board-token-from-before-rotation')[0] == 401
 
         # --- revocation reaches open streams (LLL-626) ---
         narrowed_rec, narrowed_tok = member('narrowed', scope='teams', teams=[alpha['id']], mode='rw')

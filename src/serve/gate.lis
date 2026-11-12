@@ -86,13 +86,17 @@ fn admit(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) -> Option
   // cookie until the browser was cleared).
   if is_board_token(query, want) {
     if is_read_method(r.Method) {
-      set_board_cookie(w, want, 7 * 24 * 3600)
+      set_board_cookie(w, want, 365 * 24 * 3600)
       http.Redirect(w, r, without_board_token(r), 303)
       return None
     }
     return Some(Viewer.Full)
   }
   if is_board_token(cookie, want) {
+    // Upgrade existing week-long cookies on the next visit, and keep an
+    // active browser signed in. The token is still checked on every request,
+    // so rotation takes effect regardless of the cookie's lifetime.
+    set_board_cookie(w, want, 365 * 24 * 3600)
     // An already signed-in browser may reopen an old login link. Strip its
     // token too, before page rendering can preserve it in a saved view.
     if is_read_method(r.Method) && query != "" {
@@ -215,7 +219,7 @@ pub fn board_login(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>)
   let want = ctx.settings.board_token()
   let cookie = cookie_named(rc, "lll_board").unwrap_or("")
   if is_board_token(tok, want) {
-    set_board_cookie(w, tok, 7 * 24 * 3600)
+    set_board_cookie(w, tok, 365 * 24 * 3600)
     http.Redirect(w, rc, next, 303)
     return
   }
@@ -606,8 +610,8 @@ fn cookie_named(r: Ref<http.Request>, name: string) -> Option<string> {
 
 /// One query parameter: the helper lives in serve/pages.lis; the gate shares
 /// it rather than growing a second dialect.
-/// Hand the browser its board cookie, `max_age` seconds long: a week for the
-/// board token and team links, a year for a member's token. HttpOnly: the
+/// Hand the browser its board cookie, `max_age` seconds long: a week for
+/// team links, a year for board and member tokens. HttpOnly: the
 /// page's scripts never need the token, so none of them can leak it.
 fn set_board_cookie(w: http.ResponseWriter, tok: string, max_age: int) {
   let cookie = http.Cookie {
