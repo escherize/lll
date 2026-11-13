@@ -1,6 +1,14 @@
 name: Flatpak bundles
 
 on:
+  pull_request:
+    paths:
+      - packaging/flatpak/**
+      - scripts/build_flatpak.py
+      - scripts/test_flatpak_install.py
+      - scripts/board_startup.py
+      - .github/workflows/flatpak.yml
+      - .github/workflows/release.yml
   workflow_call:
     inputs:
       tag:
@@ -40,6 +48,10 @@ jobs:
           BINARY_ARCH: ${{ matrix.binary }}
         run: |
           mkdir -p dist
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG=$(gh release view --json tagName --jq .tagName)
+            export RELEASE_TAG
+          fi
           gh release download "$RELEASE_TAG" --pattern "lll-linux-$BINARY_ARCH" --dir dist
           gh release view "$RELEASE_TAG" --json tagName,publishedAt,assets > dist/release.json
           python3 - <<'PY'
@@ -78,6 +90,7 @@ jobs:
           name: lll-flatpak-${{ matrix.arch }}
           path: dist/*.flatpak
       - name: Publish the verified bundle
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
