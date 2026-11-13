@@ -9,6 +9,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
+import uuid
 
 from board_startup import wait_for_endpoints
 
@@ -26,6 +28,7 @@ def main():
     skill = subprocess.check_output(command + ['skill', 'get', 'software-factory'], text=True, env=env)
     assert '# How work moves through a repo tracked on lll' in skill
     with tempfile.TemporaryDirectory(prefix='lll-flatpak-smoke-') as directory:
+        marker = 'Flatpak saved issue ' + uuid.uuid4().hex
         log = Path(directory) / 'board.log'
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
@@ -45,6 +48,15 @@ def main():
                 with urllib.request.urlopen(req, timeout=15) as response:
                     body = response.read().decode()
                     assert response.status == 200 and 'FLAT' in body
+                if boot == 0:
+                    create = urllib.request.Request(endpoints['board_url'] + '/create',
+                        data=urllib.parse.urlencode({'team': 'FLAT', 'title': marker}).encode(),
+                        headers={'Cookie': 'lll_board=' + endpoints['board_token'],
+                                 'Origin': endpoints['board_url']})
+                    with urllib.request.urlopen(create, timeout=15) as response:
+                        assert response.status == 200
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    assert marker in response.read().decode(), 'saved issue missing from board'
                 print(f'PASS: installed Flatpak board boot {boot + 1} opens in browser')
             finally:
                 # The flatpak client may exit while its sandbox stays alive.
