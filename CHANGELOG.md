@@ -6,6 +6,28 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-13
+
+### Added
+
+- Edit an issue's description directly on the board (LLL-784).
+- Install Linux releases as Flatpak bundles for x86-64 and ARM64. Packages
+  include the CLI, local server and browser board, keep their own data and
+  configuration, and allow explicit per-project filesystem access. Release
+  automation verifies installation and saved-board persistence on both
+  architectures before publication (LLL-789).
+
+### Fixed
+
+- Shared board-token sign-in lasts a year instead of seven days. Visits renew
+  existing cookies without another login; rotated tokens still refuse access
+  immediately (LLL-785).
+
+### Changed
+
+- Verification documentation leads with the full research scale and retains
+  linked evidence and limitations (LLL-783).
+
 ## [1.6.1] - 2026-11-11
 
 ### Fixed
