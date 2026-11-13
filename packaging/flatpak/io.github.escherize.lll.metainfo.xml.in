@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.escherize.lll</id>
+  <name>lll</name>
+  <summary>A shared work record for people and coding agents</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.escherize"><name>escherize</name></developer>
+  <description>
+    <p>lll keeps tasks, decisions and discoveries on a shared board. People
+    follow the work in a browser while agents use the command line.</p>
+    <p>The same executable includes a self-hosted server, database and web board.
+    Connect to an existing board or start a local board from your terminal.</p>
+  </description>
+  <url type="homepage">https://github.com/escherize/lll</url>
+  <url type="bugtracker">https://github.com/escherize/lll/issues</url>
+  <provides><binary>lll</binary></provides>
+  <releases><release version="@VERSION@" date="@DATE@"/></releases>
+  <content_rating type="oars-1.1"/>
+</component>

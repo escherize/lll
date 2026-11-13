@@ -1,0 +1,97 @@
+name: Flatpak bundles
+
+on:
+  pull_request:
+    paths:
+      - packaging/flatpak/**
+      - scripts/build_flatpak.py
+      - scripts/test_flatpak_install.py
+      - scripts/board_startup.py
+      - .github/workflows/flatpak.yml
+      - .github/workflows/release.yml
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to package (for example v1.6.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            binary: amd64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            binary: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Flatpak
+        run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11 appstream
+      - name: Download and verify the published binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          BINARY_ARCH: ${{ matrix.binary }}
+        run: |
+          mkdir -p dist
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG=$(gh release view --json tagName --jq .tagName)
+            export RELEASE_TAG
+          fi
+          gh release download "$RELEASE_TAG" --pattern "lll-linux-$BINARY_ARCH" --dir dist
+          gh release view "$RELEASE_TAG" --json tagName,publishedAt,assets > dist/release.json
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          release = json.loads(Path('dist/release.json').read_text())
+          assert release['tagName'] == os.environ['RELEASE_TAG']
+          name = 'lll-linux-' + os.environ['BINARY_ARCH']
+          asset = next(a for a in release['assets'] if a['name'] == name)
+          digest = 'sha256:' + hashlib.sha256(Path('dist', name).read_bytes()).hexdigest()
+          assert asset['digest'] == digest, 'download differs from published asset digest'
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('PACKAGE_VERSION=' + release['tagName'].removeprefix('v') + '\n')
+              env.write('PACKAGE_DATE=' + release['publishedAt'][:10] + '\n')
+          PY
+      - name: Build, install and exercise the bundle
+        env:
+          FLATPAK_ARCH: ${{ matrix.arch }}
+          BINARY_ARCH: ${{ matrix.binary }}
+        run: |
+          dbus-run-session -- bash -euxo pipefail <<'SH'
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.freedesktop.Platform//25.08
+          python3 scripts/build_flatpak.py --binary "dist/lll-linux-$BINARY_ARCH" \
+            --arch "$FLATPAK_ARCH" --version "$PACKAGE_VERSION" --date "$PACKAGE_DATE" \
+            --output "dist/lll-$PACKAGE_VERSION-$FLATPAK_ARCH.flatpak"
+          flatpak install --user --noninteractive "dist/lll-$PACKAGE_VERSION-$FLATPAK_ARCH.flatpak"
+          flatpak run io.github.escherize.lll --help
+          python3 scripts/test_flatpak_install.py --version "$PACKAGE_VERSION"
+          flatpak run --command=cat io.github.escherize.lll \
+            /app/share/metainfo/io.github.escherize.lll.metainfo.xml > dist/metainfo.xml
+          appstreamcli validate --no-net dist/metainfo.xml
+          SH
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lll-flatpak-${{ matrix.arch }}
+          path: dist/*.flatpak
+      - name: Publish the verified bundle
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" dist/*.flatpak

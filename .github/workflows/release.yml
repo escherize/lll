@@ -27,6 +27,12 @@ permissions:
   contents: write
 
 jobs:
+  flatpak:
+    needs: release
+    uses: ./.github/workflows/flatpak.yml
+    with:
+      tag: ${{ github.ref_name }}
+
   release:
     name: release
     runs-on: macos-15

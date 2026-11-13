@@ -33,6 +33,8 @@ brew install escherize/lll/lll
 
 Other platforms: [download a release](https://github.com/escherize/lll/releases).
 
+Linux Flatpak bundles: [installation and sandbox behavior](packaging/flatpak/README.md).
+
 ## Quickstart
 
 Start a board in a project directory:
