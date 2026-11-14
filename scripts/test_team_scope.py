@@ -823,6 +823,29 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         hop = call(api, '/api/collections/members/records',
                    dict(bot_body, name='bot-ward', email='bot-ward@example.test', owner=ward['id']), su)
         assert hop[0] == 400 and 'owner is one hop' in hop[1]['message'], hop[:2]
+        # LLL-798: a team-scoped owner still sees a bot they own after
+        # disabling it. A disabled bot has no teams, so the shared-team clause
+        # of the roster rule no longer shows it; ownership does.
+        keeper, keeper_tok = member('keeper', scope='teams', teams=[alpha['id']], mode='rw')
+        keeper_env = dict(cli_ro, LLL_TOKEN=keeper_tok, LLL_CONFIG_HOME=str(root / 'keeper-config'))
+
+        def as_keeper(*args):
+            return subprocess.run([binary, *args], cwd=root, env=keeper_env, text=True, capture_output=True, timeout=30)
+
+        made = as_keeper('bot', 'create', 'bot-kept', '--json')
+        assert made.returncode == 0, made.stderr
+        kept_id = call(api, '/api/collections/members/records?filter=' + urllib.parse.quote('name = "bot-kept"'), token=su)[1]['items'][0]['id']
+        assert 'bot-kept: read-write, team ALPHA' in as_keeper('member', 'access', 'bot-kept').stdout
+        assert as_keeper('bot', 'disable', 'bot-kept').returncode == 0
+        seen = as_keeper('member', 'access', 'bot-kept')
+        assert seen.returncode == 0 and 'bot-kept: read-only, no teams' in seen.stdout, (seen.returncode, seen.stdout, seen.stderr)
+        assert 'bot-kept' in as_keeper('member', 'list').stdout
+        assert call(api, f'/api/collections/members/records/{kept_id}', token=keeper_tok)[0] == 200
+        # Ownership shows nothing to anyone else: another ALPHA-only member
+        # still cannot see the disabled bot.
+        _, peer_tok = member('keeper-peer', scope='teams', teams=[alpha['id']], mode='rw')
+        assert call(api, f'/api/collections/members/records/{kept_id}', token=peer_tok)[0] == 404
+        assert 'bot-kept' not in {m['name'] for m in call(api, '/api/collections/members/records?perPage=200', token=peer_tok)[1]['items']}
         print('team scope: ok')
     finally:
         child.terminate()
