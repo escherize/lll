@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from board_startup import wait_for_endpoints
 from browser_session import new_session, open_session, diagnostic, require_result
@@ -200,6 +201,30 @@ def main():
             events_path = '/api/collections/permission_events/records'
             def event_count():
                 return expect(200, events_path, token=admin)['totalItems']
+            # An authenticated Admin's valid command is the control: a
+            # hostile Origin must be rejected before it can promote anyone.
+            target = expect(200, management + empty['id'], token=manager_token)
+            form = {'member': empty['id'], 'revision': target['revision'],
+                    'workspace_role': 'admin', 'action': 'preview'}
+            def board_change(origin, action):
+                body = dict(form, action=action)
+                request = urllib.request.Request(board + '/permissions/change', method='POST',
+                    data=urllib.parse.urlencode(body).encode(), headers={
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cookie': 'lll_board=' + manager_token, 'Origin': origin})
+                try:
+                    response = urllib.request.urlopen(request, timeout=15)
+                except urllib.error.HTTPError as error:
+                    response = error
+                with response:
+                    return response.status, response.read().decode()
+            count = event_count()
+            status, preview_html = board_change(board, 'preview')
+            assert status == 200 and 'Review this change' in preview_html, status
+            status, _ = board_change('https://cross-origin.invalid', 'apply')
+            assert status == 403 and event_count() == count
+            assert expect(200, management + empty['id'], token=manager_token)['workspace_role'] == 'member'
+            checks.append('valid Admin board preview works; hostile-Origin promotion refuses without changing grants or audit history')
             snapshot = expect(200, management + manager['id'], token=manager_token)
             expect(409, management + manager['id'], {'revision': snapshot['revision'], 'workspace_role': 'member'}, manager_token)
             snapshot = expect(200, management + alice['id'], token=manager_token)

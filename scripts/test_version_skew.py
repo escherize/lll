@@ -20,7 +20,7 @@ from board_startup import wait_for_endpoints
 binary = str(Path(sys.argv[1]).resolve())
 MARK = 'this lll is'
 # LLL-710: both discovery documents list the same capabilities (gopb.Capabilities).
-CAPABILITIES = ['issues.idempotency', 'comments.idempotency', 'webhooks.activity', 'issues.parents', 'bots.lifecycle', 'projects.cascade']
+CAPABILITIES = ['issues.idempotency', 'comments.idempotency', 'webhooks.activity', 'issues.parents', 'bots.lifecycle', 'projects.cascade', 'permissions.teams', 'permissions.workspace']
 STUB_BODY = b'{"items":[],"totalItems":0,"page":1,"perPage":200}'
 
 

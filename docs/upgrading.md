@@ -17,6 +17,8 @@ new capability. Consumers should ignore additional fields and event topics.
 | Keyed comments | Client with `issue comment --idempotency-key` | Authenticated `/api/lll/comments/idempotency` says supported; 1.1.0 lacks this route |
 | Comment and claim events on query watch | Client with `watch --activity` | Native PocketBase topics; older servers lack reliable claim actor metadata |
 | Attributed claim events and comment/claim webhooks | `webhook add --activity`; activity-aware consumer | Server with the claim-actor migration and activity webhook hooks |
+| Per-team Viewer/Editor grants | `member permissions`; `member access --team KEY --role ROLE` | `permissions.teams`; permission management version2 |
+| Explicit workspace administration | `member access --workspace-role ROLE`; Permissions on the board | `permissions.workspace`; an Admin member or explicit operator authentication |
 
 Activity is opt-in. Plain watch and existing webhook registrations remain
 issue-only. Use `watch --activity` or register a receiver with
