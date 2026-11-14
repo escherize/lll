@@ -39,7 +39,7 @@ async page => {
   await cookie(fixture.managerToken);
   await page.setViewportSize({width:1440,height:1200});
   await page.goto(board+'/');
-  must(new URL(page.url()).pathname==='/permissions','admin without data was stranded at the root');
+  must((await page.evaluate(()=>location.pathname))==='/permissions','admin without data was stranded at the root');
   await open(fixture.alice);
   must((await row('ENG').locator('td[data-label="Grant"]').innerText())==='Editor' && (await row('ENG').locator('td[data-label="Effective access"] strong').innerText())==='Editor','Engineering grant/effective role missing');
   must((await row('FIN').locator('td[data-label="Grant"]').innerText())==='Viewer' && (await row('FIN').locator('td[data-label="Effective access"] strong').innerText())==='Viewer','Finance grant/effective role missing');
