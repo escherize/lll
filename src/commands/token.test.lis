@@ -267,3 +267,24 @@ fn shell_word_quotes_anything_a_shell_would_interpret() {
   assert prompt.contains("export LLL_URL='http://h/`id`'\n")
 }
 
+
+// ------------------------------------------------------------ bot help
+
+// LLL-797: 'lll bot --help' is the create page. It listed only create and
+// rotate, so an owner looking for a way to stop a bot found none and tried
+// the administrator-only member verbs instead.
+#[test]
+fn bot_help_lists_every_bot_verb() {
+  let page = bot_page(false)
+  assert page.contains("lll bot rotate bot-NAME")
+  assert page.contains("lll bot disable bot-NAME")
+  assert page.contains("lll bot remove bot-NAME")
+}
+
+#[test]
+fn member_refusals_point_an_owner_at_the_bot_verbs() {
+  let hint = owned_bot_hint("bot-helper")
+  assert hint.contains("'lll bot disable bot-helper'")
+  assert hint.contains("'lll bot remove bot-helper'")
+  assert owned_bot_hint("alice") == ""
+}
