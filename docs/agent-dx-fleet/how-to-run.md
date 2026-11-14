@@ -1,5 +1,9 @@
 # Running the approved lll DX cases
 
+The run owner coordinates the evaluation. The controller provisions fixtures,
+captures audits and judges artifacts; workers are the agents testing the CLI.
+A fresh reviewer assesses their reports against the captured evidence.
+
 ## Choose the run scope
 
 For a release, follow `docs/release-checklist.md`: five fresh workers across
@@ -16,6 +20,8 @@ A new parent-model reviewer reads every raw report, call audit and REST result.
 Keep release evidence on its release issue; historical research evidence
 belongs to its original issue.
 
+## Prepare the build and controller
+
 Build the intended source revision and record the commit and binary SHA256.
 Run `python3 scripts/test_agent_dx_fleet.py` and `mise run fleet-test` before
 provisioning: the second runs every case's seed and judge against scratch
@@ -26,6 +32,8 @@ path, `--binary` pointing to the built binary, and its exact `--commit` and
 `--sha256`. Keep this process alive; it owns all children. It copies the
 binary and wrapper/startup code and records their fingerprints before accepting
 JSON lines on stdin. Worktree edits cannot change code beneath live workers.
+
+## Provision and launch workers
 
 For a five-worker single-case release run, send
 `{"action":"provision","case":"01","run":1,"workers":5}`. Always name the
@@ -40,12 +48,16 @@ their own directory. It supplies the isolated environment and audits exact
 arguments, exit status and redacted output under the controller, outside worker
 directories. Workers never create/edit `calls.jsonl`; their deliverables are
 report.json and report.md. Never print `conn.txt` or paste a
-token into a prompt. The wrapper permits the CLI only; task rules prohibit
-source, raw HTTP, the UI, identity changes and server/config operations.
+token into a prompt. The wrapper permits the CLI only. Task rules prohibit
+source access, raw HTTP, the UI and operations outside the named case.
+Cases 14, 15 and 19 explicitly permit their specified configuration or identity
+operations; they do not permit starting servers.
 
 Wrappers leave `LLL_AGENT` unset rather than guessing the worker's runtime or
 inheriting the controller's label. CLI `--agent` remains available when the
 case permits an explicit session label.
+
+## Collect and judge evidence
 
 After every worker has written report.json and report.md, send
 `{"action":"judge"}`. It validates and publishes the authoritative audits into
@@ -64,7 +76,9 @@ review.md and summaries.json. Assemble run.json with summaries, review,
 checker results and fingerprint. Record the closing tally from the judge's
 artifact totals and the reviewer's classification of failed calls in the
 captured audits, including the number of workers with tool-owned failures.
-The owner uses the audits and ground truth, not worker done claims.
+The run owner bases the result on the audits and ground truth.
+
+## Review results and rerun if needed
 
 Pass requires every provisioned artifact and fewer than two workers with a tool-owned
 failed invocation. Repeated tool failure classes get their own claimed issue
@@ -73,11 +87,14 @@ instances and agents before advancing. Record harness/task-design corrections
 separately. A new binary requires a new controller and fresh root; never replace
 the binary beneath live workers. Repeat the chosen release cases on the final build if the binary changes.
 
+## Stop the controller and retain evidence
+
 Send `{"action":"stop"}` after review, then `{"action":"exit"}` when changing
 builds or finishing. Stop waits/reaps owned children, verifies every owned
 listener is gone, removes connections and private controller data. Scan
-sanitized evidence for credentials, remove disposable worker HOME/cache, and
-retain only reports, audits, snapshots, reviews, tally, fingerprints and cleanup
+sanitized evidence for credentials. Remove disposable worker HOME/cache and
+case-created credential files and configuration directories. Retain only
+reports, audits, snapshots, reviews, tally, fingerprints and cleanup
 receipts. Attach the evidence bundle and closing table to the run’s tracking issue.
 
 A provision request while a case is live returns an error and leaves that case
@@ -103,7 +120,7 @@ cases differ. Case 12 gets no team, so a command without `--team` must be
 refused. Case 14 gets nothing from conn.txt: the CLI reads a seeded, broken
 config (wrong URL, expired token) in the worker's HOME, which the worker
 repairs. Its supplied `fleet-login` sends the token to the audited CLI over
-stdin; `fleet-as-helper ENV_FILE` in case15 runs audited `whoami` using the
+stdin; `fleet-as-helper ENV_FILE` in case 15 runs audited `whoami` using the
 saved helper token without evaluating exports as shell code. These helpers
 preserve CLI exit codes and never print credentials. Cases 15 and 19 honour a worker-set `LLL_TOKEN` or `LLL_CONFIG_HOME`
 (inside the worker directory) so a worker can act as a second identity; the
@@ -129,6 +146,6 @@ contaminated launch as harness evidence, then use a fresh instance and worker.
 This changes the launch environment, not lll's credential precedence or the
 wrapper's server/config boundaries.
 
-Cases 15 and 19 use a person identity: case15
-exercises human-owned token provisioning, and case19 invites a person. A bot must never provision a person
+Cases 15 and 19 use a person identity: case 15
+exercises human-owned token provisioning, and case 19 invites a person. A bot must never provision a person
 account; that would evade its owner's access boundary.

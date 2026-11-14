@@ -1,9 +1,10 @@
 # The lll board API
 
-The board's data API is PocketBase REST, served at the board's address — the
-same url the CLI is configured against (`LLL_URL`, or `url` in
-`~/.config/lll/lll.toml`; `lll config list` shows which value won and where
-it came from). There is no separate API host to point at.
+Use the configured API URL for PocketBase REST requests. `LLL_URL` or the
+effective `url` setting selects it; `lll config list` shows the value and its
+source. Local servers normally have separate API and board listeners. Hosted
+boards can serve the API at the board's address through the `/api/` proxy.
+The browser address is configured separately with `web_url` or `LLL_WEB_URL`.
 
 ## Auth
 
@@ -19,8 +20,8 @@ too.
 
 ## The raw passthrough
 
-`lll api METHOD PATH [--body TEXT]` sends the request for you: it rides the
-configured url and token, prints the response body to stdout and the status
+`lll api METHOD PATH [--body TEXT]` sends the request for you: it uses the
+configured URL and token, prints the response body to stdout and the status
 line to stderr, and shows non-200 responses as-is rather than as command
 errors:
 
@@ -115,10 +116,9 @@ and field, its type, whether it is required, and the access rules a member
 token answers to. It is generated from the migrations (their end state — what
 the server actually enforces), not hand-typed; regenerate after schema
 changes with `mise run api-schema`. The gate verifies the two agree —
-`gen_api_schema.py --check` runs in e2e and fails naming what drifted, so the
-reference cannot silently fall behind the schema again (LLL-435).
+`gen_api_schema.py --check` runs in e2e and fails naming what drifted, to detect drift between the reference and schema (LLL-435).
 
-## Opt-in comment and claim activity
+## Comment and claim event delivery
 
 Existing webhook registrations and `lll watch` remain issue-only. Use
 `lll watch --activity --json` for live comment and claim events, or
@@ -134,7 +134,7 @@ actor. Scope rules apply to subscriptions; shared webhook names use the team's
 shared roster. Delivery is live-only, with no replay or durable outbox claim.
 See the CLI contract and `watch --help` for reconciling reconnect gaps.
 
-### Accepting an invite as an existing person
+## Accepting an invite as an existing person
 
 `POST /api/lll/invites/redeem` with a valid member Authorization token applies
 its `code` to that authenticated person; any supplied name is ignored. The

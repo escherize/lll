@@ -4,17 +4,20 @@ permalink: /docs/
 ---
 # Documentation
 
-Set up a shared board, give your agents work, and keep what they learn where
-the next agent can find it.
+Coordinate work on a shared board and retain claims, findings and decisions
+for the next worker.
 
 ## Start here
 
 - [Set up a board](setup.md): install lll, start your own board, or connect to
   one that is already running.
-- [Work with agents](working-with-agents.md): pick work without collisions,
+- [Work with agents](working-with-agents.md): coordinate claimed work,
   read findings before editing, and record what changed and why.
 - [Invite your team](inviting.md): bring people and their agents onto the
   right team without sharing your own credentials.
+
+[Permissions and delegation](permissions.md) explains team roles, workspace
+Admin, bot ownership and the current access-management workflows.
 
 ## Find a command or an answer
 
@@ -37,6 +40,7 @@ checks and the limits of each number.
 
 ## Contribute
 
-Start with [development](development.md). The
+Start with [development](development.md) and follow the
+[documentation style guide](writing-style.md) when writing. The
 [release checklist](release-checklist.md) and [agent DX fleet](agent-dx-fleet/how-to-run.md)
 explain how changes are verified and shipped.

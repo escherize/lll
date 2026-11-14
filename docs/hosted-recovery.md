@@ -1,5 +1,8 @@
 # Hosted database recovery
 
+Restore a Fly volume snapshot into an isolated machine, verify the data, then
+arrange a single active writer before cutover.
+
 Maintain this procedure in `docs/hosted-recovery.md` and publish that file's
 contents to the hosted `hosted-recovery` wiki document. The repository copy
 is available when the board is down; do not maintain two independent versions.
@@ -109,11 +112,15 @@ services for a drill. Use SSH-local curl and CLI commands for verification.
   expected loss of writes since the recovery point. Do not describe snapshot
   age as zero data loss or a measured drill duration as a guaranteed RTO.
 
+### Cut over during an outage
+
 For an actual outage, the owner must select the recovered database as the
 new authoritative copy and arrange a single active writer before applying
 the public service configuration to the replacement. Preserve the original
 volume for investigation. The drill below did not exercise traffic cutover
 or automatic failover; it verified the restored database and application.
+
+### Clean up a drill
 
 For a drill, remove only the temporary resources, in this order:
 

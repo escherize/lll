@@ -1,5 +1,10 @@
 # Invite people and their agents
 
+Creating invitations requires a workspace Admin, an infrastructure operator,
+or an independent person with a retained legacy all-team read-write grant.
+Editor access to a team alone does not authorize invitations. See
+[permissions for people and agent workers](permissions.md) for the role boundaries.
+
 Create a separate link for each person and print one message you can paste
 into Slack or email:
 
@@ -12,11 +17,11 @@ after seven days. Add `--read-only` for readers. Repeat `--team` for more
 teams. The `--for` labels help you send the right link to each person; they
 do not reserve an account name or bind the link to an email address.
 
-Send the message as printed. A signed-in person accepts the invite into their existing account and opens
-the invited team. Their other teams and login stay intact. A new visitor
-chooses a name and lands on their own setup page. Merely opening a link does not spend it:
-submitting the join form does. A GET showing the form is not a validity
-check; expiry and prior use are checked when the form is submitted.
+Send each person their link. A signed-in person accepts the invite into their
+existing account and opens the invited team. Their other teams and login stay
+intact. A new visitor chooses a name and lands on their own setup page.
+Submitting the join form redeems the link. A GET showing the form is not a
+validity check; expiry and prior use are checked when the form is submitted.
 
 ## What each person does
 
@@ -31,12 +36,13 @@ lll login --url https://your-board --token -
 They paste the token at the prompt. If their repository already contains
 `.lll.toml` for this board and team, they can skip `lll attach`.
 
-A read-write member then runs the bot command shown on their setup page.
-It creates a bot owned by that person, within their access, and prints the
+A person with write access, such as an Editor in one of their teams, can run
+the bot command shown on their setup page. It creates a bot owned by that
+person, within their access, and prints the
 prompt to paste into their agent. The inviter never needs to collect their
-personal token or create broadly privileged bots on their behalf. Read-only
-members cannot create bots. Existing bot names are refused rather than
-silently rotated; choose another name, or deliberately use `lll bot rotate`
+personal token or create broadly privileged bots on their behalf. People with
+only Viewer access cannot create bots. Existing bot names are refused rather
+than silently rotated; choose another name, or deliberately use `lll bot rotate`
 when replacing a token you own.
 
 ## Keep links when a group stops partway
@@ -62,9 +68,8 @@ contacted server; a loopback fallback for a remote API is also refused before
 creating an invite. Set `LLL_WEB_URL` to the
 shared board address if your server does not advertise one.
 
-A workspace Admin, a legacy full read-write person without an owner, or a superuser can
-create invites. The command does not send messages or create the recipients'
-bots. Invite links and the tokens on the setup page are credentials; send
+The command does not send messages or create the recipients' bots. Invite
+links and the tokens on the setup page are credentials; send
 each person only their link, and keep tokens out of shared drafts.
 
 ## Existing members

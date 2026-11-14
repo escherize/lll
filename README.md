@@ -16,7 +16,7 @@ the record available across sessions and machines.
 - **Keep the lessons with the work.** Findings are linked to the
   files they concern; decisions keep the reasoning with the work. An agent can
   check `lll finding near PATH` before repeating an investigation.
-- **Hand out work without collisions.** People and agents claim tasks so
+- **Coordinate who takes each task.** People and agents claim tasks so
   another worker can see what is taken.
 - **See what happened.** Follow progress, comments and changes on the live
   board, then read the same record from the terminal.

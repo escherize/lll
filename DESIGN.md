@@ -249,8 +249,8 @@ speaks in three grays and the six semantic state hues. Depth is tonal, not
 shadowed: five closely-spaced dark surfaces layer the UI, and the one real
 shadow is a 1px whisper under cards.
 
-Note: PRODUCT.md's brand commitment named a teal accent; the shipped build is
-orange throughout (tokens, comp, icons). Orange #f0883e is canonical.
+Orange #f0883e is the canonical accent, matching PRODUCT.md and the shipped
+tokens and icons.
 
 **Key Characteristics:**
 - Dark-only; near-black tonal surfaces, no light theme.
@@ -343,13 +343,15 @@ back to system-ui, sans-serif. There is no second face.
 anything countable. Antialiased, line-height 1.45 base.
 
 ### Hierarchy
-- **Title** (600, 19px, 1.3, -0.012em): the issue page `h1` — the largest type
-  in the product.
-- **Body** (400, 13px, 1.45): base size for everything — board columns, cards,
+- **Title** (600, 19px, 1.3, -0.012em): the issue page `h1`, the largest type
+  in the board and issue controls. The landing page and
+  [documentation reading surface](#documentation-reading-surface) have separate
+  typography roles.
+- **Body** (400, 13px, 1.45): base size for board columns, cards,
   comments, rail. Column headers and section headings are the same 13px at
   weight 600 (letter-spacing -0.005em); hierarchy comes from weight, not size.
 - **Label** (600, 11px, +0.02em, UPPERCASE): sidebar section headers
-  ("Properties"). The only uppercase in the system.
+  ("Properties"). Uppercase in board and issue controls is limited to these labels.
 - **Micro** (500-800, 8.5-12.5px): the enumerated small steps — avatar
   initials (8.5px, 700), workspace mark letter (10px, 800), chips (10.5px),
   card key rows (11.5px, tabular-nums), comment meta and prop keys (12px),
@@ -357,9 +359,9 @@ anything countable. Antialiased, line-height 1.45 base.
 - **Max measure:** descriptions 68ch, comments 65ch.
 
 ### Named Rules
-**The Weight-Not-Size Rule.** Between 10.5px and 19px, hierarchy is expressed
-by weight and color voice (text/text-2/text-3), rarely by size. Do not
-introduce large display type.
+**The Weight-Not-Size Rule.** In board and issue controls, hierarchy between
+10.5px and 19px is expressed by weight and color voice (text/text-2/text-3),
+rarely by size. Keep large display type out of these controls.
 
 **The Tabular Numerals Rule.** Issue keys, counts, and any aligned numbers set
 `font-variant-numeric: tabular-nums`.
@@ -601,8 +603,10 @@ stays outside page morphs. Static pages update their snapshot on reload.
   urgent priority icon.
 - **Don't** use red outside the flash strip — no inline error text, no red
   icons, no second error treatment.
-- **Don't** introduce a second typeface, type above 19px, or uppercase outside
-  the sidebar section-label register.
+- **Don't** introduce a second typeface. Keep board and issue controls at or
+  below 19px, with uppercase limited to sidebar section labels. Follow the
+  separate typography roles for the landing page and documentation reading
+  surface.
 - **Don't** add drop shadows beyond the card whisper, or invent new dark grays
   off the ladder.
 - **Don't** use icon fonts, emoji glyphs, or imported icon packs; draw new
@@ -673,10 +677,12 @@ is 16px/1.6 (the product's 13px is too small for reading copy at page width).
   ledger headers and tier rows, 12-13.5px monospace for code, ledger counts
   and exit codes, 13.5px text-3 captions.
 
-**The Display Exception Rule.** This page is the one place type goes above
-the product's 19px ceiling. Size comes with weight 800 and tracking between
+**The Display Exception Rule.** The landing page uses display type above the
+board controls' 19px ceiling. Size comes with weight 800 and tracking between
 -0.032em and -0.038em, in three steps (display, door command, headline). The
-Weight-Not-Size Rule still governs the product.
+Weight-Not-Size Rule still governs board and issue controls; the
+[documentation reading surface](#documentation-reading-surface) has its own
+typography roles.
 
 ### Layout
 

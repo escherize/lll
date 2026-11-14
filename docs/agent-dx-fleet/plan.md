@@ -1,11 +1,14 @@
 # LLL-402: lll agent DX fleet plan
 
-> Numbering note: the 1.0 fleet plan renumbered the cases 01-20; this plan's
-> case 05 is case 06 there. The current cases are the files in `rules/`.
+> Historical plan approved on 2026-09-18. Scope, model availability and status
+> below describe that plan. Use [how to run](how-to-run.md) for current release
+> procedure and [the rules directory](rules/) for the current case index.
+> The original roadmap table below uses historical case numbers; its case 05
+> is current case 06. Do not use that table as the current case index.
 
-Status: approved initial cases 01 and 05; execution is in progress. The user
-said go after reviewing this plan and the first briefs on 2026-09-18.
-Other cases remain a roadmap requiring separate review.
+At approval, initial cases 01 and 05 were authorized for execution. The user
+approved this plan and the first briefs on 2026-09-18. Other cases were a roadmap
+requiring separate review.
 
 Source: [agent-dx-fleet](https://github.com/metabase/agent-instructions/blob/main/bryan/skills/agent-dx-fleet/SKILL.md),
 main skill blob `f76bc9c4b7a44d4ec13ff67106e60840f5732ea1`. The design, report
@@ -51,11 +54,11 @@ checks in `scripts/test_agent_dx_fleet.py` registered in the full gate.
 
 Readiness requires the complete URL/token/team tuple, the owned board banner,
 a live owned child and authenticated access as the expected bot. A nonempty
-connection file alone is insufficient. The upstream provision script currently
-uses file size as readiness and the caller's umask; the real run uses the
+connection file alone is insufficient. In the original review, the upstream
+provision script used file size as readiness and the caller's umask; the planned run uses the
 owning controller directly instead. Its teardown
-comment says process group but actually signals immediate descendants and later
-reuses saved PIDs. Use an owning controller that terminates, waits/reaps and
+comment said process group but the script signalled immediate descendants and
+later reused saved PIDs. Use an owning controller that terminates, waits/reaps and
 only escalates still-live children it owns. Test these harness properties with
 fakes before real provisioning; count harness failures separately from lll.
 
@@ -110,5 +113,5 @@ policy. Stop after the approved initial cases and present the evidence before
 expanding the run.
 
 Teardown every owned listener and verify it is gone, redact stored evidence,
-keep the durable reports and remove disposable token/data files. LLL-402 remains
-open until the approved real runs and skill-friction corrections are verified.
+keep the durable reports and remove disposable token/data files. The plan
+required LLL-402 to remain open until the approved real runs and skill-friction corrections were verified.

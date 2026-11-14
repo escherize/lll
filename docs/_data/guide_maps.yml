@@ -54,7 +54,7 @@ working-with-agents.md:
 
 release-checklist.md:
   kind: steps
-  caption: Each gate needs evidence before publication.
+  caption: Verify the cut before publication and the installed artifacts afterward.
   steps:
     - label: Prepare
       detail: Version and final cut

@@ -1,6 +1,8 @@
 # Upgrading to lll 1.0: what can break a consumer
 
-> **Question this answers:** I have scripts, agent prompts or wrappers that call `lll` 0.9. Which 1.0 changes can break them, and how do I check?
+> **Historical migration guide: 0.9 → 1.0.** Use this checklist for scripts,
+> agent prompts and wrappers migrating from 0.9. “New” and “now” below refer to
+> 1.0. For current client/server upgrades, see [Upgrading](upgrading.md).
 
 1.0 promises SemVer for the surface in [`docs/cli-contract.md`](https://github.com/escherize/lll/blob/main/docs/cli-contract.md): exit codes, the `--json` fields it names, the list envelope, and command, verb and flag spellings with their permanent aliases. From 1.0 on, a change that breaks a script built on those needs 2.0. Message wording and help text are not covered.
 

@@ -14,6 +14,8 @@ Members can claim only for themselves; an omitted member ID uses the
 authenticated member. Superusers must name the intended member. Naming the
 observed claim prevents a delayed release from deleting a replacement hold.
 
+## Release and close
+
 Only the holder can release a claim without force (LLL-512). Any other caller
 is refused with a message that names the holder, and the claim stays. With
 `"force": true`, the release goes through and writes a comment on the issue in
@@ -55,6 +57,8 @@ token, leaves the claim alone, as before: a PATCH carries no force and writes
 no comment. The CLI spells it `lll issue update KEY --state done
 [--keep-claim]`.
 
+### Transition implementation
+
 Both rules are one table (LLL-685): the from-state, the caller's hold (none,
 its own, another session's, another member's) and the ask (a close, or a
 move to a state, with `keep_claim` and, for a close, `force`) give the
@@ -70,11 +74,15 @@ and reports what the server did. Every client state write goes through
 `models.transition`, and the write layer puts a state on the wire only as
 the `StateWrite` it makes (`scripts/test_transition_ratchet.py`).
 
+## Deleting a claimed issue
+
 A claimed issue cannot be deleted (LLL-662). The issues DELETE request is
 refused while a claim exists, for every caller, because the claim relation
 cascades and the hold would vanish with no record. `lll issue delete KEY
 --force` releases the claim first, under the release rule, then deletes. A
 team deletion still cascades through its issues and claims.
+
+## Expiry and renewal
 
 A claim expires when it has not been renewed for 24 hours. The hourly sweep
 ages a claim by its `updated` time, and only a renewal moves `updated`
@@ -83,7 +91,7 @@ superuser is refused with a message that names the holder, and the clock does
 not move. Claiming your own issue again does not renew it. The CLI spelling is
 `lll issue claim KEY --renew`.
 
-The comment commits with the release, unlike the expiry announcement, which is
+The forced-release comment commits with the release, unlike the expiry announcement, which is
 written after its commit. A failed expiry comment must not roll back the sweep,
 or the next sweep would retry the same claim forever. A forced release has a
 caller that can retry, and the comment is its only record.
@@ -93,9 +101,12 @@ Direct `DELETE /api/collections/claims/records/{id}` is superuser-only
 hourly expiry sweep deletes through the Go app, where collection rules do not
 apply.
 
-The board displays holders on cards and issue pages. Its **Claim as NAME**
-button names the member used by the board process; the shared board login
-cookie does not identify an individual member. **Release NAME's claim** submits
+## Board behavior
+
+The board displays holders on cards and issue pages. Personal member logins
+claim as the authenticated member; shared board logins act as the configured
+board member. A shared credential does not identify the individual person who
+used it. **Release NAME's claim** submits
 the claim ID rendered on that page, so an old form cannot release a replacement.
 The button sends force only when the form's reason field is filled in
 (LLL-662): the viewer's own claim releases without one, and anyone else's is
@@ -103,6 +114,8 @@ refused, with the refusal asking for a reason. A member login acts as that
 member; the board login acts as the board's member, which the comment names,
 not the person who clicked.
 Archived teams show claim state without writable controls.
+
+## Events and reconciliation
 
 Claim events refresh the affected issue and team board independently of issue
 events. This includes releases that preserve an unrelated assignee and therefore
@@ -125,6 +138,8 @@ Watch remains live-only. Comments and claims do not bump `issue.updated`, so
 `issue list --since` does not reconcile their missed events. Re-read comments
 and claims after reconnect when a complete current snapshot is required.
 
+## Repeated acquisition and agent labels
+
 Claiming an issue already held by the same member succeeds, retains the claim
 ID and creation time, and restores assignment to that member. Another member's
 claim is refused. Releasing an unclaimed issue is an error. A transaction
@@ -143,6 +158,8 @@ A label is at most 64 characters from A-Z, a-z, 0-9, `.`, `_` and `-`; empty
 means no label. The claim, renew and release routes, the `agent` fields and the
 CLI all refuse anything else, because the label is rendered into comments.
 Comments carry the same label, and every view shows it after the author.
+
+## Assignment edits
 
 Assignment edits must include the observed claim ID; an empty string means
 the caller observed no claim. A changed observation rejects the entire edit.
@@ -166,12 +183,16 @@ share the Lisette `claims` module rather than assembling separate record
 writes. Issue request locking also coordinates these operations with native
 issue PATCH and DELETE requests.
 
+## Compatibility and retries
+
 Deploy the updated server before distributing a client using these routes.
 An older server returns 404; the CLI explains that a server upgrade is needed
 and makes no fallback claim-record writes. If a connection drops after commit,
 the client cannot know the result: inspect the issue or retry acquisition,
 which is idempotent for the holder. A repeated release reports that the hold
 is gone or has changed.
+
+## Direct record edits
 
 Native PocketBase record CRUD is a lower-level interface and does not compose
 claim and assignment changes automatically. CLI `issue update --assignee ...`
@@ -182,6 +203,8 @@ one exception (LLL-516): a native PATCH that moves a claimed issue's assignee
 to anyone but the holder is refused unless the holder's own member sends it.
 PATCH carries no force and writes no comment, so everyone else, a superuser
 included, clears through the assignment operation with force.
+
+## Verification and decisions
 
 Verification lives in `gopb/claims_test.go` (real database rollback and
 concurrency) and `scripts/test_claims_live.py` (authenticated HTTP, competing

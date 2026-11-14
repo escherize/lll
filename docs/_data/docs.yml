@@ -12,6 +12,8 @@
       url: /verification.html
 - title: Use lll
   pages:
+    - title: Permissions and delegation
+      url: /permissions.html
     - title: CLI guide
       url: /cli-guide.html
     - title: CLI contract
@@ -32,6 +34,8 @@
       url: /hosted-recovery.html
 - title: Contribute
   pages:
+    - title: Documentation style
+      url: /writing-style.html
     - title: Development
       url: /development.html
     - title: Release checklist

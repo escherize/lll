@@ -293,6 +293,12 @@ them.
 `project view --json` lists its `issues` as records without `key` or
 `claim`; use `issue list --project NAME --json` for the issue object.
 
+In `issue view --json` and `issue next --json`, comment `author_name` is
+`"hidden member"` for an inaccessible author and `""` for an empty relation.
+`server_record` is always a boolean: true for server-written comments,
+including forced-release notes attributed to a member and expiry notes
+with `author_kind: "system"`. These fields need no extra member lookup.
+
 `lll watch --json` prints one event per line. Its timestamps are RFC3339;
 the covered envelope has `topic`, `action` and `record`. Consumers must ignore
 unknown topics/actions and additional fields. Issue record fields follow the
@@ -334,13 +340,9 @@ read the CLI covers, prefer its `--json`: `lll issue list --json` carries
 each issue's claim, so reading claims through
 `lll api GET /api/collections/claims/records` is no longer needed for that.
 
-In `issue view --json` and `issue next --json`, comment `author_name` is
-`"hidden member"` for an inaccessible author and `""` for an empty relation.
-`server_record` is always a boolean: true for server-written comments,
-including forced-release notes attributed to a member and expiry notes
-with `author_kind: "system"`. These fields need no extra member lookup.
+## Watch events
 
-### Display fields on watch events
+### Display fields on issue events
 
 Issue events from `watch --json` (including `--ready`) and `issue watch --json`
 carry `key`, `priority_name` and `creator_name` beside `topic`, `action` and
@@ -429,7 +431,7 @@ and preserves that JSON on stdout; stderr carries the error. A failed request
 may have committed, so creation retries are not idempotent. See
 [Inviting people and agents](inviting.md).
 
-### Project cascade
+## Project cascade
 
 `project delete NAME --cascade --dry-run --json` returns `project` (id),
 `name`, `issues` (`id`, `key`, `title`, `state`), `blockers` (`kind`, `count`)

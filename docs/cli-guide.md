@@ -15,17 +15,19 @@ lll label create bug
 lll issue create -t "Fix login" --priority 1 --assignee "$USER" --label bug   # APP-2
 lll issue list --state todo --sort -updated
 lll issue branch-name APP-2  # print app-2-fix-login; changes nothing
+lll issue claim APP-2        # take it exclusively; non-zero if someone holds it
 lll issue start APP-2        # state -> in-progress; leaves Git untouched
 lll issue start APP-2 --branch  # also create or switch to that branch, and record the work site
-lll issue claim APP-2        # take it exclusively; non-zero if someone holds it
 lll issue view                # APP-2, inferred from the git branch
 lll issue comment -b "done in abc123"   # markdown; renders on the web board
 lll issue ref APP-2 gh#42    # append once; also retries a failed PR-reference save
-lll issue release APP-2      # give it back
-lll issue close               # APP-2 again, from the branch
+lll issue close               # finish APP-2; release your claim and keep the assignee
 ```
 
-These need a GitHub remote, or stream until Ctrl-C:
+For an unfinished handoff, use `lll issue release APP-2` instead of closing.
+It releases your claim and clears the assignee when it still names you.
+
+The PR helper needs a GitHub remote; the watch commands stream until Ctrl-C:
 
 <!-- example-check: skip: needs a GitHub remote, or streams until Ctrl-C -->
 ```sh
@@ -155,15 +157,15 @@ stable command names, exit codes and JSON fields for automation.
 
 ## Delete a disposable project
 
-`lll project delete NAME --force` keeps its cards and removes their project.
-To delete the cards too, preview the cascade first:
+`lll project delete NAME --force` keeps its issues and removes their project.
+To delete the issues too, preview the cascade first:
 
 ```sh
 lll project delete NAME --cascade --dry-run --json
 lll project delete NAME --cascade --if-preview REVISION --yes --json
 ```
 
-Use the preview's `revision` in the second command. A changed card, comment or
+Use the preview's `revision` in the second command. A changed issue, comment or
 reference invalidates it. Execution is atomic and refuses claims or external
 references (including children, blockers, linked docs and webhook filters);
 release or detach those first. Preview performs no writes and works for
