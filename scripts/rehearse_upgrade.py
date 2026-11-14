@@ -177,6 +177,15 @@ def main():
                 permissions.admin = infrastructure['token']
                 report['permissions_upgrade'] = permissions.verify('upgraded server')
                 report['permissions_future_teams'] = permissions.verify_future_team()
+                # A second boot must not reapply additive backfills or retire
+                # member credentials. Keep the same database and original tokens.
+                stop()
+                start(after, data, 'after-restart')
+                status, infrastructure = request('/api/collections/_superusers/auth-with-password',
+                    {'identity': env['LLL_ADMIN_EMAIL'], 'password': env['LLL_ADMIN_PASSWORD']}, auth='')
+                assert status == 200
+                permissions.admin = infrastructure['token']
+                report['permissions_restart'] = permissions.verify('restarted upgraded server')
             status, support = request('/api/lll/comments/idempotency')
             assert status == 200 and support.get('supported') is True
             argv = ('issue', 'comment', key, '-b', 'Retried after upgrade', '--idempotency-key', 'upgrade-comment', '--json')

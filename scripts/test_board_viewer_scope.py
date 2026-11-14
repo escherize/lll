@@ -419,6 +419,25 @@ with tempfile.TemporaryDirectory(prefix='lll-545-') as directory:
             time.sleep(.2)
         assert idle_proc.poll() is not None, 'an idle revoked stream stayed open past the re-check interval'
 
+        # Switching the Editor subset must retire an open stream even while
+        # readability, global mode and the coarse "has any write" stay equal.
+        mixed_rec, mixed_tok = member('mixed-stream', scope='teams',
+                                      teams=[alpha['id'], beta['id']], mode='ro',
+                                      editor_teams=[alpha['id']])
+        mixed_stream = stream('/events?team=ALPHA', mixed_tok, 'mixed-role')
+        wait_for(mixed_stream, 'AFTERREVOKE alpha')
+        mixed_proc = streams[-1]
+        status, body, _ = call(api, f"/api/collections/members/records/{mixed_rec['id']}",
+                               {'editor_teams': [beta['id']]}, su, 'PATCH')
+        assert status == 200, body
+        deadline = time.monotonic() + 20
+        while mixed_proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(.2)
+        assert mixed_proc.poll() is not None, 'a changed per-team Editor grant retained its old stream'
+        status, current, _ = call(api, '/api/lll/access', token=mixed_tok)
+        assert status == 200
+        assert {team['key']: team['role'] for team in current['teams']} == {'ALPHA': 'viewer', 'BETA': 'editor'}
+
         # --- an ALPHA issue carries a hidden team's label and project (legacy
         # data, LLL-631): no scoped surface may name them ---
         _, zeta, _ = call(api, '/api/collections/teams/records', {'key': 'ZETA', 'name': 'Zeta Hidden'}, su)
