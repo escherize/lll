@@ -1,9 +1,8 @@
 # Identity, organization and permissions
 
-The v1.7 release is the deployed baseline for this work. LLL-793 adds the
-per-team and workspace roles described below; its implementation branch and
-this document do not establish that a server has been upgraded. Follow
-[the migration procedure](permissions-migration.md) before enabling those roles.
+This contract describes lll 1.8.0. Upgrading from 1.7 preserves existing grants
+and member credentials. Follow [the migration procedure](permissions-migration.md)
+before enabling per-team roles; the operator explicitly assigns the first Admin.
 
 ## Organization
 
@@ -34,7 +33,7 @@ In v1.7, a member has a readable set of teams (or all current and future teams)
 and one read-only/read-write mode across that set. Different roles in different
 teams cannot be represented by that release's clients.
 
-## Per-team roles in the LLL-793 candidate
+## Per-team roles in 1.8
 
 | Team role | Effective content access |
 | --- | --- |

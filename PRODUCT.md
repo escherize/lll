@@ -57,11 +57,11 @@ static assets are embedded in the binary.
   search and live fragments read as their viewer. Personal sign-in, an
   operator's bootstrap credentials and the shared board credential serve
   different purposes; a session label adds no authority.
-- The v1.7 baseline has one read/write mode across each member's teams. The
-  LLL-793 candidate adds per-team Viewer/Editor grants and a separate workspace
-  Admin role with an access-preserving migration; this does not assert a
-  production deployment. See [the permissions contract](docs/permissions.md)
-  and [migration procedure](docs/permissions-migration.md).
+- Team data access uses Viewer/Editor grants; workspace Admin is a separate
+  responsibility. The 1.8 migration preserves legacy all-team/future-team grants
+  and credentials, promotes nobody automatically, and explains explicit
+  conversion. See [the permissions contract](docs/permissions.md) and
+  [migration procedure](docs/permissions-migration.md).
 - No build step, no JS beyond Datastar, CSS custom properties for tokens. [user-confirmed]
 
 ## Brand Commitments

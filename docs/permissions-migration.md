@@ -1,7 +1,8 @@
 # Team permissions and migration
 
-Working design for LLL-793. This document describes the proposed user model and
-verification requirements; it is not a claim that the feature has shipped.
+Upgrade procedure and authorization contract for lll 1.8.0 (LLL-793).
+The additive migration preserves existing grants and member credentials;
+per-team changes and the first workspace Admin require explicit action.
 
 ## Authorization retains its evidence
 
