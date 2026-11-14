@@ -643,9 +643,16 @@ can never do more than the creating bot. Narrowing the creating bot narrows
 it too. 'lll member list' shows which bot created it. A read-only bot, and a
 bot with no owner, cannot create bots.
 
-See 'lll bot rotate --help' for token rotation."
+See 'lll bot rotate --help' for token rotation. To stop a bot you own, 'lll bot
+disable bot-NAME' revokes its access and tokens and keeps its identity and work;
+'lll bot remove bot-NAME' removes the identity. Neither needs administrator
+credentials (see their --help)."
   }
-  let rotate_usage = if rotating { "" } else { "\n  " + flags.usage("lll bot rotate", spec, "bot-NAME") }
+  let rotate_usage = if rotating {
+    ""
+  } else {
+    "\n  " + flags.usage("lll bot rotate", spec, "bot-NAME") + "\n  lll bot disable bot-NAME [--json] [--url URL]\n  lll bot remove bot-NAME [--force] [--yes] [--json] [--url URL]"
+  }
   f"{command} - {description}\n\nUsage:\n  {flags.usage(command, spec, "bot-NAME")}{rotate_usage}\n\nThe name must start with the reserved bot- prefix, e.g. '{command} bot-myrepo'."
     + "
 
