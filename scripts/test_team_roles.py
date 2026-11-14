@@ -247,9 +247,10 @@ def main():
             checks.append('whoami names per-team roles; login readiness follows the selected team and explains Admin without content grants')
             if args.browser:
                 assert shutil.which('playwright-cli'), 'browser verification requires playwright-cli'
-                label = expect(200, '/api/collections/labels/records',
-                               {'name': 'Viewer label', 'team': finance, 'color': '#888888'}, admin)
-                expect(200, issues + '/' + ib['id'], {'labels': [label['id']]}, admin, 'PATCH')
+                for team_id, issue_id, name in [(finance, ib['id'], 'Viewer label'), (eng, ia['id'], 'Editor label')]:
+                    label = expect(200, '/api/collections/labels/records',
+                                   {'name': name, 'team': team_id, 'color': '#888888'}, admin)
+                    expect(200, issues + '/' + issue_id, {'labels': [label['id']]}, admin, 'PATCH')
                 capture = str(args.capture_dir.resolve()) if args.capture_dir else ''
                 if args.capture_dir:
                     args.capture_dir.mkdir(parents=True, exist_ok=True)

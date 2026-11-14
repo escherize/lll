@@ -647,6 +647,8 @@ input:focus, textarea:focus, select:focus {
    dialog) and in the issue page's Properties panel they are the control,
    so the checked one may spend the ember accent. */
 .ni-labels, .props .labs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+/* Issue label names remain readable in both selected and picker chips. */
+#labels-form .chip { font-size: 11px; }
 /* The four selects say what they are; the chips are the one control that
    needs telling, in the properties-panel key register. */
 .ni-key { margin-right: 3px; color: var(--text-3); font-size: 12px; }

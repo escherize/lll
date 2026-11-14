@@ -98,6 +98,7 @@ async page => {
   must(await page.locator('#comment-form,#attachment-upload').count()===0,'Viewer received a write form');
   must((await page.locator('#issue-detail').innerText()).includes('Read-only for this login.'),'Viewer role was not explained');
   must(await page.locator('#labels-form input[type="checkbox"]:checked').isDisabled(),'Viewer could remove a label');
+  must(await page.locator('#labels-form .chip').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=11),'Viewer label name is below the functional text floor');
   await shot('mobile-viewer-issue');
   await page.setViewportSize({width:1440,height:1200});
   await shot('desktop-viewer-issue');
@@ -105,6 +106,7 @@ async page => {
   await page.goto(board+'/t/ENG/issue/'+fixture.engKey);
   must(await page.locator('#state-form select').isEnabled(),'Editor lost state editing');
   must(await page.locator('#comment-form').count()===1,'Editor lost commenting');
+  must(await page.locator('#labels-form .chip').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=11),'Editor label name is below the functional text floor');
   await shot('mobile-editor-issue');
   await page.setViewportSize({width:1440,height:1200});
   await shot('desktop-editor-issue');
