@@ -1,6 +1,6 @@
 # lll case 19: invite a scoped colleague (tier 4)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
+You are a fresh agent evaluating lll through its CLI. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
 claimed success. Your controller supplies your two-digit worker number NN,
 absolute worker directory and the `lll` wrapper path when launching you.
@@ -55,13 +55,13 @@ In this case you also act as a second identity. The wrapper honours two
 settings you give it for one command, and always uses conn.txt's server:
 `LLL_TOKEN` (a token, read from a file you saved, never typed) and
 `LLL_CONFIG_HOME` (a directory inside your worker directory, holding that
-identity's own saved login). Your sandbox may refuse `export VAR=$(...)` or
-`VAR=$(...) cmd` at the prompt; a tiny script that sets the variable and runs
-`./lll` is the way around that. Files that hold tokens or passwords stay in
+identity's own saved login). If the runner does not support `export VAR=$(...)` or
+`VAR=$(...) cmd` as prompt syntax, use a script only if the runner permits
+the same child-process environment settings. A permission refusal is a harness
+blocker; do not bypass it. Files that hold tokens or passwords stay in
 your directory; never print them.
 
-This harness allows environment variables scoped to child processes; older
-fleet lessons about refusing HOME/source are historical, not lll failures.
+This harness permits environment variables scoped to child processes.
 If the wrapper or instance is unavailable, record a harness blocker and stop.
 
 ## Deliverable
@@ -70,8 +70,10 @@ Write `report.json` and `report.md` in your worker directory. If a file tool
 refuses to write them, use a shell heredoc instead:
 
     cat > report.json <<'EOF'
-    {"done": false, ...}
+    {"done": false}
     EOF
+
+Complete the full JSON shape below before returning your report.
 
 Log every CLI call in those reports. Never create/edit/delete/reconstruct
 `calls.jsonl` or any instrumentation file: the controller keeps the

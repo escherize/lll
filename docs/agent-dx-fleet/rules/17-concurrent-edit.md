@@ -1,6 +1,6 @@
 # lll case 17: concurrent description edits (tier 4)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker, working in
+You are a fresh agent evaluating lll through its CLI, working in
 pairs. Record every call, guess, failure and surprise. Truthful friction is
 more useful than a claimed success. Your controller supplies your two-digit
 worker number NN, your partner's number PP, your absolute worker directory and
@@ -81,8 +81,7 @@ runs the pinned binary there. All CLI calls must use that wrapper: run it as
 `./lll` from your worker directory. Your bot `bot-fleet-worker-NN` is already
 provisioned; no login or token creation is needed.
 
-This harness allows environment variables scoped to child processes; older
-fleet lessons about refusing HOME/source are historical, not lll failures.
+This harness permits environment variables scoped to child processes.
 If the wrapper or instance is unavailable, record a harness blocker and stop.
 
 ## Deliverable
@@ -91,8 +90,10 @@ Write `report.json` and `report.md` in your worker directory. If a file tool
 refuses to write them, use a shell heredoc instead:
 
     cat > report.json <<'EOF'
-    {"done": false, ...}
+    {"done": false}
     EOF
+
+Complete the full JSON shape below before returning your report.
 
 Log every CLI call in those reports. Never create/edit/delete/reconstruct
 `calls.jsonl` or any instrumentation file: the controller keeps the

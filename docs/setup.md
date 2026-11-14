@@ -48,7 +48,8 @@ identity. Follow [server startup](server-operations.md#start-the-server), or
 
 An existing email-and-password member can use
 `lll login --url https://your-host --email you@example.com`; the command asks
-for the password privately. A superuser is an administrator, not a member.
+for the password privately. A database superuser is an infrastructure operator,
+separate from a member with the workspace Admin role.
 See [account administration](server-operations.md#give-people-access) for that role.
 
 ## Choose a team for a repository

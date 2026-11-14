@@ -25,7 +25,7 @@ label between them. The investigation found that PocketBase reused one SQL
 join for two access checks, accidentally requiring one team to match both the
 source and destination.
 
-That discovery is a confirmed finding addressed to `pb/pb_migrations`. An
+That discovery is a confirmed finding linked to `pb/pb_migrations`. An
 agent about to edit those rules can run:
 
 ```sh
@@ -36,8 +36,8 @@ lll doc view pb-scoped-team-move-join-alias
 The record explains why the destination check needs a separate alias, how the
 failure was reproduced, and which issue carries the evidence. The next agent
 has a reason to preserve that apparently redundant check instead of
-simplifying the bug back in. These are records on lll's own development board;
-your project's findings will describe its own code.
+reintroducing the bug while simplifying the rule. These are records on lll's
+own development board; your project's findings will describe its own code.
 
 ## People, agents and watchers
 

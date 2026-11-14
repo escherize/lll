@@ -1,8 +1,9 @@
 # Release checklist
 
-A release ships the CLI binary. Every merge to main already deploys the
-server, so the release proves that the binary people install works against
-the live server, and that no half-finished work goes out with it.
+A release publishes the CLI binary. Successful gated main builds deploy the
+server separately. Before tagging, verify the exact release commit, test its
+client against the live server, and complete the compatibility and agent checks
+below. After publication, verify the installed artifacts.
 
 `mise run release-check CUT=<sha>` runs steps 2-4 and prints a table with one
 row per check. A FAIL row makes it exit non-zero; a WARN row does not. It only
@@ -22,13 +23,17 @@ An early `release-check` of the baseline is useful preparation, but does not
 replace the final `mise run release-check CUT=<sha>` before publication.
 Never tag the pre-bump baseline with the new version.
 
-## 2-4. Automated
+<a id="2-4-automated"></a>
+
+## 2-4. Run automated release checks
 
 Run `mise run release-check CUT=<sha>`. It verifies that main is green and
 deployed at the cut, no security work is half-landed, and version skew works
 in both directions. The command prints a results table with one row per check.
 
-## Client/server compatibility and migration rehearsal
+<a id="clientserver-compatibility-and-migration-rehearsal"></a>
+
+### Before step 5: rehearse compatibility and migration
 
 Before tagging, follow [the upgrade procedure](upgrading.md). Run
 `scripts/rehearse_upgrade.py` with the published baseline and the candidate
@@ -38,7 +43,9 @@ unsupported-feature refusal. Confirm a pre-upgrade backup can be started with
 its matching old binary; a version-skew warning is not a compatibility test.
 This synthetic rehearsal is separate from the agent DX fleet below.
 
-## 5. Agent DX fleet
+<a id="5-agent-dx-fleet"></a>
+
+## 5. Run the agent DX fleet
 
 Run a small agent-dx fleet: 5 workers over the cases that the release touched.
 Use a binary built from the cut. Follow `docs/agent-dx-fleet/how-to-run.md`
@@ -48,9 +55,9 @@ It passes when the board check confirms every artifact and fewer than 2
 workers hit a tool-owned failure. A repeated tool failure gets its own issue
 and a fix, then a fresh run.
 
-## 6. Release order
+<a id="6-release-order"></a>
 
-Each constraint below was found by breaking it.
+## 6. Publish the release in order
 
 1. Bump the version in `lisette.toml` and the literal in
    `src/buildinfo/version.lis`, and merge the bump. The release workflow

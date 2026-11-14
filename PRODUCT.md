@@ -16,18 +16,21 @@ ambient light.
 
 ## Product Purpose
 
-`lll` is a Linear-style issue tracker over a self-hosted PocketBase: teams,
-ENG-123 identifiers, states, priorities, projects, labels, comments. The CLI is
-the primary interface; the web board is a live read-and-light-write surface.
-Success: state of work legible in seconds, updates visible in realtime without
-reload.
+`lll` is a shared record for people and agent workers coordinating development.
+It began as a Linear-style issue tracker and now connects tasks and claims with
+durable findings, decisions, attribution and handoffs. Team roles and bounded
+bot delegation control access to that work. The CLI is the primary interface;
+the live web board lets people follow and update it. Success means workers can
+resume with the context previous workers recorded, and people can see who is
+doing what.
 
 ## Positioning
 
-Linear's model without Linear's SaaS: self-hosted, ONE binary with PocketBase
-compiled in and served in-process, agent-friendly (`--json`, NDJSON watch
-streams). Long-term it replaces Backlog.md-style file trackers for multi-agent
-development.
+A self-hosted coordination backbone for people and agent workers, distributed
+as one binary with PocketBase compiled in and served in-process. The shared
+board and agent-facing CLI keep work and its reasoning available across
+sessions and machines. People and external agent tools launch and run workers;
+lll coordinates their work through claims, a durable record and bounded access.
 
 ## Operating Context
 
@@ -62,7 +65,9 @@ static assets are embedded in the binary.
   and credentials, promotes nobody automatically, and explains explicit
   conversion. See [the permissions contract](docs/permissions.md) and
   [migration procedure](docs/permissions-migration.md).
-- No build step, no JS beyond Datastar, CSS custom properties for tokens. [user-confirmed]
+- No frontend build step. Server-rendered templates use Datastar, with
+  JavaScript for navigation, project preferences and Mermaid diagrams. CSS custom
+  properties define the design tokens.
 
 ## Brand Commitments
 
@@ -77,6 +82,7 @@ static assets are embedded in the binary.
 ## Product Principles
 
 - Reading is the product; density and scanability beat expression.
-- Everything the CLI can see, the board shows live; no stale views.
-- One binary, no pipelines: templates and assets are embedded in it.
+- Board and issue pages update subscribed content live. Pages without a live
+  subscription, including the docs index, refresh their snapshot on reload.
+- Ship templates and static assets in one binary.
 - Agents are first-class users; keep markup/ids stable for morphing.

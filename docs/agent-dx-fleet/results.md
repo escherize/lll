@@ -1,14 +1,23 @@
 # LLL-402: initial approved fleet results
 
+> Historical results from the plan approved on 2026-09-18, recorded before the
+> harness PR landed and final-main replay. Pending work below describes that
+> snapshot, not current release status. See LLL-402 for subsequent evidence and
+> [how to run](how-to-run.md) for current procedure. Original case 05 here is
+> current case 06; use [the rules directory](rules/) for the current case index.
+
+Both approved cases passed on rerun. The first case 05 run was aborted because
+its call audits were unreliable; its invocation totals remain unavailable.
+
 The user approved case 01 (find/read/comment), then case 05 (create an issue),
 with ten fresh `gpt-5.6-luna` workers per case and fresh parent-model reviewers.
 Workers ran in batches of at most three on independent local boards and bot
-identities. The other eighteen cases in the plan remain unexecuted.
+identities. The other eighteen cases in the plan had not been executed at this snapshot.
 
-This records the initial runs before the harness PR lands. Both approved cases
-must still be replayed against the final main binary. The final report and
-sanitized evidence will live on LLL-402, so recording that replay does not change
-the binary's embedded Go revision metadata and require another replay.
+At this snapshot, both approved cases still required replay against the final
+main binary. The final report and sanitized evidence were to be attached to
+LLL-402 so recording that replay would not change the binary's embedded Go
+revision metadata and require another replay.
 
 | Case | Run | Exact artifacts | Captured calls | Failed calls | Workers with tool failures | Verdict |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -35,9 +44,9 @@ Seven distinct case 01 rerun workers successfully used `search --team`.
 
 The baseline checker omitted webhooks. All ten after-only webhook checks were
 empty, but the missing before state cannot be reconstructed; baseline coverage
-remains qualified. Later runs capture all eleven member-writable collections,
-compare every seeded record, count every new record, verify exact fields and
-author/creator, and reject unrelated writes and duplicates. Adversarial oracle
+remains qualified. The recorded reruns captured all eleven member-writable collections,
+compared every seeded record, counted every new record, verified exact fields
+and author/creator, and rejected unrelated writes and duplicates. Adversarial oracle
 tests exercise those rejection paths.
 
 Case 05 run 1 stopped after six workers replaced their local `calls.jsonl` with
@@ -83,5 +92,5 @@ not a failed invocation class. LLL-485 records the output-contract decision.
 
 Baseline and aborted-run sanitized evidence are attached to LLL-402. Completed
 controllers verified all twenty owned listeners gone and removed connections,
-private data and worker HOME/cache. Remaining successful-run evidence and final
-main replay receipts will be attached before LLL-402 closes.
+private data and worker HOME/cache. At this snapshot, successful-run evidence and final
+main replay receipts still needed to be attached before LLL-402 could close.

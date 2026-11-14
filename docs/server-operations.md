@@ -68,7 +68,8 @@ Prefer a [single-use invitation](inviting.md) for someone joining through a
 browser. They keep their existing identity when already signed in, and the
 setup page gives the exact token-based CLI login.
 
-For an email-and-password account, an administrator can use:
+For an email-and-password account, an operator with database superuser
+credentials can use:
 
 <!-- example-check: skip: needs a hosted server and administrator access -->
 ```sh
@@ -101,7 +102,8 @@ The lll web board is the interface for everyday work. The separate database
 administration console can change records, collection rules and the schema,
 so lll does not expose it through the board unless you enable it deliberately.
 Start with `lll up --admin-ui` to make it available at the board's `/_/` path.
-It requires the server's administrator credentials, not a regular board login.
+It requires database superuser credentials. A regular board login or workspace
+Admin role does not authenticate to this console.
 The option controls the board's proxy; the separate API listener retains its
 own administration routes.
 
@@ -112,7 +114,7 @@ print the appropriate command. If you run a server, stop it and back up its
 data before upgrading. See [the upgrade guide](upgrading.md) for server-first
 rollout, migration checks and restoring a backup.
 
-A Homebrew install updates itself. Once a day per server, lll checks the
+Homebrew clients can update automatically. Once a day per server, lll checks the
 server's version. When the server is newer, lll starts `brew upgrade lll` in
 the background, prints one line on stderr and finishes your command
 unchanged:

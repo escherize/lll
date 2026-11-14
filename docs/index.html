@@ -386,8 +386,8 @@ keep historical proof and compatibility detail in native, no-JS disclosures. -->
   </section>
 
   <section class="s wrap" aria-labelledby="t-play">
-    <h2 class="t" id="t-play">Work together without collisions.</h2>
-    <p class="intro prose">Claims keep agents from picking up the same task. Progress appears on the live board. This playback uses real commands and captured output from lll 1.0.</p>
+    <h2 class="t" id="t-play">Coordinate work with claims.</h2>
+    <p class="intro prose">Claims record which member or labeled agent session has taken a task. Progress appears on the live board. This playback uses real commands and captured output from lll 1.0.</p>
 
     <div class="play" id="play">
       <div class="console">
@@ -421,8 +421,8 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
     <p class="intro prose">Across <strong>145 recorded test runs</strong>, agents tried finding context, creating work and collaborating without collisions. Their mistakes and failures shaped the CLI. Testing continues with every release.</p>
     <p class="memory-note">The October research record documents 2,061 agent trials. <a href="verification.html#research-at-scale">See the testing history and ongoing release checks.</a></p>
     <ul class="proof-checks">
-      <li><h3>Unsafe writes refused</h3><p><strong>434 requests across 31 write routes</strong> are refused in the board-origin test, including requests with valid cookies.</p></li>
-      <li><h3>Retries without duplicates</h3><p><strong>24 issue-create calls and 12 comment calls</strong> race with shared retry keys. Lost-response retries are checked too.</p></li>
+      <li><h3>Unsafe writes refused</h3><p>In the 11 November 2026 checks, <strong>434 requests across 31 write routes</strong> were refused in the board-origin test, including requests with valid cookies.</p></li>
+      <li><h3>Retries without duplicates</h3><p>Those checks raced <strong>24 issue-create calls and 12 comment calls</strong> with shared retry keys and verified lost-response retries.</p></li>
       <li><h3>Upgrades rehearsed</h3><p><strong>Four old/new client-server pairs</strong>, a stopped backup restore, downloaded binaries and the actual Homebrew install are checked before a release is called done.</p></li>
     </ul>
     <p class="memory-note">The scripted harness also checks all 20 task scenarios against correct and deliberately wrong workers. Those controls are separate from the real-agent counts above. <a href="verification.html#hardening-checks">See what each check proves.</a></p>
@@ -509,7 +509,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <tr><td>1</td><td>error</td></tr>
           <tr><td>2</td><td>usage: a wrong command or flag</td></tr>
           <tr><td>3</td><td>not found</td></tr>
-          <tr><td>4</td><td>refused by the server's rules</td></tr>
+          <tr><td>4</td><td>refused or conflict</td></tr>
           <tr><td>5</td><td>nothing to do</td></tr>
           <tr><td>6</td><td>not authenticated</td></tr>
           <tr><td>130</td><td>interrupted</td></tr>
@@ -532,8 +532,8 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       <nav class="docs" aria-label="Reference and operations">
       <a href="docs/"><b>Browse the guides</b><span>Setup, working with agents, invitations and reference.</span></a>
       <a href="https://github.com/escherize/lll#readme"><b>README</b><span>Why lll, installation, and your first project.</span></a>
-      <a href="cli-contract.html"><b>The 1.0 contract</b><span>Exit codes, output streams and what SemVer covers.</span></a>
-      <a href="upgrading-to-1.0.html"><b>Upgrading from 0.9</b><span>Every change a script or agent can see.</span></a>
+      <a href="cli-contract.html"><b>CLI contract</b><span>Exit codes, output streams and what SemVer covers.</span></a>
+      <a href="upgrading-to-1.0.html"><b>Upgrading from 0.9 to 1.0</b><span>Changes that can affect scripts and agents during that upgrade.</span></a>
       <a href="ci-deployment.html"><b>Hosting</b><span>Deploying the binary, CI, and the Dockerfile and fly.toml it ships with.</span></a>
       <a href="hosted-recovery.html"><b>Recovery</b><span>Backing up and restoring a hosted database.</span></a>
       <a href="api.html"><b>API</b><span>The PocketBase collections and the rules behind them.</span></a>

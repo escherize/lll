@@ -1,6 +1,6 @@
 # lll case 11: split an issue into blockers (tier 3)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
+You are a fresh agent evaluating lll through its CLI. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
 claimed success. Your controller supplies your two-digit worker number NN,
 absolute worker directory and the `lll` wrapper path when launching you.
@@ -19,13 +19,15 @@ Read every object in full before you change it.
    - `Offline mode: cache schema (worker NN)`
    - `Offline mode: sync queue (worker NN)`
    - `Offline mode: conflict banner (worker NN)`
-3. Record that the parent cannot start until each of the three is done (the
-   three block the parent).
+3. Record that the original issue cannot start until each of the three is done (the
+   three block the original issue).
 4. Ask lll what to work on next (its "what next" command, without taking it).
-   It must now offer one of the three, not the parent.
-5. Read back the parent and confirm its three blockers.
+   It must now offer one of the three, not the original issue.
+5. Read back the original issue and confirm its three blockers.
 
-The artifact is three new issues blocking the parent, and lll's next pick
+Use blocker links for this task; do not create parent/child links.
+
+The artifact is three new issues blocking the original issue, and lll's next pick
 being one of them. Do not claim anything; change nothing else.
 
 ## Environment
@@ -37,8 +39,7 @@ runs the pinned binary there. All CLI calls must use that wrapper: run it as
 `./lll` from your worker directory. Your bot `bot-fleet-worker-NN` is already
 provisioned; no login or token creation is needed.
 
-This harness allows environment variables scoped to child processes; older
-fleet lessons about refusing HOME/source are historical, not lll failures.
+This harness permits environment variables scoped to child processes.
 If the wrapper or instance is unavailable, record a harness blocker and stop.
 
 ## Deliverable
@@ -47,8 +48,10 @@ Write `report.json` and `report.md` in your worker directory. If a file tool
 refuses to write them, use a shell heredoc instead:
 
     cat > report.json <<'EOF'
-    {"done": false, ...}
+    {"done": false}
     EOF
+
+Complete the full JSON shape below before returning your report.
 
 Log every CLI call in those reports. Never create/edit/delete/reconstruct
 `calls.jsonl` or any instrumentation file: the controller keeps the

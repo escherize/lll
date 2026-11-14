@@ -30,6 +30,9 @@ alongside them.
   [.claude/skills/parallel-work/SKILL.md](.claude/skills/parallel-work/SKILL.md).
   Isolation, what a worktree does NOT isolate, and why the board's claim is the
   lock rather than Git.
+- For documentation, follow [docs/writing-style.md](docs/writing-style.md):
+  factual, straightforward prose with current behavior, proposals and
+  historical evidence clearly distinguished.
 - For Go interop, text offsets, partial I/O or reusable initialization, read
   [.claude/skills/lisette-interop/SKILL.md](.claude/skills/lisette-interop/SKILL.md).
 - For live board updates, fragment ownership, drafts or async search, read

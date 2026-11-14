@@ -4,6 +4,11 @@ Upgrade procedure and authorization contract for lll 1.8.0 (LLL-793).
 The additive migration preserves existing grants and member credentials;
 per-team changes and the first workspace Admin require explicit action.
 
+For an upgrade, start with [rollout and recovery](#rollout-and-recovery).
+To manage grants, use the [CLI workflow](#cli-workflow). The
+[authorization design](#authorization-retains-its-evidence) below explains the
+internal enforcement boundary.
+
 ## Authorization retains its evidence
 
 Apply [Parse, don’t validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)

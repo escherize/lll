@@ -1,6 +1,6 @@
 # lll case 14: recover a broken config (tier 3)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
+You are a fresh agent evaluating lll through its CLI. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
 claimed success. Your controller supplies your two-digit worker number NN,
 absolute worker directory and the `lll` wrapper path when launching you.
@@ -46,12 +46,12 @@ write configuration itself. In this case the wrapper passes no connection to lll
 settings and runs the pinned binary with your own saved configuration, under
 `home/config` in your worker directory, and that configuration is broken.
 Repair it with lll's own commands; do not edit the config file by hand. All CLI calls must use the wrapper: run it as
-`./lll` from your worker directory. Your sandbox may refuse `export VAR=$(...)`
-or `VAR=$(...) cmd` at the prompt; a tiny script that does the same is the way
-around that.
+`./lll` from your worker directory. If the runner does not support `export VAR=$(...)`
+or `VAR=$(...) cmd` as prompt syntax, use a script only if the runner permits
+the same child-process environment settings. A permission refusal is a harness
+blocker; do not bypass it.
 
-This harness allows environment variables scoped to child processes; older
-fleet lessons about refusing HOME/source are historical, not lll failures.
+This harness permits environment variables scoped to child processes.
 If the wrapper or instance is unavailable, record a harness blocker and stop.
 
 ## Deliverable
@@ -60,8 +60,10 @@ Write `report.json` and `report.md` in your worker directory. If a file tool
 refuses to write them, use a shell heredoc instead:
 
     cat > report.json <<'EOF'
-    {"done": false, ...}
+    {"done": false}
     EOF
+
+Complete the full JSON shape below before returning your report.
 
 Log every CLI call in those reports. Never create/edit/delete/reconstruct
 `calls.jsonl` or any instrumentation file: the controller keeps the

@@ -1,6 +1,6 @@
 # lll case 15: hand off bot credentials (tier 3)
 
-You are one of ten fresh agents trying lll, a CLI issue tracker. Record every
+You are a fresh agent evaluating lll through its CLI. Record every
 call, guess, failure and surprise. Truthful friction is more useful than a
 claimed success. Your controller supplies your two-digit worker number NN,
 absolute worker directory and the `lll` wrapper path when launching you.
@@ -16,7 +16,7 @@ Read every object in full before you change it.
 
 You act as a person, `fleet-worker-NN` (not a bot). You will create a bot for
 a helper agent, hand its credentials off as an environment file, rotate them
-and prove the old ones are dead.
+and verify that the old token no longer authenticates.
 
 1. Create a bot named `bot-helper-NN`, saving ONLY its environment exports
    (lll can print just those) to `helper-NN.env` in your directory. Never
@@ -26,7 +26,10 @@ and prove the old ones are dead.
 3. Read the bot first with `./lll member access bot-helper-NN`. Rotate the helper's token, saving the new exports to
    `helper-NN-rotated.env`.
 4. Prove the old token fails: run `whoami` with `helper-NN.env` again and
-   record the exit code (it should mean "not authenticated").
+   record the exit code in the call log. Expected exit code 6 ("not authenticated")
+   confirms the retired-token check passed. Record the call and actual exit
+   code, mark the refusal as expected, and distinguish it from an unexpected
+   tool-owned failure.
 5. Prove the new one works: run `whoami` with `helper-NN-rotated.env`.
 
 Exact forms, so no token is ever displayed or typed:
@@ -63,8 +66,7 @@ checks; you do not need to construct a shell credential pipeline or source
 the exports yourself. Files that hold tokens or passwords stay in your
 directory; never print them.
 
-This harness allows environment variables scoped to child processes; older
-fleet lessons about refusing HOME/source are historical, not lll failures.
+This harness permits environment variables scoped to child processes.
 If the wrapper or instance is unavailable, record a harness blocker and stop.
 
 ## Deliverable
@@ -73,8 +75,10 @@ Write `report.json` and `report.md` in your worker directory. If a file tool
 refuses to write them, use a shell heredoc instead:
 
     cat > report.json <<'EOF'
-    {"done": false, ...}
+    {"done": false}
     EOF
+
+Complete the full JSON shape below before returning your report.
 
 Log every CLI call in those reports. Never create/edit/delete/reconstruct
 `calls.jsonl` or any instrumentation file: the controller keeps the
