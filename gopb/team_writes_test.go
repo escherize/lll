@@ -14,6 +14,7 @@ import (
 type teamWritesFixture struct {
 	app          core.App
 	live, frozen *core.Record
+	operator     *core.Record
 }
 
 func newTeamWritesFixture(t *testing.T) teamWritesFixture {
@@ -34,7 +35,7 @@ func newTeamWritesFixture(t *testing.T) teamWritesFixture {
 	team := func() *core.RelationField {
 		return &core.RelationField{Name: "team", CollectionId: teams.Id, MaxSelect: 1}
 	}
-	members := core.NewBaseCollection("members")
+	members := core.NewAuthCollection("members")
 	members.Fields.Add(&core.TextField{Name: "name"}, &core.TextField{Name: "scope"}, &core.TextField{Name: "mode"},
 		&core.TextField{Name: "owner"}, &core.RelationField{Name: "teams", CollectionId: teams.Id, MaxSelect: 99})
 	save(members)
@@ -55,6 +56,16 @@ func newTeamWritesFixture(t *testing.T) teamWritesFixture {
 	registerArchivedTeamGuard(app)
 	registerAssigneeTeamGuard(app)
 	f := teamWritesFixture{app: app}
+	operators, err := app.FindCollectionByNameOrId(core.CollectionNameSuperusers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.operator = core.NewRecord(operators)
+	f.operator.SetEmail("archive-operator@testing.invalid")
+	f.operator.SetRandomPassword()
+	if err := app.Save(f.operator); err != nil {
+		t.Fatal(err)
+	}
 	f.live = f.rec(t, "teams", map[string]any{"key": "LIVE"})
 	f.frozen = f.rec(t, "teams", map[string]any{"key": "FROZEN"})
 	return f
@@ -68,6 +79,10 @@ func (f teamWritesFixture) rec(t *testing.T, collection string, data map[string]
 	}
 	r := core.NewRecord(c)
 	r.Load(data)
+	if c.IsAuth() {
+		r.SetEmail(r.GetString("name") + "@testing.invalid")
+		r.SetRandomPassword()
+	}
 	if err := f.app.Save(r); err != nil {
 		t.Fatalf("%s %v: %v", collection, data, err)
 	}
@@ -82,10 +97,13 @@ func (f teamWritesFixture) archive(t *testing.T, team *core.Record) {
 	}
 }
 
-// request runs the records API's request hooks for one write, as auth (nil
-// for none), and reports whether the write would have gone ahead.
+// request runs native request hooks. A nil fixture actor explicitly selects
+// the test operator; anonymous requests never receive production authority.
 func (f teamWritesFixture) request(t *testing.T, action string, r *core.Record, auth *core.Record) (bool, error) {
 	t.Helper()
+	if auth == nil {
+		auth = f.operator
+	}
 	e := &core.RecordRequestEvent{RequestEvent: &core.RequestEvent{App: f.app, Auth: auth}, Record: r}
 	e.Collection = r.Collection()
 	reached := false
@@ -194,8 +212,8 @@ func TestArchivedRefusalDoesNotNameAHiddenTeam(t *testing.T) {
 	f.archive(t, f.frozen)
 	outsider := f.rec(t, "members", map[string]any{"name": "outsider", "scope": "teams", "mode": "rw", "teams": []string{f.live.Id}})
 	insider := f.rec(t, "members", map[string]any{"name": "insider", "scope": "teams", "mode": "rw", "teams": []string{f.frozen.Id}})
-	if reached, err := f.request(t, "delete", issue, outsider); !reached || err != nil {
-		t.Fatalf("the guard answered for a team the caller cannot see: %v", err)
+	if reached, err := f.request(t, "delete", issue, outsider); reached || err == nil || strings.Contains(err.Error(), "FROZEN") {
+		t.Fatalf("hidden team leaked or supplied authority: reached=%v error=%v", reached, err)
 	}
 	_, err := f.request(t, "delete", issue, insider)
 	refusedAsArchived(t, err, "FROZEN")
