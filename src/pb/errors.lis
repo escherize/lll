@@ -93,6 +93,10 @@ pub enum ServerCode {
   NotClaimed,
   /// A member with an owner would have wider access than its owner.
   BotExceedsOwner,
+  /// A legacy scope/mode mutation cannot represent per-team grants.
+  TeamRolesRequired,
+  /// Replacing an all/future-team grant requires explicit conversion.
+  ConfirmAllTeamConversion,
   /// PocketBase refused a password change's oldPassword field: the current
   /// password given is not the member's. PocketBase's own validation, read
   /// from the field it names rather than from its wording.
@@ -108,6 +112,8 @@ pub fn code_named(code: string) -> Option<ServerCode> {
     "claim_changed" => Some(ServerCode.ClaimChanged),
     "not_claimed" => Some(ServerCode.NotClaimed),
     "bot_exceeds_owner" => Some(ServerCode.BotExceedsOwner),
+    "team_roles_required" => Some(ServerCode.TeamRolesRequired),
+    "confirm_all_team_conversion" => Some(ServerCode.ConfirmAllTeamConversion),
     _ => None,
   }
 }
@@ -121,6 +127,7 @@ fn is_refusal(code: Option<ServerCode>) -> bool {
     Some(ServerCode.ClaimChanged) => true,
     Some(ServerCode.NotClaimed) => true,
     Some(ServerCode.BotExceedsOwner) => false,
+    Some(ServerCode.TeamRolesRequired) | Some(ServerCode.ConfirmAllTeamConversion) => true,
     Some(ServerCode.OldPasswordRejected) => false,
     None => false,
   }

@@ -170,7 +170,7 @@ fn member_invite(input: flags.CommandInput) -> Result<output.Output, pb.CliError
   let mut out = output.none()
   if keys.is_empty() {
     let created = create_member_as(ctx, su, name, email, password, [], None)?
-    out = out.notice(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite }, [])}")
+    out = out.notice(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadWrite, .. }, [])}")
     out = out.notice("send them this (below, on stdout); the password is shown once and stored nowhere")
     for line in invite_lines(created.name, email, password, base, cfg.team) {
       out = out.line(line)
@@ -189,7 +189,7 @@ fn member_invite(input: flags.CommandInput) -> Result<output.Output, pb.CliError
     team_ids = team_ids.append(team.id)
   }
   let created = create_member_as(ctx, su, name, email, password, team_ids, Some(mode))?
-  out = out.notice(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Teams(team_ids), mode }, keys)}")
+  out = out.notice(f"invited {created.name} <{email}>: {describe_access(models.Access { reach: models.Reach.Teams(team_ids), mode, .. }, keys)}")
   out = out.notice("send them this (below, on stdout); the password is shown once and stored nowhere")
   for line in invite_lines(created.name, email, password, base, keys[0]) {
     out = out.line(line)

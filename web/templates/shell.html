@@ -22,16 +22,17 @@
 <button id="nav-toggle" class="nav-toggle" type="button" aria-controls="rail" aria-expanded="false">Navigation</button>
 <nav id="rail" class="rail" aria-label="Workspace">
 <div class="workspace"><span class="mark">L</span> lll</div>
-<a data-g="b" href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
+{{if or .TeamKey .Teams}}<a data-g="b" href="{{.BoardBase}}"{{if eq .Active "board"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-board"/></svg> Board</a>
 <a data-g="i" href="{{.BoardBase}}issues"{{if eq .Active "issues"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-issues"/></svg> All issues</a>
 {{if .Me}}<a data-g="m" href="{{.BoardBase}}?assignee={{.Me}}" title="Issues assigned to {{.Me}}"{{if eq .Active "mine"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-me"/></svg> My issues</a>
 {{end}}<a data-g="p" href="{{.BoardBase}}projects"{{if eq .Active "projects"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-project"/></svg> Projects</a>
 <a data-g="d" href="{{.BoardBase}}docs"{{if eq .Active "docs"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-doc"/></svg> Docs</a>
 <a data-g="s" href="{{.BoardBase}}search"{{if eq .Active "search"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-search"/></svg> Search{{/* The palette's only advertisement. A shortcut nobody is told about is a shortcut nobody uses. */}}<kbd class="rail-kbd" title="Open the jump palette: Cmd+K, or Ctrl+K">⌘K</kbd></a>
-{{template "rail-teams" .Teams}}
+{{template "rail-teams" .Teams}}{{end}}
 {{if not .Scoped}}{{template "rail-favorites" .Favorites}}
 {{template "rail-views" .Views}}
 <a href="{{.BoardBase}}settings"{{if eq .Active "settings"}} class="active"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Settings</a>{{end}}
+{{if .PermissionManagement}}<a href="/permissions"{{if eq .Active "permissions"}} class="active" aria-current="page"{{end}}><svg width="14" height="14"><use href="#ic-settings"/></svg> Permissions</a>{{end}}
 {{if .BotOwner}}{{template "rail-bot" .}}{{end}}
 {{/* /me is open to every viewer, scoped or not: who this browser is, and
      the member's CLI login. Root-relative, like the page itself. */}}<a href="/me" title="Who this browser is signed in as, and your CLI login"><svg width="14" height="14"><use href="#ic-me"/></svg> Your login</a>

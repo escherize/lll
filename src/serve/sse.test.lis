@@ -66,7 +66,7 @@ fn fresh_description_snapshots_are_targeted_and_scope_is_respected() {
 /// not read.
 fn reader(key: string) -> Reader {
   let settings = config.given(config.Config { url: "http://127.0.0.1:1", .. }, config.Sources { .. }, config.Env { .. })
-  Reader { key, client: pb.Client.new(settings), scoped: key != "board", writes: true }
+  Reader { key, client: pb.Client.new(settings), scoped: key != "board", writes: true, access: None }
 }
 
 // LLL-658: a client gets only what was read as its own reader, whatever

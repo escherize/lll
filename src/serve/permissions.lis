@@ -1,0 +1,353 @@
+import "go:encoding/json"
+import "go:net/http"
+import "go:net/url"
+
+import "models"
+import "pb"
+import "writes"
+
+pub struct PermissionPersonVM {
+  pub id: string,
+  pub name: string,
+  pub selected: bool,
+}
+
+pub struct PermissionTeamVM {
+  pub id: string,
+  pub key: string,
+  pub name: string,
+  pub role: string,
+  pub effective: string,
+  pub choice: string,
+  pub limited: bool,
+  pub all: bool,
+  pub member: string,
+  pub revision: string,
+}
+
+pub struct PermissionDiffVM {
+  pub team: string,
+  pub before: string,
+  pub after: string,
+}
+
+pub struct PermissionFormVM {
+  pub member: string,
+  pub revision: string,
+  pub team: string,
+  pub role: string,
+  pub workspace_role: string,
+  pub convert_all: bool,
+}
+
+pub struct PermissionsVM {
+  pub people: Slice<PermissionPersonVM>,
+  pub selected: models.MemberPermissions,
+  pub teams: Slice<PermissionTeamVM>,
+  pub owner: string,
+  pub creator: string,
+  pub ready: bool,
+  pub can_assign_admin: bool,
+  pub error: string,
+  pub needs_admin: bool,
+  pub success: string,
+  pub review: bool,
+  pub changed: bool,
+  pub changes: Slice<PermissionDiffVM>,
+  pub future_lost: bool,
+  pub legacy_lost: bool,
+  pub workspace_before: string,
+  pub workspace_after: string,
+  pub request: PermissionFormVM,
+}
+
+#[json]
+struct PermissionEventRef { member: models.MemberId, created: string }
+
+fn permission_label(value: string) -> string {
+  match value {
+    "none" => "No access",
+    "viewer" => "Viewer",
+    "editor" => "Editor",
+    "admin" => "Admin",
+    "member" => "Member",
+    _ => "Unknown",
+  }
+}
+
+fn permissions_vm(
+  index: models.PermissionsIndex,
+  wanted: string,
+) -> Result<PermissionsVM, pb.CliError> {
+  let selected = if wanted == "" {
+    index.members.get(0)
+  } else {
+    index.members.find(|m| m.id.string() == wanted)
+  }
+  let Some(member) = selected else {
+    return Err(pb.fail(
+      pb.ErrorKind.NotFound,
+      "This member is no longer available. Open Permissions again to choose a current member.",
+    ))
+  }
+  let people = index.members.map(|m| PermissionPersonVM {
+    id: m.id.string(),
+    name: m.name,
+    selected: m.id == member.id,
+  })
+  let granted = member.teams.filter(|t| t.role != "none")
+  let ungranted = member.teams.filter(|t| t.role == "none")
+  let ordered = granted.append(ungranted...)
+  let teams = ordered.map(|t| PermissionTeamVM {
+    id: t.id.string(),
+    key: t.key,
+    name: t.name,
+    role: permission_label(t.role),
+    effective: permission_label(t.effective),
+    choice: t.role,
+    limited: t.role != t.effective,
+    all: member.all,
+    member: member.id.string(),
+    revision: member.revision,
+  })
+  let owner = index.members
+    .find(|m| m.id == member.owner)
+    .map_or("", |m| m.name)
+  let creator = index.members
+    .find(|m| m.id == member.created_by)
+    .map_or("", |m| m.name)
+  Ok(
+    PermissionsVM {
+      people,
+      selected: member,
+      teams,
+      owner,
+      creator,
+      ready: true,
+      can_assign_admin: member.kind == "person" && member.owner.is_empty(),
+      ..,
+    },
+  )
+}
+
+fn permission_page_render(
+  w: http.ResponseWriter,
+  view: Viewing,
+  vm: PermissionsVM,
+  status: int,
+) {
+  let me = match view.viewer {
+    Viewer.Full => "",
+    Viewer.Scoped(s) => s.member.map_or("", |m| m.name),
+  }
+  let rail = rail_for(
+    view.reads,
+    view.viewer,
+    "permissions",
+    me,
+    models.Team { .. },
+  )
+  let html = match render("permissions-page", PageVM { rail, page: vm }) {
+    Ok(html) => html,
+    Err(_) => {
+      http.Error(w, "Could not render Permissions. Try again.", 500)
+      return
+    },
+  }
+  w.Header().Set("Cache-Control", "no-store")
+  w.Header().Set("Content-Type", "text/html; charset=utf-8")
+  w.WriteHeader(status)
+  let _ = w.Write(html.bytes())
+}
+
+fn permission_page_error(
+  w: http.ResponseWriter,
+  view: Viewing,
+  error: pb.CliError,
+) {
+  let status = if error.status > 0 { error.status } else { 503 }
+  let message = if status >= 500 {
+    "Could not load Permissions. Try again when the server is available."
+  } else {
+    error.message
+  }
+  permission_page_render(
+    w,
+    view,
+    PermissionsVM { error: message, needs_admin: status == 403, .. },
+    status,
+  )
+}
+
+fn permissions_page(w: http.ResponseWriter, r: Ref<http.Request>, view: Viewing) {
+  let index = match writes.permission_members(view.reads) {
+    Ok(index) => index,
+    Err(error) => {
+      permission_page_error(w, view, error)
+      return
+    },
+  }
+  let mut vm = match permissions_vm(index, query_param(r, "member")) {
+    Ok(vm) => vm,
+    Err(error) => {
+      permission_page_error(w, view, error)
+      return
+    },
+  }
+  // The query is not a success claim. Confirm the immutable event exists and
+  // belongs to the member before showing a recorded-change acknowledgement.
+  if wants_raw(w, r) {
+    match json.MarshalIndent(vm.selected, "", "  ") {
+      Ok(bytes) => write_raw(
+        w,
+        f"# Permissions for {vm.selected.name}\n\n```json\n{bytes as string}\n```\n",
+      ),
+      Err(_) => http.Error(w, "Could not format permissions.", 500),
+    }
+    return
+  }
+  let event = query_param(r, "event")
+  if event != "" {
+    if let Ok(raw) = view.reads.get(
+      f"/api/collections/permission_events/records/{url.PathEscape(event)}",
+    ) {
+      let mut recorded = PermissionEventRef { .. }
+      let decoded = json.Unmarshal(raw.bytes(), &recorded)
+      if decoded.is_ok() && recorded.member == vm.selected.id {
+        vm.success = f"Permission change recorded at {recorded.created}."
+      }
+    }
+  }
+  permission_page_render(w, view, vm, 200)
+}
+
+fn permissions_change(
+  w: http.ResponseWriter,
+  r: Ref<http.Request>,
+  view: Viewing,
+) {
+  let mut form = r.Clone(r.Context())
+  form.Body = Some(http.MaxBytesReader(w, form.Body, 8192))
+  let requested = PermissionFormVM {
+    member: form.PostFormValue("member"),
+    revision: form.PostFormValue("revision"),
+    team: form.PostFormValue("team"),
+    role: form.PostFormValue("role"),
+    workspace_role: form.PostFormValue("workspace_role"),
+    convert_all: form.PostFormValue("convert_all") == "1",
+  }
+  let action = form.PostFormValue("action")
+  if action != "preview" && action != "apply" {
+    http.Error(w, "Choose Preview before applying a permission change.", 400)
+    return
+  }
+  let index = match writes.permission_members(view.reads) {
+    Ok(index) => index,
+    Err(error) => {
+      permission_page_error(w, view, error)
+      return
+    },
+  }
+  let mut vm = match permissions_vm(index, requested.member) {
+    Ok(vm) => vm,
+    Err(error) => {
+      permission_page_error(w, view, error)
+      return
+    },
+  }
+  let mutation = if requested.workspace_role != "" {
+    if requested.team != "" || requested.role != "" || requested.convert_all {
+      http.Error(w, "Change one team role or workspace role at a time.", 400)
+      return
+    }
+    let Some(role) = models.WorkspaceRole.parse(requested.workspace_role) else {
+      http.Error(w, "Choose Member or Admin.", 400)
+      return
+    }
+    models.PermissionMutation.Workspace(role)
+  } else {
+    let Some(team) = vm.selected.teams.find(|t| t.id.string() == requested.team) else {
+      http.Error(w, "Choose a current team.", 400)
+      return
+    }
+    let Some(role) = models.TeamRole.parse(requested.role) else {
+      http.Error(w, "Choose No access, Viewer or Editor.", 400)
+      return
+    }
+    models.PermissionMutation.Team {
+      team: team.id,
+      role,
+      convert_all: requested.convert_all,
+    }
+  }
+  let observed = models.MemberPermissions {
+    revision: requested.revision,
+    ..vm.selected,
+  }
+  let preview = action == "preview"
+  let reply = match writes.permission_change(
+    view.reads,
+    observed,
+    mutation,
+    preview,
+  ) {
+    Ok(reply) => reply,
+    Err(error) => {
+      vm.error = error.message
+      vm.teams = vm.teams.map(|t| if t.id == requested.team {
+        PermissionTeamVM { choice: requested.role, ..t }
+      } else {
+        t
+      })
+      let status = if error.status > 0 { error.status } else { 503 }
+      permission_page_render(w, view, vm, status)
+      return
+    },
+  }
+  if reply.applied {
+    let self_demoted = reply.after.id.string() ==
+    pb.token_subject(view.reads.token()).unwrap_or("") &&
+    reply.after.workspace_role == "member"
+    if self_demoted && reply.before.workspace_role == "admin" {
+      permission_page_render(
+        w,
+        view,
+        PermissionsVM {
+          success: "Your workspace Admin role has been removed. Your team grants are unchanged. Open Your login to continue with your remaining access.",
+          ..,
+        },
+        200,
+      )
+      return
+    }
+    let mut target = f"/permissions?member={url.QueryEscape(reply.after.id.string())}"
+    if reply.event_id != "" {
+      target = f"{target}&event={url.QueryEscape(reply.event_id)}"
+    }
+    http.Redirect(w, r, target, 303)
+    return
+  }
+  let mut changes: Slice<PermissionDiffVM> = []
+  for before in reply.before.teams {
+    if let Some(after) = reply.after.teams.find(|t| t.id == before.id) {
+      if before.role != after.role {
+        changes = changes.append(
+          PermissionDiffVM {
+            team: before.key,
+            before: permission_label(before.role),
+            after: permission_label(after.role),
+          },
+        )
+      }
+    }
+  }
+  vm.review = true
+  vm.changed = reply.before.revision != reply.after.revision
+  vm.changes = changes
+  vm.future_lost = reply.future_team_access_lost
+  vm.legacy_lost = reply.legacy_management_lost
+  vm.workspace_before = permission_label(reply.before.workspace_role)
+  vm.workspace_after = permission_label(reply.after.workspace_role)
+  vm.request = requested
+  permission_page_render(w, view, vm, 200)
+}

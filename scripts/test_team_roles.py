@@ -10,11 +10,13 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import tempfile
 import urllib.error
 import urllib.request
 from board_startup import wait_for_endpoints
+from browser_session import new_session, open_session, diagnostic, require_result
 
 
 def port():
@@ -27,6 +29,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary', type=Path)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--browser', action='store_true', help='require browser coverage of the real mobile management page')
+    parser.add_argument('--capture-dir', type=Path)
     args = parser.parse_args()
     binary = str(args.binary.resolve())
     checks = []
@@ -41,7 +45,8 @@ def main():
             child = subprocess.Popen([binary, 'up', '--no-open', '--pb-dir', str(root / 'data'), '--port', str(port())],
                                      cwd=root, env=env, stdout=output, stderr=subprocess.STDOUT)
         try:
-            api = wait_for_endpoints(log)['db_url']
+            endpoint = wait_for_endpoints(log)
+            api, board = endpoint['db_url'], endpoint['board_url']
 
             def call(path, body=None, token='', method=None):
                 req = urllib.request.Request(api + path, method=method,
@@ -227,6 +232,29 @@ def main():
             expect(400, management + bot['id'], {'revision': bot_snapshot['revision'], 'workspace_role': 'admin'}, manager_token)
             expect(400, members + '/' + bot['id'], {'workspace_role': 'admin'}, admin, 'PATCH')
             change(alice, manager_token, workspace_role='member')
+            if args.browser:
+                assert shutil.which('playwright-cli'), 'browser verification requires playwright-cli'
+                capture = str(args.capture_dir.resolve()) if args.capture_dir else ''
+                if args.capture_dir:
+                    args.capture_dir.mkdir(parents=True, exist_ok=True)
+                fixture = {'api': api, 'board': board, 'capture': capture, 'managerToken': manager_token,
+                    'aliceToken': alice_token, 'boardToken': env['LLL_BOARD_TOKEN'], 'alice': alice['id'], 'bot': bot['id'], 'broad': broad['id'], 'finance': finance,
+                    'engKey': 'ENG-' + str(ia['number']), 'finKey': 'FIN-' + str(ib['number'])}
+                script = (Path(__file__).resolve().parent / 'browser_permissions.js').read_text()
+                script = script.replace('__PERMISSION_FIXTURE__', json.dumps(fixture))
+                session = new_session()
+                try:
+                    open_session(session, 'about:blank')
+                    result = subprocess.run(['playwright-cli', '-s=' + session, 'run-code', script],
+                        capture_output=True, text=True, timeout=100)
+                    if result.returncode != 0 or '### Error' in result.stdout:
+                        raise AssertionError(diagnostic(result.stdout + result.stderr, board,
+                            [manager_token, alice_token, admin]))
+                    require_result(result, 'permissions mobile, preview/apply, conversion, bot explanation and per-team controls passed', board)
+                finally:
+                    subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=15)
+                checks.append('real mobile/desktop management, preview/apply, conversion warning, bot explanation and team-specific board controls')
+
             # Self-grants are explicit and leave the same audit evidence.
             self_grant = change(manager, manager_token, team=finance, role='viewer')
             assert self_grant['event_id']

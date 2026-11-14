@@ -26,7 +26,7 @@ import "realtime"
 /// The board login's key is "board": only its rail carries the workspace's
 /// favorites and saved views. `scoped` and `writes` are presentation
 /// (shown_refs, the claim button).
-struct Reader { key: string, client: pb.Client, scoped: bool, writes: bool }
+struct Reader { key: string, client: pb.Client, scoped: bool, writes: bool, access: Option<models.Access> }
 
 /// One connected browser: its scope ("board:KEY:ORDER" for a team's board
 /// view in one card ordering, or "issue:KEY-1"), who it reads as, and the
@@ -195,14 +195,16 @@ fn reader_of(v: Viewing) -> Reader {
     Viewer.Full => "board",
     Viewer.Scoped(s) => s.member.map_or_else(
       || f"link:{v.reads.token()}",
-      |m| f"member:{m.access.mode.writes()}:{m.access.every_team()}:{m.token}",
+      |m| f"member:{m.access.signature()}:{m.token}",
     ),
   }
+  let access = match v.viewer { Viewer.Full => None, Viewer.Scoped(s) => s.member.map(|m| m.access) }
   Reader {
     key,
     client: v.reads,
     scoped: viewer_is_scoped(v.viewer),
     writes: viewer_writes(v.viewer),
+    access,
   }
 }
 
@@ -296,12 +298,12 @@ fn events_stream(
   // the stream, not what keeps data out of it. A stream also closes when its
   // read credential expires or the member's mode or reach changed since it
   // opened: the browser reconnects and reads with what is current.
-  let opened_writes = viewer_writes(v.viewer)
+  let opened_access = viewer_access_signature(v.viewer)
   let opened_scoped = viewer_is_scoped(v.viewer)
   let still_allowed = || {
     if pb.token_expired(v.reads.token()) { return false }
     let current = board_viewer(ctx, r)
-    if viewer_writes(current) != opened_writes || viewer_is_scoped(current) != opened_scoped { return false }
+    if viewer_access_signature(current) != opened_access || viewer_is_scoped(current) != opened_scoped { return false }
     match current {
       Viewer.Full => true,
       Viewer.Scoped(now) => if page == "issue" && key != "" { now.sees_issue(key) } else { now.teams.contains(team) },
@@ -667,7 +669,7 @@ fn issue_for_reader(hub: Hub, reader: Reader, key: string, client_id: int) -> Re
     description = issue.description
     vm = issue_fields_vm(ctx, issue, [], shown)?
     // A reader that cannot write never gets a claim button (LLL-545).
-    if !reader.writes { vm.claim_read_only = true }
+    if !reader.access.map_or(reader.writes, |a| a.writes_team(issue.team)) { vm.claim_read_only = true }
   }
   let html = render("issue-detail", vm)?
   let _ = hub.broadcast.send(Broadcast {

@@ -102,10 +102,10 @@ fn identity_recovery_quotes_display_names() {
 #[test]
 fn member_commands_declare_every_verb_and_alias() {
   let names = flags.command_names(member_commands())
-  for want in ["list", "add", "create", "invite", "passes", "remove", "delete", "access", "set-password"] {
+  for want in ["list", "add", "create", "invite", "passes", "remove", "delete", "access", "permissions", "set-password"] {
     assert names.find(|n| n == want).is_some()
   }
-  assert names.length() == 9
+  assert names.length() == 10
 }
 
 /// A summary is the verb's row in `lll member --help`; an empty one is a
@@ -215,9 +215,9 @@ fn member_list_team_filter_keeps_who_can_reach_it() {
   let fleet = models.TeamId("t1")
   let ops = models.TeamId("t2")
   assert reaches_team(None, fleet)
-  assert reaches_team(Some(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadOnly }), fleet)
-  assert reaches_team(Some(models.Access { reach: models.Reach.Teams([fleet]), mode: models.Mode.ReadWrite }), fleet)
-  assert !reaches_team(Some(models.Access { reach: models.Reach.Teams([ops]), mode: models.Mode.ReadWrite }), fleet)
+  assert reaches_team(Some(models.Access { reach: models.Reach.Every, mode: models.Mode.ReadOnly, .. }), fleet)
+  assert reaches_team(Some(models.Access { reach: models.Reach.Teams([fleet]), mode: models.Mode.ReadWrite, .. }), fleet)
+  assert !reaches_team(Some(models.Access { reach: models.Reach.Teams([ops]), mode: models.Mode.ReadWrite, .. }), fleet)
 }
 
 // LLL-688: the invite probes web_url with the superuser token, so only a

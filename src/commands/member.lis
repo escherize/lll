@@ -215,6 +215,16 @@ fn member_access(
   let Some(a) = access else {
     return ""
   }
+  if !a.editors.is_empty() {
+    let editors = a.editors.map(|id| keys.get(id).unwrap_or("a hidden team"))
+    if a.every_team() { return f"Viewer every team; Editor {strings.Join(editors, ", ")}" }
+    let roles = a.team_ids().map(|id| {
+      let key = keys.get(id).unwrap_or("a hidden team")
+      let role = if a.writes_team(id) { "Editor" } else { "Viewer" }
+      f"{key} {role}"
+    })
+    return strings.Join(roles, ", ")
+  }
   if a.every_team() { return f"{a.mode.wire()} every team (server-wide)" }
   let mut named: Slice<string> = []
   let mut hidden = 0
@@ -823,7 +833,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   let mut mode = current.mode
   if p.given("--read-only") { mode = models.Mode.ReadOnly }
   if p.given("--read-write") { mode = models.Mode.ReadWrite }
-  let wanted = models.Access { reach, mode }
+  let wanted = models.Access { reach, mode, .. }
   let patch = writes.MemberPatch {
     scope: Some(wanted.scope_wire()),
     teams: Some(wanted.team_ids()),
@@ -832,7 +842,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   }
   if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), m.id, patch) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
-    if e.has_code(pb.ServerCode.BotExceedsOwner) { return Err(e) }
+    if e.has_code(pb.ServerCode.BotExceedsOwner) || e.has_code(pb.ServerCode.TeamRolesRequired) { return Err(e) }
     let status = e.status
     if status == 400 || status == 403 || status == 404 {
       return Err(pb.fail(
@@ -877,6 +887,7 @@ fn recorded_access(m: models.Member) -> models.Access {
       models.Access {
         reach: models.Reach.Teams([]),
         mode: models.Mode.ReadWrite,
+        ..,
       },
     )
 }
