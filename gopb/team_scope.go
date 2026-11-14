@@ -104,6 +104,10 @@ func registerMemberScopeDefault(app core.App) {
 		return e.Next()
 	})
 	app.OnRecordCreate("members").BindFunc(func(e *core.RecordEvent) error {
+		if e.Record.Collection().Fields.GetByName("workspace_role") != nil && e.Record.GetString("workspace_role") == "" {
+			e.Record.Set("workspace_role", "member")
+		}
+
 		def := access{all: true, rw: true}
 		if e.Record.GetString("kind") == botKind && e.Record.GetString("owner") != "" {
 			if owner, err := e.App.FindRecordById("members", e.Record.GetString("owner")); err == nil {
@@ -163,7 +167,7 @@ func registerMemberScopeDefault(app core.App) {
 		if before.GetString("created_by") != "" && e.Record.GetString("created_by") == "" {
 			e.Record.RefreshTokenKey()
 		}
-		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode", "editor_teams"} {
+		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode", "editor_teams", "workspace_role"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				if err := checkOwner(e.App, e.Record); err != nil {
 					return err
@@ -180,7 +184,7 @@ func registerMemberScopeDefault(app core.App) {
 
 // guardedMemberFields are the member columns a save must not roll back:
 // who owns and created the member, what it may do, and its token key.
-var guardedMemberFields = []string{"kind", "owner", "created_by", "scope", "teams", "mode", "editor_teams", core.FieldNameTokenKey}
+var guardedMemberFields = []string{"kind", "owner", "created_by", "scope", "teams", "mode", "editor_teams", "workspace_role", core.FieldNameTokenKey}
 
 // keepCommitted returns the member as stored now and keeps, on m, every
 // committed value the save did not itself change (LLL-709 review F5,
@@ -325,6 +329,10 @@ func setAccess(m *core.Record, a access) {
 // when its kind, owner, created_by or access changes. Narrowing an owner is not checked: what it owns narrows with it.
 // An owner id that does not exist is left to the relation validator.
 func checkOwner(app core.App, m *core.Record) error {
+	if m.GetString("workspace_role") == "admin" && (m.GetString("kind") != "person" || m.GetString("owner") != "") {
+		return router.NewBadRequestError("only an independent person can be a workspace administrator", nil)
+	}
+
 	own := ownAccess(m)
 	for _, id := range own.editors {
 		if !own.sees(id) {
@@ -547,6 +555,9 @@ func refuseReadOnlyWrites(re *core.RequestEvent) error {
 	if c, err := re.App.FindCachedCollectionByNameOrId(name); err == nil {
 		name = c.Name
 	}
+	if isWorkspaceAdmin(re.Auth) && (name == "teams" || name == "members") {
+		return re.Next()
+	}
 	if readOnlyWritable[name] || (name == "members" && method == http.MethodPatch && re.Request.PathValue("id") == re.Auth.Id) {
 		return re.Next()
 	}
@@ -589,12 +600,14 @@ func registerAccessRoute(routes *router.Router[*core.RequestEvent]) {
 			}
 		}
 		return re.JSON(http.StatusOK, map[string]any{
-			"permissions_version": 2,
-			"id":                  re.Auth.Id,
-			"name":                re.Auth.GetString("name"),
-			"rw":                  acc.rw,
-			"all":                 acc.all,
-			"teams":               teams,
+			"permissions_version":    2,
+			"workspace_role":         re.Auth.GetString("workspace_role"),
+			"can_manage_permissions": isWorkspaceAdmin(re.Auth),
+			"id":                     re.Auth.Id,
+			"name":                   re.Auth.GetString("name"),
+			"rw":                     acc.rw,
+			"all":                    acc.all,
+			"teams":                  teams,
 		})
 	})
 }

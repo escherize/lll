@@ -201,9 +201,9 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         assert not any(m['name'] in ('Second Person', 'Nobody', 'Late Person')
                        for m in call(api, '/api/collections/members/records?perPage=200', token=su)[1]['items'])
 
-        # Only a full read-write person (or a superuser) mints (LLL-629): a
+        # An administrator, legacy full person or superuser mints (LLL-629): a
         # scoped guest's own invites would outlive its removal.
-        WHO = 'only a person with read-write access to every team, or a superuser, can create invites'
+        WHO = 'only a workspace administrator, a person with read-write access to every team, or a superuser, can create invites'
         guest = member('guest', scope='teams', teams=[alpha['id']], mode='rw')
         reader = member('reader', scope='teams', teams=[alpha['id']], mode='ro')
         for tok in [reader, guest]:

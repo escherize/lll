@@ -113,6 +113,11 @@ def main():
                 status, _ = call(members + suffix, token=alice_token)
                 assert status == (200 if not suffix else 403), (suffix, status)
             expect(404, members + '/' + alice['id'], {'editor_teams': [finance]}, alice_token, 'PATCH')
+            for field, value in [('editor_teams+', [finance]), ('workspace_role', 'admin'), ('workspace_role+', 'admin')]:
+                status, _ = call(members + '/' + alice['id'], {field: value}, alice_token, 'PATCH')
+                assert status in (400, 403, 404), ('self-escalation modifier', field, status)
+            unchanged = expect(200, members + '/' + alice['id'], token=admin)
+            assert unchanged['editor_teams'] == [eng] and unchanged['workspace_role'] == 'member'
             checks.append('legacy grant changes refuse before writes; profiles retain roles; role-field filter probes and self-escalation refused')
             bot_body = {'name': 'bot-review', 'kind': 'bot', 'owner': alice['id'], 'email': 'bot@local.invalid',
                         'password': 'isolated-bot-password', 'passwordConfirm': 'isolated-bot-password'}
@@ -135,6 +140,89 @@ def main():
             future_roles = expect(200, '/api/lll/access', token=token(reader))['teams']
             assert any(t['id'] == future and t['role'] == 'viewer' for t in future_roles)
             checks.append('legacy all-team Editor and Viewer grants retain future-team semantics')
+
+            # Workspace responsibility is independent of team-content grants.
+            manager = person('workspace-admin', scope='teams', mode='ro', teams=[], workspace_role='admin')
+            manager_token = token(manager)
+            management = '/api/lll/permissions/'
+            expect(403, '/api/lll/permissions', token=alice_token)
+            expect(403, '/api/lll/permissions', token=token(broad))
+            expect(200, '/api/lll/permissions', token=manager_token)
+            expect(404, issues + '/' + ib['id'], token=manager_token)
+            assert expect(200, '/api/lll/access', token=manager_token)['teams'] == []
+            expect(200, '/api/collections/teams/records', {'key': 'ADM', 'name': 'Admin-created team'}, manager_token)
+            # Ordinary provisioning by an explicit administrator defaults to no data.
+            empty = expect(200, members, {'name': 'new-member', 'kind': 'person', 'email': 'new@local.invalid',
+                'password': 'isolated-person-password', 'passwordConfirm': 'isolated-person-password'}, manager_token)
+            assert empty['scope'] == 'teams' and empty['teams'] == [] and empty['mode'] == 'ro'
+            assert empty['workspace_role'] == 'member'
+            checks.append('explicit administration manages metadata without implicit private content; provisioning defaults to no team access')
+
+            def change(target, actor, **operation):
+                snapshot = expect(200, management + target['id'], token=actor)
+                return expect(200, management + target['id'], {'revision': snapshot['revision'], **operation}, actor)
+
+            events_path = '/api/collections/permission_events/records'
+            def event_count():
+                return expect(200, events_path, token=admin)['totalItems']
+            snapshot = expect(200, management + manager['id'], token=manager_token)
+            expect(409, management + manager['id'], {'revision': snapshot['revision'], 'workspace_role': 'member'}, manager_token)
+            snapshot = expect(200, management + alice['id'], token=manager_token)
+            count = event_count()
+            preview = expect(200, management + alice['id'], {'revision': snapshot['revision'], 'team': eng,
+                'role': 'editor', 'preview': True}, manager_token)
+            assert preview['applied'] is False and event_count() == count
+            applied = expect(200, management + alice['id'], {'revision': snapshot['revision'], 'team': eng,
+                'role': 'editor'}, manager_token)
+            assert applied['applied'] is True and applied['event_id']
+            assert event_count() == count + 1
+            expect(409, management + alice['id'], {'revision': snapshot['revision'], 'team': finance,
+                'role': 'editor'}, manager_token)
+            assert event_count() == count + 1
+            event = expect(200, events_path + '/' + applied['event_id'], token=manager_token)
+            assert event['actor'] == manager['id'] and event['actor_kind'] == 'person'
+            assert event['member'] == alice['id'] and 'editor_teams' in event['changes']
+            expect(403, events_path, {'member': alice['id'], 'actor_kind': 'system'}, admin)
+            status, _ = call(events_path + '/' + applied['event_id'], {'changes': {}}, admin, 'PATCH')
+            assert status in (400, 403), status
+            assert expect(200, events_path, token=alice_token)['items'] == []
+            checks.append('preview is side-effect free; apply is revision-bound and audited; stale, forged and rewritten history refused')
+            # Role promotion preserves the exact data grant and cannot promote bots.
+            before_grants = expect(200, members + '/' + alice['id'], token=admin)
+            promotion = change(alice, manager_token, workspace_role='admin')
+            after_grants = expect(200, members + '/' + alice['id'], token=admin)
+            assert promotion['after']['workspace_role'] == 'admin'
+            assert all(before_grants[k] == after_grants[k] for k in ['scope', 'teams', 'mode', 'editor_teams'])
+            bot_snapshot = expect(200, management + bot['id'], token=manager_token)
+            expect(400, management + bot['id'], {'revision': bot_snapshot['revision'], 'workspace_role': 'admin'}, manager_token)
+            expect(400, members + '/' + bot['id'], {'workspace_role': 'admin'}, admin, 'PATCH')
+            change(alice, manager_token, workspace_role='member')
+            # Self-grants are explicit and leave the same audit evidence.
+            self_grant = change(manager, manager_token, team=finance, role='viewer')
+            assert self_grant['event_id']
+            expect(200, issues + '/' + ib['id'], token=manager_token)
+            status, _ = call(issues + '/' + ib['id'], {'title': 'admin viewer denied'}, manager_token, 'PATCH')
+            assert status in (400, 403, 404)
+            checks.append('role changes preserve data grants, bot promotion is refused, and private-team self-grants are explicit and audited')
+            snapshot = expect(200, management + broad['id'], token=manager_token)
+            operation = {'revision': snapshot['revision'], 'team': finance, 'role': 'viewer'}
+            refused = expect(400, management + broad['id'], operation, manager_token)
+            assert refused['data']['code'] == 'confirm_all_team_conversion'
+            count = event_count()
+            conversion = expect(200, management + broad['id'], {**operation, 'convert_all_teams': True, 'preview': True}, manager_token)
+            assert conversion['future_team_access_lost'] is True and event_count() == count
+            converted = expect(200, management + broad['id'], {**operation, 'convert_all_teams': True}, manager_token)
+            assert converted['future_team_access_lost'] is True and converted['after']['all'] is False
+            new_team = expect(200, '/api/collections/teams/records', {'key': 'NEW', 'name': 'Created after conversion'}, admin)['id']
+            new_issue = expect(200, issues, {'team': new_team, 'title': 'new', 'state': 'todo'}, admin)
+            expect(404, issues + '/' + new_issue['id'], token=token(broad))
+            checks.append('all/future-team conversion requires explicit confirmation and accurately previews the loss of future coverage')
+            # Revoked managers cannot use an old token to change another grant.
+            snapshot = expect(200, management + alice['id'], token=manager_token)
+            expect(200, members + '/' + manager['id'], {'workspace_role': 'member'}, admin, 'PATCH')
+            expect(403, management + alice['id'], {'revision': snapshot['revision'], 'team': finance,
+                'role': 'editor'}, manager_token)
+            checks.append('revoked administration is checked afresh and cannot mutate grants using an existing token')
         finally:
             child.terminate()
             child.wait(timeout=30)

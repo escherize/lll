@@ -94,7 +94,8 @@ type inviteGrant struct {
 	rw    bool
 }
 
-// mayInvite is true only for a full member: a person with no owner and
+// mayInvite admits an explicit workspace administrator or a legacy full person
+// with no owner and
 // read-write access to every team (LLL-629). A person joined through an
 // invite is independent of whoever invited it, so deleting or narrowing the
 // inviter does not reach it. Minting is therefore a way to outlive a
@@ -105,13 +106,13 @@ type inviteGrant struct {
 // invites.
 func mayInvite(creator *core.Record) bool {
 	own := ownAccess(creator)
-	return creator.GetString("kind") != botKind && creator.GetString("owner") == "" && own.all && own.rw
+	return creator.GetString("kind") != botKind && creator.GetString("owner") == "" && ((own.all && own.rw) || isWorkspaceAdmin(creator))
 }
 
 // mayNotInvite is the refusal for a caller mayInvite rejects. It names who
 // can mint, so the caller knows whom to ask.
 func mayNotInvite(name string) string {
-	return "only a person with read-write access to every team, or a superuser, can create invites; " + name +
+	return "only a workspace administrator, a person with read-write access to every team, or a superuser, can create invites; " + name +
 		" cannot. Ask one of them to run 'lll invite create'; 'lll whoami' shows your access"
 }
 
@@ -209,7 +210,7 @@ func redeemInviteFor(app core.App, code, name, memberID string, now time.Time, e
 			// The creator's access is read again now: narrowing or deleting
 			// the creator voids what it handed out and nobody redeemed yet.
 			creator, err := tx.FindRecordById("members", invite.GetString("creator"))
-			if err != nil || !mayInvite(creator) || !grantAllowed(effectiveAccess(tx, creator), grant) {
+			if err != nil || !mayInvite(creator) || !grantAllowed(inviteAuthority(tx, creator), grant) {
 				return errInviteVoid
 			}
 		} else if len(grant.teams) == 0 {
@@ -401,7 +402,7 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 			if !mayInvite(creator) {
 				return re.ForbiddenError(mayNotInvite(creator.GetString("name")), nil)
 			}
-			acc = effectiveAccess(re.App, creator)
+			acc = inviteAuthority(re.App, creator)
 		}
 		teams, err := inviteTeamIDs(re.App, acc, body.Teams)
 		if err != nil {
@@ -592,4 +593,13 @@ func checkChosenName(app core.App, m *core.Record) error {
 		return router.NewBadRequestError("the name '"+name+"' is taken on this board: pick another", nil)
 	}
 	return nil
+}
+
+// Administration can grant a team without silently reading its content.
+// A legacy full person retains the narrower historical invitation privilege.
+func inviteAuthority(app core.App, creator *core.Record) access {
+	if isWorkspaceAdmin(creator) {
+		return access{all: true, rw: true}
+	}
+	return effectiveAccess(app, creator)
 }

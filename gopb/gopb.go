@@ -89,6 +89,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 	registerMemberNameGuard(app)
 	registerMemberUpdateTx(app) // after the name guard: name lock, then transaction
 	registerMemberScopeDefault(app)
+	registerPermissionEvents(app)
 	registerRosterScope(app)
 	registerScopedRefGuard(app)
 	registerFilterNameGuards(app)
@@ -159,6 +160,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		registerBotRoutes(e.Router)
 		registerProjectCascadeRoutes(e.Router)
 		registerAccessRoute(e.Router)
+		registerPermissionRoutes(e.Router)
 		registerLinkTokenRoute(e.Router)
 		registerInviteRoutes(e.Router)
 		registerReferenceRoutes(e.Router, &issueUpdates)
@@ -345,5 +347,5 @@ func apiDiscovery(version, boardURL string) map[string]any {
 // feature ships; never remove or rename one. A server without the list
 // predates it, so the CLI asks that feature's own support route instead.
 func Capabilities() []string {
-	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents", "bots.lifecycle", "projects.cascade"}
+	return []string{"issues.idempotency", "comments.idempotency", "webhooks.activity", "issues.parents", "bots.lifecycle", "projects.cascade", "permissions.teams", "permissions.workspace"}
 }

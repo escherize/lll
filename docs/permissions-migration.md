@@ -41,6 +41,14 @@ operations already supported for those records. Archived teams remain read-only.
 An Editor cannot manage workspace roles, team memberships or team lifecycle.
 A Viewer reads team content and can manage their own favorites/saved views.
 
+Compatibility exception: an existing all-team read-write grant retains its
+historical team lifecycle powers and, for independent people, invitation powers.
+The management API identifies this as `legacy_management`. It does not promote
+the person to Admin or authorize changes to other people's grants. Converting
+to explicit team roles removes both that legacy grant and future-team coverage;
+the preview reports both losses. Operators can assign Admin separately before
+converting a legacy manager.
+
 Workspace administrators can manage people and team grants. Administration
 alone does not make private team content readable. Granting oneself access is
 an explicit, audited grant operation, subject to the same revision check and
@@ -141,3 +149,28 @@ The second command checks new mixed-role enforcement, source/destination
 moves, native/custom route agreement, self-escalation refusal, hidden roster
 probes, safe legacy mutation refusal, bot inheritance and owner revocation.
 Both commands own throwaway databases and accept no hosted server URL.
+
+
+## Workspace administration and receipts
+
+Migration assigns every existing identity workspace role Member. Initial Admin
+promotion is an explicit operator action. Admin is available only to independent
+people; bot ownership and workspace responsibility cannot be combined.
+Administration reveals team and member metadata needed to manage grants, not
+private issues or documents. Self-granting private team access requires the
+same revision-guarded operation and audit event as granting another person.
+
+The permissions endpoint exposes a revision and a preview. Applying a change
+against an older revision returns a conflict without modifying grants. Unknown
+operation fields and invalid roles are rejected before a writable target exists.
+A workspace role change preserves data grants exactly. A non-operator cannot
+remove the final Admin; an operator can recover or reassign administration.
+
+Permission events contain only the changed grant/ownership/responsibility fields
+and the authenticated actor. They contain no token, password or email. The grant
+and its event share one transaction: failure to save the event rolls back the
+grant. Preview writes nothing. Native member mutations and automatic delegation
+narrowing are recorded too; automatic changes have actor kind System. Stale
+profile saves preserve committed grant fields and do not invent duplicate events.
+Events cannot be created through the records API or updated, even by operators;
+operator deletion is explicit retention, as for the existing content audit log.
