@@ -62,6 +62,10 @@ owner removal leaves bots denied and preserves attribution. Existing unowned,
 operator-created bots retain their explicit grants. This migration does not
 create a new workspace-owned service-account lifecycle or transfer personal
 bots automatically when somebody leaves.
+Disabling, removing or rotating a personal bot remains the owner's or
+infrastructure operator's authority; a workspace Admin role alone does not
+confer it. A creating bot may rotate its own bounded workers while its current
+owner and grant conditions still hold, but cannot disable or remove them.
 
 ## Compatibility contract
 
@@ -206,6 +210,8 @@ operator-only and cannot be combined with the role-management flags.
 
 `--preview` returns before/after states and no audit event. To convert a retained
 all-team grant, supply `--convert-all-teams` explicitly and inspect the reported
-loss of future-team coverage and legacy management rights. Use `--revision` when
+loss of future-team coverage and legacy management rights. Keeping the selected
+team's role unchanged still performs an explicitly requested conversion, so all
+current roles can be preserved while future-team coverage is removed. Use `--revision` when
 applying a previously reviewed preview; a stale revision is a refusal, not an
 automatic retry. JSON stdout contains only the state or receipt.

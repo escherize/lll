@@ -265,7 +265,7 @@ func (manager permissionManager) prepare(id string, change permissionChange) (*w
 				return nil, router.NewBadRequestError("team not found", nil)
 			}
 			wanted := []string{"none", "viewer", "editor"}[change.role]
-			if roleOf(next, change.team) != wanted {
+			if roleOf(next, change.team) != wanted || (next.all && change.convertAll) {
 				if next.all && !change.convertAll {
 					return nil, withCode(router.NewBadRequestError("this replaces an all-current-and-future-team grant; preview with convert_all_teams and confirm that future-team coverage is lost", nil), "confirm_all_team_conversion")
 				}

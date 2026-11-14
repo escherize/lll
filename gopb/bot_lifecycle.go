@@ -95,7 +95,7 @@ func lifecycleAuthority(app core.App, caller, bot *core.Record) error {
 	if !rosterSees(app, caller, bot) {
 		return missingLifecycleBot()
 	}
-	return router.NewForbiddenError("only the bot's owner or an administrator can disable or remove it", nil)
+	return router.NewForbiddenError("only the bot's owner or an operator (superuser) can disable or remove it", nil)
 }
 
 // Use PocketBase's relation metadata, including future relation fields. An

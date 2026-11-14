@@ -195,3 +195,64 @@ func TestPermissionChangeRollsBackWhenItsAuditCannotBeSaved(t *testing.T) {
 		t.Fatal("failed audit left a partial permission mutation")
 	}
 }
+
+func TestExplicitWildcardConversionPreservesUnchangedCurrentRoles(t *testing.T) {
+	for _, role := range []teamRole{teamViewer, teamEditor} {
+		t.Run([]string{"none", "viewer", "editor"}[role], func(t *testing.T) {
+			f, re := newPermissionFixture(t)
+			f.other.Set("mode", modeName(role == teamEditor))
+			if err := f.app.Save(f.other); err != nil {
+				t.Fatal(err)
+			}
+			before := permissionEventCount(t, f.app)
+			preview, err := withPermissionManager(re, func(manager permissionManager) (permissionPlan, error) {
+				snapshot, err := manager.snapshot(f.other.Id)
+				if err != nil {
+					return permissionPlan{}, err
+				}
+				proof, err := manager.prepare(f.other.Id, permissionChange{revision: snapshot.Revision, team: f.alpha, role: role, convertAll: true})
+				if err != nil {
+					return permissionPlan{}, err
+				}
+				return proof.execute(true)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.After.All || !preview.FutureTeamAccessLost || preview.LegacyManagementLost != (role == teamEditor) || preview.Before.Revision == preview.After.Revision {
+				t.Fatal("explicit conversion ignored when the selected role stayed the same")
+			}
+			if permissionEventCount(t, f.app) != before || !ownAccess(f.reload(t, f.other)).all {
+				t.Fatal("conversion preview wrote")
+			}
+			for i, team := range preview.Before.Teams {
+				if preview.After.Teams[i].Role != team.Role {
+					t.Fatal("current role changed during conversion")
+				}
+			}
+		})
+	}
+}
+
+func TestWorkspaceAdministrationDoesNotTakeAnotherPersonsBot(t *testing.T) {
+	f, re := newPermissionFixture(t)
+	bot := f.save(t, "bot-other-owner", botKind, f.other.Id, "", nil)
+	err := lifecycleAuthority(f.app, re.Auth, bot)
+	var api *router.ApiError
+	if !errors.As(err, &api) || (api.Status != http.StatusForbidden && api.Status != http.StatusNotFound) {
+		t.Fatalf("Admin acquired another person's bot lifecycle: %v", err)
+	}
+	if token, _, err := rotateBot(f.app, re.Auth, bot.GetString("name"), 3600); err == nil || token != "" {
+		t.Fatal("Admin acquired another person's bot credential")
+	}
+	if f.reload(t, bot).TokenKey() != bot.TokenKey() {
+		t.Fatal("refused Admin rotation retired the owner's credential")
+	}
+	if err := lifecycleAuthority(f.app, f.other, bot); err != nil {
+		t.Fatalf("owner control refused: %v", err)
+	}
+	token, _, err := rotateBot(f.app, f.other, bot.GetString("name"), 3600)
+	if err != nil || !f.tokenWorks(token) {
+		t.Fatalf("owner rotation control failed: %v", err)
+	}
+}
