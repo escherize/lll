@@ -93,6 +93,23 @@ async page => {
   must(await page.getByRole('button',{name:'Edit description',exact:true}).isVisible(),'Engineering Editor lost editing controls');
   await page.goto(board+'/t/FIN/issue/'+fixture.finKey);
   must(await page.getByRole('button',{name:'Edit description',exact:true}).count()===0,'Finance Viewer received editing controls');
+  must(await page.getByRole('button',{name:'Edit issue title',exact:true}).count()===0,'Viewer received title editing');
+  must(await page.locator('#state-form select').isDisabled(),'Viewer received an enabled state control');
+  must(await page.locator('#comment-form,#attachment-upload').count()===0,'Viewer received a write form');
+  must((await page.locator('#issue-detail').innerText()).includes('Read-only for this login.'),'Viewer role was not explained');
+  must(await page.locator('#labels-form input[type="checkbox"]:checked').isDisabled(),'Viewer could remove a label');
+  await shot('mobile-viewer-issue');
+  await page.setViewportSize({width:1440,height:1200});
+  await shot('desktop-viewer-issue');
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(board+'/t/ENG/issue/'+fixture.engKey);
+  must(await page.locator('#state-form select').isEnabled(),'Editor lost state editing');
+  must(await page.locator('#comment-form').count()===1,'Editor lost commenting');
+  await shot('mobile-editor-issue');
+  await page.setViewportSize({width:1440,height:1200});
+  await shot('desktop-editor-issue');
+  await page.setViewportSize({width:390,height:844});
+
   const denied=await page.goto(board+'/permissions');
   must(denied.status()===403,'ordinary member opened administration');
   await cookie(fixture.boardToken);

@@ -232,8 +232,24 @@ def main():
             expect(400, management + bot['id'], {'revision': bot_snapshot['revision'], 'workspace_role': 'admin'}, manager_token)
             expect(400, members + '/' + bot['id'], {'workspace_role': 'admin'}, admin, 'PATCH')
             change(alice, manager_token, workspace_role='member')
+            assert 'per-team roles' in cli(alice_token, 'whoami').stdout
+            for key, actor, expected in [('ENG', alice_token, 'ready: lll issue create'),
+                                         ('FIN', alice_token, 'ready (read-only): lll issue list'),
+                                         ('ENG', manager_token, 'workspace Admin with no team content grants')]:
+                home = root / ('login-' + key + ('-admin' if actor == manager_token else ''))
+                home.mkdir()
+                login_env = {k: v for k, v in env.items() if not k.startswith('LLL_')}
+                login_env.update(HOME=str(home), LLL_TEAM=key)
+                logged = subprocess.run([binary, 'login', '--url', api, '--token', '-'], cwd=home,
+                    env=login_env, input=actor+'\n', capture_output=True, text=True, timeout=30)
+                assert logged.returncode == 0 and expected in logged.stdout, (key, logged.stdout, logged.stderr)
+                assert actor not in logged.stdout + logged.stderr
+            checks.append('whoami names per-team roles; login readiness follows the selected team and explains Admin without content grants')
             if args.browser:
                 assert shutil.which('playwright-cli'), 'browser verification requires playwright-cli'
+                label = expect(200, '/api/collections/labels/records',
+                               {'name': 'Viewer label', 'team': finance, 'color': '#888888'}, admin)
+                expect(200, issues + '/' + ib['id'], {'labels': [label['id']]}, admin, 'PATCH')
                 capture = str(args.capture_dir.resolve()) if args.capture_dir else ''
                 if args.capture_dir:
                     args.capture_dir.mkdir(parents=True, exist_ok=True)
@@ -253,7 +269,7 @@ def main():
                     require_result(result, 'permissions mobile, preview/apply, conversion, bot explanation and per-team controls passed', board)
                 finally:
                     subprocess.run(['playwright-cli', '-s=' + session, 'close'], capture_output=True, timeout=15)
-                checks.append('real mobile/desktop management, preview/apply, conversion warning, bot explanation and team-specific board controls')
+                checks.append('real mobile/desktop preview/apply and stale refusal; legacy conversion and bot explanation; Editor controls enabled; Viewer title/description edits absent, state/label controls disabled and composer/upload absent')
 
             # Self-grants are explicit and leave the same audit evidence.
             self_grant = change(manager, manager_token, team=finance, role='viewer')

@@ -630,7 +630,7 @@ pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, pb.CliError> 
 /// "read-write, every team (server-wide)", "read-only, no teams". One wording for whoami,
 /// invite and access.
 fn describe_access(access: models.Access, keys: Slice<string>) -> string {
-  let m = if access.mode.writes() { "read-write" } else { "read-only" }
+  let m = if !access.mode.writes() && access.has_writes() { "per-team roles" } else if access.mode.writes() { "read-write" } else { "read-only" }
   if access.every_team() { return f"{m}, every team (server-wide)" }
   if keys.is_empty() { return f"{m}, no teams" }
   let noun = if keys.length() == 1 { "team" } else { "teams" }
