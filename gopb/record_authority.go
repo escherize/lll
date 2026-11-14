@@ -123,6 +123,14 @@ func nativeMemberAuthority(e *core.RecordRequestEvent, actor *core.Record) error
 	if actor.GetString("kind") == botKind {
 		owner = actor.GetString("owner")
 	}
+	// Preserve the domain refusal for an unowned bot trying to own its
+	// worker. This lookup is only of the current actor itself, so it cannot
+	// disclose another member while refusing a departed owner relationship.
+	if owner == "" && actor.GetString("kind") == botKind && e.Record.GetString("owner") == actor.Id {
+		if err := checkOwner(e.App, e.Record); err != nil {
+			return err
+		}
+	}
 	if owner == "" || e.Record.GetString("owner") != owner || !(acc.hasWrite() || isWorkspaceAdmin(actor)) {
 		return router.NewForbiddenError("current authority does not allow provisioning this owned bot", nil)
 	}
