@@ -131,6 +131,10 @@ def main():
 
             verify(before, 'before')
             verify(after, 'before')
+            if args.permissions:
+                _, error = cli(after, 'member', 'access', owner['name'], '--workspace-role', 'admin', '--preview', code=1)
+                assert 'upgrade the server' in error
+                report['old_server_permission_management'] = 'safe capability refusal before any grant write'
             support_status, _ = request('/api/lll/comments/idempotency')
             if support_status == 404:
                 count = len(json.loads(cli(after, 'issue', 'view', key, '--json')[0])['comments'])

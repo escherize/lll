@@ -1,0 +1,238 @@
+import "go:bufio"
+import "go:os"
+import "go:strings"
+
+import "display"
+import "flags"
+import "models"
+import "output"
+import "pb"
+import "writes"
+
+fn permission_change_flags() -> Slice<flags.Flag> {
+  [
+    flags.Flag {
+      name: "--role",
+      value: true,
+      values: ["none", "viewer", "editor"],
+      help: "set one team's role; requires --team",
+      ..,
+    },
+    flags.Flag {
+      name: "--workspace-role",
+      value: true,
+      values: ["member", "admin"],
+      help: "set workspace responsibility; grants no team content by itself",
+      ..,
+    },
+    flags.Flag {
+      name: "--preview",
+      help: "show the proposed change without applying it",
+      ..,
+    },
+    flags.Flag {
+      name: "--convert-all-teams",
+      help: "explicitly replace an all-current-and-future-team grant with current team roles; removes its legacy management rights",
+      ..,
+    },
+    flags.Flag {
+      name: "--revision",
+      value: true,
+      hint: "REVISION",
+      help: "apply only against this previously observed permission revision",
+      ..,
+    },
+  ]
+}
+
+fn member_permissions_spec() -> Slice<flags.Flag> {
+  let mut spec = [
+    flags.Flag {
+      name: "--team",
+      value: true,
+      repeat: true,
+      hint: "KEY",
+      help: "team whose role changes; exactly one with --role",
+      ..,
+    },
+    flags.Flag {
+      name: "--json",
+      help: "print observed permissions or the preview/apply receipt as JSON",
+      ..,
+    },
+  ]
+  for flag in permission_change_flags() {
+    spec = spec.append(flag)
+  }
+  with_admin_flags(spec)
+}
+
+fn member_permissions(
+  input: flags.CommandInput,
+) -> Result<output.Output, pb.CliError> {
+  let p = input.parsed
+  let name = p.first()
+  let changing = p.given("--role") || p.given("--workspace-role")
+  if p.positional_count() > 1 || (changing && name == "") {
+    return Err(flags.usage_error(
+      "usage: lll member permissions [NAME] [--team KEY --role none|viewer|editor | --workspace-role member|admin] [--preview]",
+    ))
+  }
+  if p.given("--role") && p.given("--workspace-role") {
+    return Err(flags.usage_error(
+      "choose one team role or workspace role per change",
+    ))
+  }
+  if !changing && (p.given("--team") || p.given("--preview") ||
+  p.given("--convert-all-teams") ||
+  p.given("--revision")) {
+    return Err(flags.usage_error(
+      "permission change flags require --role or --workspace-role",
+    ))
+  }
+  if p.given("--role") && p.all("--team").length() != 1 {
+    return Err(flags.usage_error("--role requires exactly one --team KEY"))
+  }
+  if p.given("--workspace-role") && (p.given("--team") ||
+  p.given("--convert-all-teams")) {
+    return Err(flags.usage_error(
+      "workspace responsibility changes do not take team flags",
+    ))
+  }
+  let token = superuser_auth(
+    input.ctx,
+    given_admin_login(input.ctx.settings, p, bufio.NewReader(os.Stdin))?,
+  )?
+  let ctx = input.ctx.with_token(token, None)
+  let index = writes.permission_members(ctx)?
+  if name == "" {
+    if p.given("--json") { return json_value(index, "permission roster") }
+    let mut out = output.none()
+    for m in index.members {
+      let legacy = if m.legacy_management {
+        " · legacy all-team management"
+      } else {
+        ""
+      }
+      out = out.line(
+        f"{display.table_cell(m.name)}\t{m.workspace_role}{legacy}",
+      )
+    }
+    return Ok(out)
+  }
+  let Some(found) = index.members.find(
+    |m| strings.EqualFold(m.name, name) || m.id.string() == name,
+  ) else {
+    return Err(pb.fail(
+      pb.ErrorKind.NotFound,
+      f"no member named '{name}'; see 'lll member permissions'",
+    ))
+  }
+  if !changing {
+    if p.given("--json") { return json_value(found, "member permissions") }
+    return Ok(permission_lines(found, index.members))
+  }
+  let observed = if p.given("--revision") {
+    models.MemberPermissions { revision: p.one("--revision"), ..found }
+  } else {
+    found
+  }
+  let mutation = if p.given("--workspace-role") {
+    let Some(role) = models.WorkspaceRole.parse(p.one("--workspace-role")) else {
+      return Err(flags.usage_error("workspace role must be member or admin"))
+    }
+    models.PermissionMutation.Workspace(role)
+  } else {
+    let key = p.one("--team")
+    let Some(team) = found.teams.find(
+      |t| strings.EqualFold(t.key, key) || t.id.string() == key,
+    ) else {
+      return Err(pb.fail(
+        pb.ErrorKind.NotFound,
+        f"no team named '{key}' in the workspace",
+      ))
+    }
+    let Some(role) = models.TeamRole.parse(p.one("--role")) else {
+      return Err(flags.usage_error("team role must be none, viewer or editor"))
+    }
+    models.PermissionMutation.Team {
+      team: team.id,
+      role,
+      convert_all: p.given("--convert-all-teams"),
+    }
+  }
+  let reply = writes.permission_change(
+    ctx,
+    observed,
+    mutation,
+    p.given("--preview"),
+  )?
+  if p.given("--json") { return json_value(reply, "permission receipt") }
+  let status = if reply.applied { "Applied" } else { "Preview only" }
+  let mut out = output.none().line(f"{status}: {reply.after.name}")
+  if reply.future_team_access_lost {
+    out = out.line(
+      "This conversion removes access to teams created in the future.",
+    )
+  }
+  if reply.legacy_management_lost {
+    out = out.line(
+      "This conversion removes the legacy all-team management grant; assign Admin separately if needed.",
+    )
+  }
+  out = out.then(permission_lines(reply.after, index.members))
+  if reply.event_id != "" { out = out.line(f"Audit event: {reply.event_id}") }
+  Ok(out)
+}
+
+fn permission_lines(
+  member: models.MemberPermissions,
+  roster: Slice<models.MemberPermissions>,
+) -> output.Output {
+  let mut out = output
+    .none()
+    .line(
+      f"{display.table_cell(member.name)} · workspace {member.workspace_role}",
+    )
+  if !member.owner.is_empty() {
+    let owner = roster
+      .find(|m| m.id == member.owner)
+      .map_or("unavailable owner", |m| m.name)
+    out = out.line(f"Personal bot owner: {display.table_cell(owner)}")
+  }
+  if !member.created_by.is_empty() {
+    let creator = roster
+      .find(|m| m.id == member.created_by)
+      .map_or("unavailable creator", |m| m.name)
+    out = out.line(
+      f"Delegated by: {display.table_cell(creator)}; cannot exceed its authority",
+    )
+  }
+  if member.all {
+    out = out.line(
+      f"Default: {member.default_role} in all current and future teams",
+    )
+  }
+  if member.legacy_management {
+    out = out.line(
+      "Legacy all-team management grant retained; this does not confer workspace Admin",
+    )
+  }
+  let visible = member.teams.filter(
+    |t| t.role != "none" || t.effective != "none",
+  )
+  for t in visible {
+    let limited = if t.role == t.effective {
+      ""
+    } else {
+      f" (effective {t.effective}; bounded by owner/creator)"
+    }
+    out = out.line(f"  {t.key}: {t.role}{limited}")
+  }
+  if visible.is_empty() {
+    out = out.line(
+      "No team data access. Workspace administration does not add it.",
+    )
+  }
+  out.line(f"Revision: {member.revision}")
+}

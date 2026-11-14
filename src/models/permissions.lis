@@ -1,0 +1,95 @@
+/// Team grants use a closed vocabulary; the wire form is emitted only at the
+/// transport seam. Workspace responsibility is a separate type.
+pub enum TeamRole {
+  NoAccess,
+  Viewer,
+  Editor,
+}
+
+impl TeamRole {
+  pub fn parse(value: string) -> Option<TeamRole> {
+    match value {
+      "none" => Some(TeamRole.NoAccess),
+      "viewer" => Some(TeamRole.Viewer),
+      "editor" => Some(TeamRole.Editor),
+      _ => None,
+    }
+  }
+
+  pub fn wire(self) -> string {
+    match self {
+      TeamRole.NoAccess => "none",
+      TeamRole.Viewer => "viewer",
+      TeamRole.Editor => "editor",
+    }
+  }
+}
+
+pub enum WorkspaceRole {
+  Member,
+  Admin,
+}
+
+impl WorkspaceRole {
+  pub fn parse(value: string) -> Option<WorkspaceRole> {
+    match value {
+      "member" => Some(WorkspaceRole.Member),
+      "admin" => Some(WorkspaceRole.Admin),
+      _ => None,
+    }
+  }
+
+  pub fn wire(self) -> string {
+    match self {
+      WorkspaceRole.Member => "member",
+      WorkspaceRole.Admin => "admin",
+    }
+  }
+}
+
+#[json]
+pub struct PermissionTeam {
+  pub id: TeamId,
+  pub key: string,
+  pub name: string,
+  pub role: string,
+  pub effective: string,
+}
+
+/// An observed server state, not a durable authorization proof. A mutation
+/// includes its revision; the server constructs fresh write authority inside
+/// the transaction and refuses stale state or revoked administration.
+#[json]
+pub struct MemberPermissions {
+  pub id: MemberId,
+  pub name: string,
+  pub kind: string,
+  pub owner: MemberId,
+  pub created_by: MemberId,
+  pub workspace_role: string,
+  pub all: bool,
+  pub legacy_management: bool,
+  pub default_role: string,
+  pub teams: Slice<PermissionTeam>,
+  pub revision: string,
+}
+
+#[json]
+pub struct PermissionsIndex {
+  pub members: Slice<MemberPermissions>,
+}
+
+#[json]
+pub struct PermissionPlan {
+  pub before: MemberPermissions,
+  pub after: MemberPermissions,
+  pub future_team_access_lost: bool,
+  pub legacy_management_lost: bool,
+  pub event_id: string,
+  pub applied: bool,
+}
+
+pub enum PermissionMutation {
+  Team { team: TeamId, role: TeamRole, convert_all: bool },
+  Workspace(WorkspaceRole),
+}

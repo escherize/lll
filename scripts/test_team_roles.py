@@ -158,6 +158,36 @@ def main():
             assert empty['workspace_role'] == 'member'
             checks.append('explicit administration manages metadata without implicit private content; provisioning defaults to no team access')
 
+            def cli(actor, *argv, code=0, stdin=None):
+                current = dict(env, LLL_URL=api, LLL_TOKEN=actor)
+                result = subprocess.run([binary, *argv], cwd=root, env=current, input=stdin,
+                    capture_output=True, text=True, timeout=30)
+                assert result.returncode == code, (argv, result.returncode, result.stdout, result.stderr)
+                assert env['LLL_ADMIN_PASSWORD'] not in result.stdout + result.stderr
+                return result
+
+            observed = json.loads(cli(manager_token, 'member', 'permissions', empty['name'], '--json').stdout)
+            cli_preview = json.loads(cli(manager_token, 'member', 'access', empty['name'], '--team', 'ENG',
+                '--role', 'editor', '--preview', '--json').stdout)
+            assert cli_preview['applied'] is False
+            assert expect(200, members + '/' + empty['id'], token=admin)['editor_teams'] == []
+            cli_applied = json.loads(cli(manager_token, 'member', 'access', empty['name'], '--team', 'ENG',
+                '--role', 'editor', '--revision', observed['revision'], '--json').stdout)
+            assert cli_applied['applied'] is True and cli_applied['event_id']
+            stale = cli(manager_token, 'member', 'access', empty['name'], '--team', 'ENG', '--role', 'viewer',
+                '--revision', observed['revision'], code=4)
+            assert 'permissions changed' in stale.stderr.lower()
+            cli(manager_token, 'member', 'access', empty['name'], '--role', 'editor', '--workspace-role', 'admin', code=2)
+            # Inherited operator credentials must not elevate a configured member.
+            refused = cli(alice_token, 'member', 'permissions', empty['name'], code=4)
+            assert 'workspace administrator' in refused.stderr.lower()
+            explicit = cli(alice_token, 'member', 'access', empty['name'], '--workspace-role', 'admin', '--preview',
+                '--json', '--admin-email', env['LLL_ADMIN_EMAIL'], '--admin-password', '-',
+                stdin=env['LLL_ADMIN_PASSWORD'] + '\n')
+            assert json.loads(explicit.stdout)['after']['workspace_role'] == 'admin'
+            assert expect(200, members + '/' + empty['id'], token=admin)['workspace_role'] == 'member'
+            checks.append('CLI reads roles, previews/applies revision-bound changes, refuses stale or ambiguous commands and uses operator credentials only explicitly')
+
             def change(target, actor, **operation):
                 snapshot = expect(200, management + target['id'], token=actor)
                 return expect(200, management + target['id'], {'revision': snapshot['revision'], **operation}, actor)

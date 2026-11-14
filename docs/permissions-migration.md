@@ -174,3 +174,38 @@ narrowing are recorded too; automatic changes have actor kind System. Stale
 profile saves preserve committed grant fields and do not invent duplicate events.
 Events cannot be created through the records API or updated, even by operators;
 operator deletion is explicit retention, as for the existing content audit log.
+
+
+## CLI workflow
+
+Inspect the workspace roster and a person's grants with an Admin member token
+(or explicit operator credentials):
+
+```sh
+lll member permissions
+lll member permissions Alice --json
+lll member access Alice --team ENG --role editor --preview --json
+lll member access Alice --team ENG --role editor --revision REVISION_FROM_PREVIEW
+lll member access Alice --team FIN --role viewer
+```
+
+`--role none` removes only the named team's grant. `--workspace-role admin`
+changes responsibility independently of data grants. To assign the initial Admin,
+the operator authenticates explicitly without saving or sharing its credential:
+
+```sh
+lll member access Alice --workspace-role admin \
+  --admin-email operator@example.com --admin-password -
+```
+
+A configured member token takes precedence over inherited operator environment
+credentials. The password `-` is read privately from stdin. These commands never
+print credentials. New role-management commands check server capabilities and
+refuse older servers before sending a mutation. Legacy scope/mode flags remain
+operator-only and cannot be combined with the role-management flags.
+
+`--preview` returns before/after states and no audit event. To convert a retained
+all-team grant, supply `--convert-all-teams` explicitly and inspect the reported
+loss of future-team coverage and legacy management rights. Use `--revision` when
+applying a previously reviewed preview; a stale revision is a refusal, not an
+automatic retry. JSON stdout contains only the state or receipt.
