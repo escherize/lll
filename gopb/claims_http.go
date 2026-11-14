@@ -60,8 +60,8 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
-			return updateAssignment(tx, re.Request.PathValue("issue"), *body.ClaimID, fields, by, body.KeepClaim)
+		outcome, err := withWritableIssue(re, func(issue writableIssue) (ClaimOutcome, error) {
+			return issue.assign(*body.ClaimID, fields, by, body.KeepClaim)
 		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
@@ -97,8 +97,8 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		if !re.HasSuperuserAuth() {
 			by.memberID = re.Auth.Id
 		}
-		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
-			return acquireClaim(tx, re.Request.PathValue("issue"), body.Member, body.Agent, by)
+		outcome, err := withWritableIssue(re, func(issue writableIssue) (ClaimOutcome, error) {
+			return issue.claim(body.Member, body.Agent, by)
 		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
@@ -140,8 +140,8 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
-			return releaseClaim(tx, re.Request.PathValue("issue"), body.ClaimID, by)
+		outcome, err := withWritableIssue(re, func(issue writableIssue) (ClaimOutcome, error) {
+			return issue.release(body.ClaimID, by)
 		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
@@ -174,8 +174,8 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
-			return closeIssue(tx, re.Request.PathValue("issue"), *body.ClaimID, by, body.KeepClaim)
+		outcome, err := withWritableIssue(re, func(issue writableIssue) (ClaimOutcome, error) {
+			return issue.close(*body.ClaimID, by, body.KeepClaim)
 		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
@@ -205,33 +205,12 @@ func registerClaimRoutes(routes *router.Router[*core.RequestEvent], writes *issu
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		outcome, err := claimWrite(re, func(tx core.App) (ClaimOutcome, error) {
-			return renewClaim(tx, re.Request.PathValue("issue"), body.ClaimID,
+		outcome, err := withWritableIssue(re, func(issue writableIssue) (ClaimOutcome, error) {
+			return issue.renew(body.ClaimID,
 				releaser{memberID: memberID, agent: body.Agent, origin: originHost(re.Request)})
 		})
 		return respondClaim(re, outcome, err)
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
-}
-
-// claimWrite runs after the per-issue lock is acquired. Preflight may have
-// passed before waiting for that lock; recheck under the database writer so
-// archiving cannot commit between authorization and the operation. Serialize
-// before opening this transaction, matching native records lock order.
-// Return the outcome before writing HTTP so a failed commit cannot look OK.
-func claimWrite(re *core.RequestEvent, write func(core.App) (ClaimOutcome, error)) (ClaimOutcome, error) {
-	original := re.App
-	defer func() { re.App = original }()
-	var outcome ClaimOutcome
-	err := original.RunInTransaction(func(tx core.App) error {
-		re.App = tx
-		if err := issueWritable(re, re.Request.PathValue("issue")); err != nil {
-			return err
-		}
-		var err error
-		outcome, err = write(tx)
-		return err
-	})
-	return outcome, err
 }
 
 func respondClaim(re *core.RequestEvent, outcome ClaimOutcome, err error) error {
@@ -268,6 +247,10 @@ func withCode(apiErr *router.ApiError, code string) *router.ApiError {
 // different orders, so the nouns are the parameters and the order is fixed
 // here: the most specific error first.
 func writeFailure(re *core.RequestEvent, err error, missing, invalidMsg, failed string) error {
+	var answered *router.ApiError
+	if errors.As(err, &answered) {
+		return answered
+	}
 	var invalid validation.Errors
 	if errors.As(err, &invalid) {
 		return re.BadRequestError(invalidMsg, invalid)

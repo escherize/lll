@@ -15,40 +15,6 @@ import (
 // /api/lll routes read records through the app and skip those rules. Each
 // one that takes an issue calls issueWritable first; all of them write.
 
-// access is what a member may do: see every team or only the listed ones,
-// and write or only read.
-type access struct {
-	all   bool
-	teams []string
-	rw    bool
-}
-
-func ownAccess(m *core.Record) access {
-	return access{all: m.GetString("scope") == "all", teams: m.GetStringSlice("teams"), rw: m.GetString("mode") == "rw"}
-}
-
-func (a access) sees(teamID string) bool {
-	return a.all || slices.Contains(a.teams, teamID)
-}
-
-// within is the intersection of a and b: what a may do that b may also do.
-func (a access) within(b access) access {
-	out := access{all: a.all && b.all, rw: a.rw && b.rw}
-	switch {
-	case a.all:
-		out.teams = b.teams
-	case b.all:
-		out.teams = a.teams
-	default:
-		for _, team := range a.teams {
-			if slices.Contains(b.teams, team) {
-				out.teams = append(out.teams, team)
-			}
-		}
-	}
-	return out
-}
-
 // effectiveAccess is auth's access as the collection rules compute it
 // (1791700000_bot_owner_scope.js, LLL-543): a superuser may do everything,
 // and a bot with an owner holds its own access within its owner's current
@@ -416,26 +382,6 @@ func checkCreator(app core.App, m *core.Record) error {
 // b sees, and write if b writes.
 func accessCovers(a, b *core.Record) bool {
 	return ownAccess(a).covers(ownAccess(b))
-}
-
-// covers reports whether a holds at least b: every team b sees, and write if
-// b writes.
-func (a access) covers(b access) bool {
-	if b.rw && !a.rw {
-		return false
-	}
-	if a.all {
-		return true
-	}
-	if b.all {
-		return false
-	}
-	for _, team := range b.teams {
-		if !slices.Contains(a.teams, team) {
-			return false
-		}
-	}
-	return true
 }
 
 // Relations a scoped member could point across teams, by collection: field ->

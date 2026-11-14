@@ -73,7 +73,9 @@ func registerReferenceRoutes(routes *router.Router[*core.RequestEvent], writes *
 		}
 		unlock := writes.acquire(re.Request.PathValue("issue"))
 		defer unlock()
-		result, err := appendReference(re.App, re.Request.PathValue("issue"), body.Ref, routeActor(re))
+		result, err := withWritableIssue(re, func(issue writableIssue) (referenceOutcome, error) {
+			return issue.appendReference(body.Ref, routeActor(re))
+		})
 		if err == nil {
 			return re.JSON(http.StatusOK, result)
 		}
