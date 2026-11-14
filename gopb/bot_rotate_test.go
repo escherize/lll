@@ -16,7 +16,7 @@ func (f creatorFixture) tokenWorks(token string) bool {
 
 func (f creatorFixture) mint(t *testing.T, by *core.Record, name string) string {
 	t.Helper()
-	token, _, err := rotateBot(f.app, by, false, name, 3600)
+	token, _, err := rotateBot(f.app, by, name, 3600)
 	if err != nil {
 		t.Fatalf("%s rotating %s: %v", by.GetString("name"), name, err)
 	}
@@ -60,7 +60,7 @@ func TestAReadOnlyCreatorCannotRotate(t *testing.T) {
 	if err := f.app.Save(coord); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := rotateBot(f.app, f.reload(t, coord), false, "bot-w1", 3600); err == nil {
+	if _, _, err := rotateBot(f.app, f.reload(t, coord), "bot-w1", 3600); err == nil {
 		t.Fatal("a read-only creator rotated its worker")
 	}
 }
@@ -96,7 +96,7 @@ func TestRotationRacingTheCreatorsRevocation(t *testing.T) {
 								return
 							default:
 							}
-							if token, _, err := rotateBot(f.app, stale, false, "bot-w", 3600); err == nil {
+							if token, _, err := rotateBot(f.app, stale, "bot-w", 3600); err == nil {
 								mu.Lock()
 								minted = append(minted, token)
 								mu.Unlock()

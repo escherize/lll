@@ -383,7 +383,7 @@ func checkOwner(app core.App, m *core.Record) error {
 		return router.NewBadRequestError("an owner is one hop: "+owner.GetString("name")+
 			" has an owner itself, so it cannot own "+name+". Give "+name+" that member's owner instead", nil)
 	}
-	if !accessCovers(owner, m) {
+	if !accessCovers(owner, m) && !preservesBoundedNarrowing(app, m) {
 		// A stable code (LLL-675): `lll member access` relays this refusal
 		// as it is, and decides so on the code, not on the wording.
 		return withCode(router.NewBadRequestError(
@@ -424,7 +424,7 @@ func checkCreator(app core.App, m *core.Record) error {
 		return router.NewBadRequestError("a bot that "+by+" creates is owned by the creating bot's owner, "+
 			human+". Give "+name+" the owner "+human+" ('lll bot create' does this)", nil)
 	}
-	if !effectiveAccess(app, creator).covers(ownAccess(m)) {
+	if !effectiveAccess(app, creator).covers(ownAccess(m)) && !preservesBoundedNarrowing(app, m) {
 		return withCode(router.NewBadRequestError(
 			"a bot never exceeds the bot that created it: "+name+" would have wider access than "+by+
 				". Give it only teams and a mode "+by+" has", nil), "bot_exceeds_owner")
@@ -610,4 +610,24 @@ func registerAccessRoute(routes *router.Router[*core.RequestEvent]) {
 			"teams":                  teams,
 		})
 	})
+}
+
+// A live owner/creator bound can leave retained raw grants wider than the
+// current effective grant. Removing data access (including native relation
+// cleanup when deleting a team) must still be possible. The owner, creator and
+// kind cannot change through this exception, and no raw authority may grow.
+func preservesBoundedNarrowing(app core.App, m *core.Record) bool {
+	if m.IsNew() {
+		return false
+	}
+	stored, err := app.FindRecordById(m.Collection(), m.Id)
+	if err != nil {
+		return false
+	}
+	for _, field := range []string{"owner", "created_by", "kind"} {
+		if stored.GetString(field) != m.GetString(field) {
+			return false
+		}
+	}
+	return ownAccess(stored).covers(ownAccess(m))
 }

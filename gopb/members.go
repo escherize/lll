@@ -88,12 +88,7 @@ func registerMemberGuards(app core.App) {
 // lock's 5s timeout.
 func registerMemberUpdateTx(app core.App) {
 	write := func(e *core.RecordRequestEvent) error {
-		original := e.App
-		defer func() { e.App = original }()
-		return original.RunInTransaction(func(tx core.App) error {
-			e.App = tx
-			return e.Next()
-		})
+		return withWritableRecordRequest(e, func(proof writableRecordRequest) error { return proof.commit() })
 	}
 	app.OnRecordCreateRequest("members").BindFunc(write)
 	app.OnRecordUpdateRequest("members").BindFunc(write)
@@ -146,7 +141,7 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 		if body.Duration < 0 {
 			return re.BadRequestError("duration must be 0 or more", nil)
 		}
-		token, fresh, err := rotateBot(re.App, re.Auth, re.HasSuperuserAuth(), body.Name, body.Duration)
+		token, fresh, err := rotateBot(re.App, re.Auth, body.Name, body.Duration)
 		if err != nil {
 			return err
 		}
@@ -163,20 +158,15 @@ func registerBotRoutes(routes *router.Router[*core.RequestEvent]) {
 // before a concurrent revocation or narrowing may have committed, and Save
 // writes every column, so a stale copy would overwrite a committed detach
 // or narrowing and mint a token for it.
-func rotateBot(app core.App, auth *core.Record, superuser bool, name string, duration int64) (string, *core.Record, error) {
+func rotateBot(app core.App, auth *core.Record, name string, duration int64) (string, *core.Record, error) {
 	var token string
 	var fresh *core.Record
 	err := app.RunInTransaction(func(tx core.App) error {
-		caller := auth
-		if auth != nil && !auth.IsSuperuser() {
-			reread, err := tx.FindRecordById("members", auth.Id)
-			if err != nil {
-				return router.NewUnauthorizedError("the token's member no longer exists", nil)
-			}
-			caller = reread
+		caller, err := lifecycleCaller(tx, auth)
+		if err != nil {
+			return err
 		}
-		var err error
-		token, fresh, err = rotateBotIn(tx, caller, superuser, name, duration)
+		token, fresh, err = rotateBotIn(tx, caller, name, duration)
 		return err
 	})
 	if err != nil {
@@ -185,7 +175,7 @@ func rotateBot(app core.App, auth *core.Record, superuser bool, name string, dur
 	return token, fresh, nil
 }
 
-func rotateBotIn(app core.App, auth *core.Record, superuser bool, name string, duration int64) (string, *core.Record, error) {
+func rotateBotIn(app core.App, auth *core.Record, name string, duration int64) (string, *core.Record, error) {
 	bot, err := app.FindFirstRecordByFilter(
 		"members", "name = {:name} && kind = 'bot'",
 		dbx.Params{"name": name},
@@ -206,7 +196,7 @@ func rotateBotIn(app core.App, auth *core.Record, superuser bool, name string, d
 	if createdByCaller && !effectiveAccess(app, auth).covers(effectiveAccess(app, bot)) {
 		return "", nil, router.NewForbiddenError("this bot has wider access than you; ask an admin to narrow it, or rotate it with superuser credentials", nil)
 	}
-	if !superuser && !createdByCaller {
+	if !auth.IsSuperuser() && !createdByCaller {
 		if auth == nil || auth.Id != bot.GetString("owner") {
 			// A bot outside the caller's roster answers like a missing
 			// one, so the refusal does not confirm a hidden name (LLL-551).

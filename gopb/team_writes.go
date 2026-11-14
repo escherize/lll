@@ -77,9 +77,10 @@ func registerArchivedTeamGuard(app core.App) {
 			return proof.commit()
 		})
 	}
-	app.OnRecordCreateRequest(archivedGuarded...).BindFunc(check)
-	app.OnRecordUpdateRequest(archivedGuarded...).BindFunc(check)
-	app.OnRecordDeleteRequest(archivedGuarded...).BindFunc(check)
+	collections := append([]string{"teams"}, archivedGuarded...)
+	app.OnRecordCreateRequest(collections...).BindFunc(check)
+	app.OnRecordUpdateRequest(collections...).BindFunc(check)
+	app.OnRecordDeleteRequest(collections...).BindFunc(check)
 }
 
 // LLL-670: an issue's assignee can see the issue's team.
