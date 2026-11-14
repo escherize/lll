@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/jsvm"
+	"github.com/pocketbase/pocketbase/tools/search"
 )
 
 // JS migrations register globally in PocketBase. Run this real up/down test
@@ -64,6 +66,71 @@ func TestPermissionMigrationsRollbackAndRoundTrip(t *testing.T) {
 	member.Set("mode", "ro")
 	member.SetEmail("migration@testing.invalid")
 	member.SetRandomPassword()
+	save(member)
+	full := core.NewRecord(collection("members"))
+	full.Set("name", "full-move")
+	full.Set("kind", "person")
+	full.Set("workspace_role", "member")
+	full.Set("scope", "all")
+	full.Set("mode", "rw")
+	full.SetEmail("move@testing.invalid")
+	full.SetRandomPassword()
+	save(full)
+	destination := core.NewRecord(collection("teams"))
+	destination.Set("key", "DEST")
+	destination.Set("name", "Destination")
+	save(destination)
+	issue := core.NewRecord(collection("issues"))
+	issue.Set("team", team.Id)
+	issue.Set("title", "Native rule move")
+	issue.Set("number", 1)
+	issue.Set("state", "todo")
+	save(issue)
+	owned := core.NewRecord(collection("members"))
+	owned.Set("name", "bot-unrelated")
+	owned.Set("kind", botKind)
+	owned.Set("owner", member.Id)
+	owned.Set("scope", "all")
+	owned.Set("mode", "rw")
+	owned.Set("workspace_role", "member")
+	owned.SetEmail("owned@testing.invalid")
+	owned.SetRandomPassword()
+	save(owned)
+	info := &core.RequestInfo{Auth: full, Method: "PATCH", Body: map[string]any{"team": destination.Id}}
+	allowed, accessErr := app.CanAccessRecord(issue, info, issue.Collection().UpdateRule)
+	if !allowed || accessErr != nil {
+		resolver := core.NewRecordFieldResolver(app, issue.Collection(), info, true)
+		expr, err := search.FilterData(*issue.Collection().UpdateRule).BuildExpr(resolver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := app.RecordQuery(issue.Collection()).Select("(1)").AndWhere(dbx.HashExp{"issues.id": issue.Id})
+		if err := resolver.UpdateQuery(query); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("legacy full member cannot reach native move validation: %v; SQL %s", accessErr, query.AndWhere(expr).Build().SQL())
+	}
+	// The destination grant must come from this actor and its owner, never
+	// an unrelated full writer elsewhere in the virtual members collection.
+	member.Set("teams", []string{team.Id, destination.Id})
+	member.Set("editor_teams", []string{team.Id})
+	save(member)
+	for _, actor := range []*core.Record{member, owned} {
+		request := &core.RequestInfo{Auth: actor, Method: "PATCH", Body: map[string]any{"team": destination.Id}}
+		if allowed, err := app.CanAccessRecord(issue, request, issue.Collection().UpdateRule); err != nil || allowed {
+			t.Fatalf("destination Viewer borrowed another writer's grant: allowed=%v err=%v", allowed, err)
+		}
+	}
+	member.Set("editor_teams", []string{team.Id, destination.Id})
+	save(member)
+	for _, actor := range []*core.Record{member, owned} {
+		request := &core.RequestInfo{Auth: actor, Method: "PATCH", Body: map[string]any{"team": destination.Id}}
+		if allowed, err := app.CanAccessRecord(issue, request, issue.Collection().UpdateRule); err != nil || !allowed {
+			t.Fatalf("mixed/owned Editor move refused: allowed=%v err=%v", allowed, err)
+		}
+	}
+	member.Set("editor_teams", []string{})
+	member.Set("teams", []string{team.Id})
 	save(member)
 	token, err := member.NewAuthToken()
 	if err != nil {

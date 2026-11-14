@@ -5,8 +5,12 @@
 // relation starts empty: this migration changes neither grants nor token keys.
 const rules = require(`${__migrations}/lib/rules.js`);
 const OLD_WRITE = '(@request.auth.mode = "rw" && (@request.auth.owner = "" || @request.auth.owner.mode = "rw"))';
-const ownWrite = (actor, team) => `(${actor}.mode = "rw" || ${actor}.editor_teams.id ?= ${team})`;
-const write = (actor, team) => `${ownWrite(actor, team)} && (${actor}.owner = "" || ${ownWrite(`${actor}.owner`, team)})`;
+// Plain scalar comparisons on @collection quantify every virtual row, even
+// when another clause constrains its id. Match the selected row explicitly;
+// unrelated Viewers or owned bots must not veto a writer's destination grant.
+const scalar = (actor) => actor.startsWith('@collection.') ? '?=' : '=';
+const ownWrite = (actor, team) => `(${actor}.mode ${scalar(actor)} "rw" || ${actor}.editor_teams.id ?= ${team})`;
+const write = (actor, team) => `${ownWrite(actor, team)} && (${actor}.owner ${scalar(actor)} "" || ${ownWrite(`${actor}.owner`, team)})`;
 const FIELDS = {issues:"team", docs:"team", projects:"team", labels:"team", webhooks:"team", comments:"issue.team"};
 const MOVABLE = ["issues", "docs", "projects", "labels"];
 const DESTINATION = '@collection.members:lll_editor_destination.id ?= @request.auth.id && ' +
