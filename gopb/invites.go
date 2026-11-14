@@ -172,7 +172,6 @@ func redeemInvite(app core.App, code, name string, now time.Time) (*core.Record,
 }
 
 var errInviteIdentity = errors.New("accept this invite with an independent person account, not a bot or owned identity")
-var errInviteModes = errors.New("this invite mixes read-only and read-write access across teams; ask an administrator to adjust your access without changing your other teams")
 
 func redeemInviteFor(app core.App, code, name, memberID string, now time.Time, expectedTokenKey ...string) (*core.Record, error) {
 	name = strings.TrimSpace(name)
@@ -239,10 +238,7 @@ func redeemInviteFor(app core.App, code, name, memberID string, now time.Time, e
 				return errInviteIdentity
 			}
 			before := ownAccess(member)
-			merged, mergeErr := mergeInviteAccess(before, grant)
-			if mergeErr != nil {
-				return mergeErr
-			}
+			merged := mergeInviteAccess(before, grant)
 			setAccess(member, merged)
 			if err = tx.Save(member); err != nil {
 				return err
@@ -277,36 +273,40 @@ func redeemInviteFor(app core.App, code, name, memberID string, now time.Time, e
 	return member, nil
 }
 
-// mergeInviteAccess never removes an existing grant or upgrades a team the
-// invite did not grant. The current schema has one mode for all teams.
-func mergeInviteAccess(before access, grant inviteGrant) (access, error) {
-	covered := true
-	for _, team := range grant.teams {
-		covered = covered && before.sees(team)
-	}
-	if covered && (before.rw || !grant.rw) {
-		return before, nil
-	}
-	if before.all {
-		return access{}, errInviteModes
-	}
-	if len(before.teams) > 0 && before.rw != grant.rw {
-		if before.rw {
-			return access{}, errInviteModes
+// mergeInviteAccess is the per-team union, preserving all/future-team
+// coverage and every unrelated role. A finite invite never grants future writes.
+func mergeInviteAccess(before access, grant inviteGrant) access {
+	out := access{all: before.all, teams: slices.Clone(before.teams), rw: before.rw}
+	// Do not activate a dormant/malformed Editor id when adding readability.
+	for _, id := range before.editors {
+		if before.writes(id) && !slices.Contains(out.editors, id) {
+			out.editors = append(out.editors, id)
 		}
-		for _, team := range before.teams {
-			if !slices.Contains(grant.teams, team) {
-				return access{}, errInviteModes
+	}
+	// A new Viewer beside legacy finite Editors needs an explicit Editor list;
+	// retaining uniform rw would silently upgrade the newly invited team.
+	if out.rw && !out.all && !grant.rw {
+		for _, team := range grant.teams {
+			if !before.sees(team) {
+				out.rw = false
+				for _, id := range before.teams {
+					if !slices.Contains(out.editors, id) {
+						out.editors = append(out.editors, id)
+					}
+				}
+				break
 			}
 		}
 	}
-	teams := slices.Clone(before.teams)
 	for _, team := range grant.teams {
-		if !slices.Contains(teams, team) {
-			teams = append(teams, team)
+		if !out.all && !slices.Contains(out.teams, team) {
+			out.teams = append(out.teams, team)
+		}
+		if grant.rw && !out.rw && !slices.Contains(out.editors, team) {
+			out.editors = append(out.editors, team)
 		}
 	}
-	return access{teams: teams, rw: grant.rw}, nil
+	return out
 }
 
 // nameTaken compares without case: "Bryan" must not join beside "bryan".
@@ -395,32 +395,12 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 		if body.Mode != "ro" && body.Mode != "rw" {
 			return re.BadRequestError("mode must be \"ro\" or \"rw\"", nil)
 		}
-		var creator *core.Record
-		acc := access{all: true, rw: true}
-		if !re.HasSuperuserAuth() {
-			creator = re.Auth
-			if !mayInvite(creator) {
-				return re.ForbiddenError(mayNotInvite(creator.GetString("name")), nil)
-			}
-			acc = inviteAuthority(re.App, creator)
-		}
-		teams, err := inviteTeamIDs(re.App, acc, body.Teams)
+		issued, err := withWritableInvite(re, body.Teams, body.Mode, func(proof writableInvite) (issuedInvite, error) { return proof.mint() })
 		if err != nil {
 			return err
 		}
-		grant := inviteGrant{teams: teams, rw: body.Mode == "rw"}
-		if !grantAllowed(acc, grant) {
-			return re.ForbiddenError("an invite cannot grant more than you hold", nil)
-		}
-		code, invite, err := createInvite(re.App, creator, grant, time.Now())
-		if err != nil {
-			return re.InternalServerError("failed to save the invite", err)
-		}
 		return re.JSON(http.StatusOK, map[string]any{
-			"code":    code,
-			"teams":   teams,
-			"mode":    body.Mode,
-			"expires": invite.GetDateTime("expires"),
+			"code": issued.code, "teams": issued.teams, "mode": body.Mode, "expires": issued.expires,
 		})
 	}).Bind(apis.RequireAuth("members", core.CollectionNameSuperusers))
 
@@ -454,7 +434,7 @@ func registerInviteRoutes(routes *router.Router[*core.RequestEvent]) {
 			return re.NotFoundError(err.Error(), nil)
 		case errors.Is(err, errInviteUsed), errors.Is(err, errInviteExpired), errors.Is(err, errInviteVoid):
 			return re.Error(http.StatusGone, err.Error(), nil)
-		case errors.Is(err, errInviteIdentity), errors.Is(err, errInviteModes):
+		case errors.Is(err, errInviteIdentity):
 			return re.ForbiddenError(err.Error(), nil)
 		case errors.Is(err, errNameWriteBusy):
 			return re.Error(http.StatusServiceUnavailable, err.Error(), nil)

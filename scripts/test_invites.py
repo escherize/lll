@@ -388,6 +388,23 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
         assert reader_text.returncode == 0 and '(read-only)' in reader_text.stdout
         assert 'setting up your own agent' not in reader_text.stdout
 
+        # The same existing credential gains only the invited team's role.
+        for invited_team, invited_mode in [(beta['id'], 'rw'), (beta['id'], 'ro')]:
+            status, issued, _ = call(api, '/api/lll/invites',
+                                    {'teams': [invited_team], 'mode': invited_mode}, owner)
+            assert status == 200, issued
+            status, joined, _ = call(api, '/api/lll/invites/redeem',
+                                    {'code': issued['code']}, reader_cookie)
+            assert status == 200 and joined['existing'] and joined['token'] == '', joined
+            status, access, _ = call(api, '/api/lll/access', token=reader_cookie)
+            assert status == 200
+            roles = {team['key']: team['role'] for team in access['teams']}
+            assert roles == {'ALPHA': 'viewer', 'BETA': 'editor'}, roles
+        for team, writable in [(alpha['id'], False), (beta['id'], True)]:
+            status, body, _ = call(api, '/api/collections/issues/records',
+                                  {'team': team, 'title': 'mixed invite write', 'state': 'todo'}, reader_cookie)
+            assert (status == 200) == writable, body
+
         # A partial server failure must return the first usable link rather
         # than losing every link and encouraging a blind three-person rerun.
         import http.server
