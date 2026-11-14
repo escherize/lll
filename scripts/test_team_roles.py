@@ -317,6 +317,23 @@ def main():
             new_issue = expect(200, issues, {'team': new_team, 'title': 'new', 'state': 'todo'}, admin)
             expect(404, issues + '/' + new_issue['id'], token=token(broad))
             checks.append('all/future-team conversion requires explicit confirmation and accurately previews the loss of future coverage')
+            # Explicit wildcard conversion is meaningful even if every
+            # current role is preserved: future-team authority is removed.
+            same_editor = person('legacy-same-editor', scope='all', mode='rw')
+            for account, role in [(reader, 'viewer'), (same_editor, 'editor')]:
+                existing_token = token(account)
+                current = expect(200, management + account['id'], token=manager_token)
+                operation = {'revision': current['revision'], 'team': eng, 'role': role,
+                             'convert_all_teams': True}
+                count = event_count()
+                same_role = expect(200, management + account['id'], {**operation, 'preview': True}, manager_token)
+                assert same_role['future_team_access_lost'] and same_role['after']['all'] is False
+                assert same_role['before']['teams'] == same_role['after']['teams']
+                assert event_count() == count
+                same_role = expect(200, management + account['id'], operation, manager_token)
+                assert same_role['applied'] and same_role['event_id'] and event_count() == count + 1
+                assert expect(200, '/api/lll/access', token=existing_token)['all'] is False
+            checks.append('explicit conversion preserves every current role while dropping future-team coverage and recording an audit event')
             # Revoked managers cannot use an old token to change another grant.
             snapshot = expect(200, management + alice['id'], token=manager_token)
             expect(200, members + '/' + manager['id'], {'workspace_role': 'member'}, admin, 'PATCH')

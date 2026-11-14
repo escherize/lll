@@ -25,6 +25,10 @@ bounds that worker by its own access, while both retain the same human owner.
 Narrowing, detachment and credential retirement cannot restore old authority
 through a cached login. Owner, creator and workspace Admin are distinct
 relationships. A session or agent label coordinates work; it grants no access.
+Personal bot disable/removal and token control remain with its owner or the
+infrastructure operator; workspace Admin alone does not grant those powers.
+A creating bot can rotate its bounded workers while its owner and grants remain
+valid, and cannot disable or remove them.
 
 In v1.7, a member has a readable set of teams (or all current and future teams)
 and one read-only/read-write mode across that set. Different roles in different
