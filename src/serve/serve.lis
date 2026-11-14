@@ -139,6 +139,7 @@ pub fn run_server(
       PageVM { rail: shell, page: SettingsVM { section, .. } },
     )?
   }
+  let _ = render("permissions-page", PageVM { rail: shell, page: PermissionsVM { .. } })?
   let _ = render("search-page", PageVM { rail: shell, page: SearchVM { .. } })?
   let _ = render(
     "projects-page",
@@ -242,6 +243,8 @@ fn board_mux(
   //
   // Registered FIRST so the board's own routes cannot shadow /api/.
   api_proxy(mux, ctx.url()?, admin_ui, capabilities)?
+  mux.HandleFunc("GET /permissions", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| permissions_page(w, r, v)))
+  mux.HandleFunc("POST /permissions/change", gated(ctx, |w: http.ResponseWriter, r: Ref<http.Request>, v: Viewing| permissions_change(w, r, v)))
   // Invite links (LLL-544) sit outside the gate: the visitor has no board
   // credential until the redemption hands it one (serve/join.lis).
   mux.HandleFunc("GET /join/{code}", |w: http.ResponseWriter, r: Ref<http.Request>| join_page(ctx, w, r))

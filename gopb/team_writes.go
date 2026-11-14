@@ -73,35 +73,14 @@ func archivedRefusal(app core.App, auth *core.Record, teamID string) error {
 
 func registerArchivedTeamGuard(app core.App) {
 	check := func(e *core.RecordRequestEvent) error {
-		// The archive lookup and native save must hold the same writer.
-		// Otherwise an archive can commit after this check but before Next
-		// saves. Keep this at the request layer: system bookkeeping model
-		// saves deliberately remain exempt.
-		original := e.App
-		defer func() { e.App = original }()
-		return original.RunInTransaction(func(tx core.App) error {
-			e.App = tx
-			teams := []string{recordTeam(tx, e.Record)}
-			if !e.Record.IsNew() {
-				// Original was loaded before this transaction and can name a
-				// stale source team after a concurrent move.
-				stored, err := tx.FindRecordById(e.Record.Collection().Id, e.Record.Id)
-				if err != nil {
-					return router.NewNotFoundError("record not found", nil)
-				}
-				teams = append(teams, recordTeam(tx, stored))
-			}
-			for _, team := range teams {
-				if err := archivedRefusal(tx, e.Auth, team); err != nil {
-					return err
-				}
-			}
-			return e.Next()
+		return withWritableRecordRequest(e, func(proof writableRecordRequest) error {
+			return proof.commit()
 		})
 	}
-	app.OnRecordCreateRequest(archivedGuarded...).BindFunc(check)
-	app.OnRecordUpdateRequest(archivedGuarded...).BindFunc(check)
-	app.OnRecordDeleteRequest(archivedGuarded...).BindFunc(check)
+	collections := append([]string{"teams"}, archivedGuarded...)
+	app.OnRecordCreateRequest(collections...).BindFunc(check)
+	app.OnRecordUpdateRequest(collections...).BindFunc(check)
+	app.OnRecordDeleteRequest(collections...).BindFunc(check)
 }
 
 // LLL-670: an issue's assignee can see the issue's team.

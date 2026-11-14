@@ -38,7 +38,7 @@ fn the_join_form_accepts_into_the_existing_login() {
 // to a credential that names no member.
 #[test]
 fn the_me_page_shows_a_token_only_after_the_post() {
-  let ada = ViewerMember { id: "m1", name: "Ada", token: "tok.en.x", access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadOnly } }
+  let ada = ViewerMember { id: "m1", name: "Ada", token: "tok.en.x", access: models.Access { reach: models.Reach.Teams([]), mode: models.Mode.ReadOnly, .. } , workspace_admin: false }
   let viewer = Viewer.Scoped(ScopedViewer { teams: ["ALPHA"], member: Some(ada) })
   let offer = me_html(viewer, "", "")
   assert !strings.Contains(offer, "tok.en.x")
@@ -62,8 +62,8 @@ fn the_member_setup_names_its_own_bot_without_exposing_the_personal_token_on_get
     access: models.Access {
       reach: models.Reach.Teams([]),
       mode: models.Mode.ReadWrite,
-    },
-  }
+     .. },
+   workspace_admin: false }
   let viewer = Viewer.Scoped(
     ScopedViewer { teams: ["ALPHA"], member: Some(ada) },
   )
@@ -76,7 +76,7 @@ fn the_member_setup_names_its_own_bot_without_exposing_the_personal_token_on_get
     access: models.Access {
       reach: models.Reach.Teams([]),
       mode: models.Mode.ReadOnly,
-    },
+     .. },
     ..ada,
   }
   let read_page = me_html(

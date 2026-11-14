@@ -96,6 +96,8 @@ jobs:
           trap 'docker rm "$container" >/dev/null' EXIT
           docker cp "$container:/app/target/.lisette/bin/lll" "$RUNNER_TEMP/lll-linux"
           "$RUNNER_TEMP/lll-linux" --version
+      - name: Verify team permissions in the Linux artifact
+        run: python3 scripts/test_team_roles.py "$RUNNER_TEMP/lll-linux" --browser
       - name: Verify concurrent issue reads in the Linux artifact
         run: python3 scripts/test_issue_view_reads.py "$RUNNER_TEMP/lll-linux"
       # Linux echoes typed input on its own schedule (LLL-686: a prompt shown

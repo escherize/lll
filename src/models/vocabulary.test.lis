@@ -31,9 +31,9 @@ fn priorities_rank_urgent_first_and_none_last() {
 fn a_bot_reads_and_writes_only_within_its_owner() {
   let a = TeamId("a")
   let b = TeamId("b")
-  let every_rw = Access { reach: Reach.Every, mode: Mode.ReadWrite }
-  let a_ro = Access { reach: Reach.Teams([a]), mode: Mode.ReadOnly }
-  let ab_rw = Access { reach: Reach.Teams([a, b]), mode: Mode.ReadWrite }
+  let every_rw = Access { reach: Reach.Every, mode: Mode.ReadWrite, .. }
+  let a_ro = Access { reach: Reach.Teams([a]), mode: Mode.ReadOnly, .. }
+  let ab_rw = Access { reach: Reach.Teams([a, b]), mode: Mode.ReadWrite, .. }
   assert every_rw.within(every_rw).same_as(every_rw)
   assert every_rw.within(a_ro).same_as(a_ro)
   assert ab_rw.within(every_rw).same_as(ab_rw)
@@ -52,4 +52,32 @@ fn access_parses_only_what_the_server_spells() {
   assert Access.parse("all", [], "").is_none()
   assert MemberKind.parse("bot") == Some(MemberKind.Bot)
   assert MemberKind.parse("").is_none()
+}
+
+#[test]
+fn mixed_team_roles_preserve_owner_intersections_and_revocation_signatures() {
+  let a = TeamId("alpha")
+  let b = TeamId("beta")
+  let human = Access { reach: Reach.Teams([a, b]), mode: Mode.ReadOnly, editors: [a] }
+  let bot = Access { reach: Reach.Teams([a, b]), mode: Mode.ReadWrite, .. }
+  let effective = bot.within(human)
+  assert effective.writes_team(a) && !effective.writes_team(b) && effective.sees_team(b)
+  assert effective.has_writes() && !effective.mode.writes()
+  let other = Access { editors: [b], ..human }
+  let crossed = human.within(other)
+  assert !crossed.has_writes() && crossed.sees_team(a) && crossed.sees_team(b)
+  assert human.signature() != other.signature()
+}
+
+#[test]
+fn access_reply_retains_team_role_information_and_legacy_replies_still_work() {
+  let a = TeamId("alpha")
+  let b = TeamId("beta")
+  let modern = AccessReply {
+    teams: [AccessTeam { id: a, key: "ALPHA", role: "editor" }, AccessTeam { id: b, key: "BETA", role: "viewer" }],
+    ..
+  }.access()
+  assert modern.writes_team(a) && !modern.writes_team(b) && modern.sees_team(b)
+  let old = AccessReply { all_wire: true, rw_wire: true, .. }.access()
+  assert old.writes_team(a) && old.writes_team(TeamId("future"))
 }

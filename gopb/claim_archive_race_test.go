@@ -16,7 +16,20 @@ import (
 )
 
 func TestClaimRoutesRecheckArchiveAfterWaitingForIssue(t *testing.T) {
-	for _, operation := range []string{"claim", "release", "renew", "assignment", "close"} {
+	testClaimRoutesRecheckAfterWaiting(t, func(f creatorFixture) {
+		team, err := f.app.FindRecordById("teams", f.alpha)
+		if err != nil {
+			t.Fatal(err)
+		}
+		team.Set("archived", true)
+		if err = f.app.Save(team); err != nil {
+			t.Fatal(err)
+		}
+	}, http.StatusForbidden)
+}
+
+func testClaimRoutesRecheckAfterWaiting(t *testing.T, revoke func(creatorFixture), want int) {
+	for _, operation := range []string{"claim", "release", "renew", "assignment", "close", "refs"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newCreatorFixture(t)
 			teams, err := f.app.FindCollectionByNameOrId("teams")
@@ -28,7 +41,7 @@ func TestClaimRoutesRecheckArchiveAfterWaitingForIssue(t *testing.T) {
 				t.Fatal(err)
 			}
 			issues := core.NewBaseCollection("issues")
-			issues.Fields.Add(&core.TextField{Name: "title"}, &core.TextField{Name: "state"}, &core.TextField{Name: "team"}, &core.RelationField{Name: "assignee", CollectionId: f.members.Id, MaxSelect: 1})
+			issues.Fields.Add(&core.TextField{Name: "title"}, &core.TextField{Name: "state"}, &core.TextField{Name: "refs"}, &core.TextField{Name: "team"}, &core.RelationField{Name: "assignee", CollectionId: f.members.Id, MaxSelect: 1})
 			if err = f.app.Save(issues); err != nil {
 				t.Fatal(err)
 			}
@@ -85,6 +98,7 @@ func TestClaimRoutesRecheckArchiveAfterWaitingForIssue(t *testing.T) {
 				t.Fatal(err)
 			}
 			registerClaimRoutes(routes, &locks)
+			registerReferenceRoutes(routes, &locks)
 			mux, err := routes.BuildMux()
 			if err != nil {
 				t.Fatal(err)
@@ -95,6 +109,9 @@ func TestClaimRoutesRecheckArchiveAfterWaitingForIssue(t *testing.T) {
 			}
 			if operation == "assignment" {
 				body = fmt.Sprintf(`{"claim_id":%q,"agent":"racer","fields":{"assignee":%q,"title":"changed"}}`, claimID, f.human.Id)
+			}
+			if operation == "refs" {
+				body = `{"ref":"gh#123"}`
 			}
 			unlock := locks.acquire(issue.Id)
 			var once sync.Once
@@ -133,25 +150,18 @@ func TestClaimRoutesRecheckArchiveAfterWaitingForIssue(t *testing.T) {
 				t.Fatal("request never waited on the held issue lock")
 			}
 			// This commit is definitely after preflight and before the operation.
-			team, err := f.app.FindRecordById("teams", f.alpha)
-			if err != nil {
-				t.Fatal(err)
-			}
-			team.Set("archived", true)
-			if err = f.app.Save(team); err != nil {
-				t.Fatal(err)
-			}
+			revoke(f)
 			release()
 			select {
 			case code := <-result:
-				if code != http.StatusForbidden {
-					t.Errorf("write after archive returned %d, want 403", code)
+				if code != want {
+					t.Errorf("write after permission change returned %d, want %d", code, want)
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("request never completed")
 			}
 			if after := snapshot(); after != before {
-				t.Fatal("request changed issue or claim after archive completed")
+				t.Fatal("request changed issue or claim after permission change completed")
 			}
 		})
 	}

@@ -264,7 +264,7 @@ func TestProjectCascadeRechecksQueuedIdentity(t *testing.T) {
 	if err := f.app.Save(f.coord); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := prepareProjectCascade(f.app, captured, f.project.Id, true); err == nil {
+	if _, _, err := prepareProjectCascade(f.app, captured, f.project.Id); err == nil {
 		t.Fatal("queued old team grant remained authoritative")
 	}
 	f.coord.Set("teams", []string{f.alpha})
@@ -272,7 +272,7 @@ func TestProjectCascadeRechecksQueuedIdentity(t *testing.T) {
 	if err := f.app.Save(f.coord); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := prepareProjectCascade(f.app, captured, f.project.Id, true); err == nil {
+	if _, _, err := prepareProjectCascade(f.app, captured, f.project.Id); err == nil {
 		t.Fatal("queued retired token remained authoritative")
 	}
 }

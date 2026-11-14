@@ -83,6 +83,15 @@ pub fn member_commands() -> Slice<flags.Command> {
       ..,
     },
     flags.Command {
+      name: "permissions",
+      access: flags.Access.Write,
+      summary: "inspect or manage per-team roles and workspace responsibility (workspace administrator or operator)",
+      spec: member_permissions_spec(),
+      positional: "[NAME]",
+      run: member_permissions,
+      ..,
+    },
+    flags.Command {
       name: "set-password",
       access: flags.Access.Write,
       summary: "set a member's login password (superuser), or your own with --old-password",
@@ -205,6 +214,16 @@ fn member_access(
 ) -> string {
   let Some(a) = access else {
     return ""
+  }
+  if !a.editors.is_empty() {
+    let editors = a.editors.map(|id| keys.get(id).unwrap_or("a hidden team"))
+    if a.every_team() { return f"Viewer every team; Editor {strings.Join(editors, ", ")}" }
+    let roles = a.team_ids().map(|id| {
+      let key = keys.get(id).unwrap_or("a hidden team")
+      let role = if a.writes_team(id) { "Editor" } else { "Viewer" }
+      f"{key} {role}"
+    })
+    return strings.Join(roles, ", ")
   }
   if a.every_team() { return f"{a.mode.wire()} every team (server-wide)" }
   let mut named: Slice<string> = []
@@ -611,7 +630,7 @@ pub fn ensure_member(ctx: pb.Client, name: string) -> Result<bool, pb.CliError> 
 /// "read-write, every team (server-wide)", "read-only, no teams". One wording for whoami,
 /// invite and access.
 fn describe_access(access: models.Access, keys: Slice<string>) -> string {
-  let m = if access.mode.writes() { "read-write" } else { "read-only" }
+  let m = if !access.mode.writes() && access.has_writes() { "per-team roles" } else if access.mode.writes() { "read-write" } else { "read-only" }
   if access.every_team() { return f"{m}, every team (server-wide)" }
   if keys.is_empty() { return f"{m}, no teams" }
   let noun = if keys.length() == 1 { "team" } else { "teams" }
@@ -619,7 +638,7 @@ fn describe_access(access: models.Access, keys: Slice<string>) -> string {
 }
 
 fn member_access_spec() -> Slice<flags.Flag> {
-  with_admin_flags([
+  let mut spec = [
     flags.Flag {
       name: "--team",
       value: true,
@@ -666,7 +685,9 @@ fn member_access_spec() -> Slice<flags.Flag> {
       help: "the member afterwards as JSON: the object 'lll member list --json' prints per item",
       ..,
     },
-  ])
+  ]
+  for flag in permission_change_flags() { spec = spec.append(flag) }
+  with_admin_flags(spec)
 }
 
 fn member_access_page() -> string {
@@ -682,10 +703,19 @@ Usage:
   lll member access NAME --all-teams --read-write
   lll member access NAME --json                show it as JSON
 
-Showing access works with any token. Changing it needs administrator
+Per-team roles and workspace responsibility:
+  lll member permissions NAME
+  lll member access NAME --team ALPHA --role editor --preview
+  lll member access NAME --team ALPHA --role editor
+  lll member access NAME --workspace-role admin
+
+These operations use a workspace Admin token or explicit operator credentials.
+--preview writes nothing; --revision binds a later apply to an observed revision.
+Replacing an all-current-and-future-team grant requires --convert-all-teams.
+
+Legacy scope/mode access can be shown with any token. Changing it needs operator
 credentials (--admin-email/--admin-password, or LLL_ADMIN_EMAIL and
-LLL_ADMIN_PASSWORD when no token is configured), the same gate as 'lll member invite': no member or bot
-token can change anyone's access, its own included. Revoking keeps the member
+LLL_ADMIN_PASSWORD when no token is configured), these legacy flags never use a member's Admin role. Use --role for per-team changes. Revoking keeps the member
 and everything they wrote; 'lll member delete' deletes the member instead.
 " +
   flags.section(member_access_spec())
@@ -699,6 +729,12 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   let ctx = input.ctx
   let p = input.parsed
   let name = p.first()
+  if ["--role", "--workspace-role", "--preview", "--convert-all-teams", "--revision"].any(|flag| p.given(flag)) {
+    if ["--all-teams", "--no-teams", "--add-team", "--remove-team", "--read-only", "--read-write"].any(|flag| p.given(flag)) {
+      return Err(flags.usage_error("team-role management cannot be combined with legacy scope/mode flags"))
+    }
+    return member_permissions(input)
+  }
   if name == "" {
     return Err(flags.usage_error(
       "usage: lll member access NAME [--team KEY]... [--add-team KEY] [--remove-team KEY] [--all-teams|--no-teams] [--read-only|--read-write]",
@@ -797,7 +833,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   let mut mode = current.mode
   if p.given("--read-only") { mode = models.Mode.ReadOnly }
   if p.given("--read-write") { mode = models.Mode.ReadWrite }
-  let wanted = models.Access { reach, mode }
+  let wanted = models.Access { reach, mode, .. }
   let patch = writes.MemberPatch {
     scope: Some(wanted.scope_wire()),
     teams: Some(wanted.team_ids()),
@@ -806,7 +842,7 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
   }
   if let Err(e) = writes.update_member(ctx, pb.Caller.Member(su), m.id, patch) {
     // gopb checkOwner's refusal names its own fix (LLL-543).
-    if e.has_code(pb.ServerCode.BotExceedsOwner) { return Err(e) }
+    if e.has_code(pb.ServerCode.BotExceedsOwner) || e.has_code(pb.ServerCode.TeamRolesRequired) { return Err(e) }
     let status = e.status
     if status == 400 || status == 403 || status == 404 {
       return Err(pb.fail(
@@ -851,6 +887,7 @@ fn recorded_access(m: models.Member) -> models.Access {
       models.Access {
         reach: models.Reach.Teams([]),
         mode: models.Mode.ReadWrite,
+        ..,
       },
     )
 }

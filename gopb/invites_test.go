@@ -40,6 +40,7 @@ func newInviteFixture(t *testing.T) inviteFixture {
 		&core.TextField{Name: "name", Required: true},
 		&core.SelectField{Name: "kind", Values: []string{"person", "bot"}, MaxSelect: 1},
 		&core.RelationField{Name: "teams", CollectionId: teams.Id, MaxSelect: 999},
+		&core.RelationField{Name: "editor_teams", CollectionId: teams.Id, MaxSelect: 999},
 		&core.SelectField{Name: "scope", Values: []string{"all", "teams"}, MaxSelect: 1, Required: true},
 		&core.SelectField{Name: "mode", Values: []string{"rw", "ro"}, MaxSelect: 1, Required: true},
 	)
@@ -480,26 +481,29 @@ func TestInviteAddsTeamToExistingPersonWithoutChangingIdentityOrTokens(t *testin
 	}
 }
 
-func TestExistingInviteCannotWidenOtherTeamsOrConsumeOnRefusal(t *testing.T) {
+func TestExistingInviteMergesPerTeamAndKeepsCodeOnIdentityRefusal(t *testing.T) {
 	f := newInviteFixture(t)
 	now := time.Now()
 	code := f.mint(t, f.full, inviteGrant{teams: []string{f.beta}, rw: true}, now)
-	if _, err := redeemInviteFor(f.app, code, "", f.reader.Id, now); !errors.Is(err, errInviteModes) {
+	if _, err := redeemInviteFor(f.app, code, "", f.scoped.Id, now, "retired-key"); !errors.Is(err, errInviteIdentity) {
 		t.Fatal(err)
 	}
-	if _, err := redeemInviteFor(f.app, code, "", f.scoped.Id, now, "revoked-token-key"); !errors.Is(err, errInviteIdentity) {
+	member, err := redeemInviteFor(f.app, code, "", f.reader.Id, now)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := redeemInviteFor(f.app, code, "", f.scoped.Id, now); err != nil {
-		t.Fatal(err)
+	a := ownAccess(member)
+	if !a.sees(f.alpha) || a.writes(f.alpha) || !a.writes(f.beta) {
+		t.Fatalf("unrelated Viewer changed: %+v", a)
 	}
 	ro := f.mint(t, f.full, inviteGrant{teams: []string{f.beta}}, now)
-	fresh, _ := f.app.FindRecordById("members", f.reader.Id)
-	if ownAccess(fresh).rw {
-		t.Fatal("refused upgrade changed reader")
-	}
-	if _, err := redeemInviteFor(f.app, ro, "", f.reader.Id, now); err != nil {
+	member, err = redeemInviteFor(f.app, ro, "", f.scoped.Id, now)
+	if err != nil {
 		t.Fatal(err)
+	}
+	a = ownAccess(member)
+	if !a.writes(f.alpha) || !a.sees(f.beta) || a.writes(f.beta) {
+		t.Fatalf("unrelated Editor changed or new Viewer widened: %+v", a)
 	}
 }
 

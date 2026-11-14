@@ -35,7 +35,7 @@ type cascadePreview struct {
 // A revision covers complete affected records, not just issue.updated: comments
 // and relation changes do not necessarily advance that timestamp. The hash is a
 // compare-and-swap guard, never an authorization credential.
-func prepareProjectCascade(app core.App, auth *core.Record, id string, writing bool) (cascadePreview, []*core.Record, error) {
+func prepareProjectCascade(app core.App, auth *core.Record, id string) (cascadePreview, []*core.Record, error) {
 	out := cascadePreview{Issues: []cascadeIssue{}, Blockers: []cascadeBlocker{}}
 	if auth == nil {
 		return out, nil, router.NewUnauthorizedError("sign in first", nil)
@@ -52,14 +52,7 @@ func prepareProjectCascade(app core.App, auth *core.Record, id string, writing b
 	if !acc.sees(project.GetString("team")) {
 		return out, nil, router.NewNotFoundError("project not found", nil)
 	}
-	if writing {
-		if !acc.rw {
-			return out, nil, router.NewForbiddenError(readOnlyRefusal(caller), nil)
-		}
-		if err := archivedRefusal(app, caller, project.GetString("team")); err != nil {
-			return out, nil, err
-		}
-	}
+
 	team, err := app.FindRecordById("teams", project.GetString("team"))
 	if err != nil {
 		return out, nil, err
@@ -144,7 +137,7 @@ func prepareProjectCascade(app core.App, auth *core.Record, id string, writing b
 func registerProjectCascadeRoutes(routes *router.Router[*core.RequestEvent]) {
 	routes.GET("/api/lll/projects/cascade-support", func(re *core.RequestEvent) error { return re.JSON(http.StatusOK, map[string]bool{"supported": true}) })
 	routes.GET("/api/lll/projects/{project}/cascade", func(re *core.RequestEvent) error {
-		preview, _, err := prepareProjectCascade(re.App, re.Auth, re.Request.PathValue("project"), false)
+		preview, _, err := prepareProjectCascade(re.App, re.Auth, re.Request.PathValue("project"))
 		if err != nil {
 			return err
 		}
@@ -158,33 +151,7 @@ func registerProjectCascadeRoutes(routes *router.Router[*core.RequestEvent]) {
 		if err := re.BindBody(&body); err != nil || len(body.Revision) != 64 {
 			return re.BadRequestError("a preview revision is required", nil)
 		}
-		var result cascadePreview
-		err := re.App.RunInTransaction(func(tx core.App) error {
-			preview, rows, err := prepareProjectCascade(tx, re.Auth, re.Request.PathValue("project"), true)
-			if err != nil {
-				return err
-			}
-			if preview.Revision != body.Revision {
-				return router.NewApiError(http.StatusConflict, "project changed since preview; preview again before deleting", nil)
-			}
-			if len(preview.Blockers) > 0 {
-				return router.NewApiError(http.StatusConflict, "project has claims or external references; release or detach them before deleting", nil)
-			}
-			for _, issue := range rows {
-				if err := tx.Delete(issue); err != nil {
-					return err
-				}
-			}
-			project, err := tx.FindRecordById("projects", preview.Project)
-			if err != nil {
-				return err
-			}
-			if err := tx.Delete(project); err != nil {
-				return err
-			}
-			result = preview
-			return nil
-		})
+		result, err := withWritableProjectCascade(re, body.Revision, func(proof writableProjectCascade) (cascadePreview, error) { return proof.remove() })
 		if err != nil {
 			var answered *router.ApiError
 			if errors.As(err, &answered) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 )
 
 // A request paused after its archive check must exclude a concurrent archive
@@ -88,7 +89,7 @@ func TestNativeArchiveCheckSharesWriteTransaction(t *testing.T) {
 				case "delete":
 					f.app.OnRecordDeleteRequest(collection).BindFunc(pause)
 				}
-				f.app.OnRecordUpdateRequest("teams").BindFunc(func(e *core.RecordRequestEvent) error { close(entered); return e.Next() })
+				f.app.OnRecordUpdateRequest("teams").Bind(&hook.Handler[*core.RecordRequestEvent]{Priority: -1, Func: func(e *core.RecordRequestEvent) error { close(entered); return e.Next() }})
 				var workers sync.WaitGroup
 				t.Cleanup(func() { release(); workers.Wait() })
 				start := func(fn func() int) <-chan int {

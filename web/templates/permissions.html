@@ -1,0 +1,44 @@
+{{define "permissions-page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Permissions · lll</title>
+<link rel="stylesheet" href="/static/theme.css"><link rel="stylesheet" href="/static/permissions.css">
+{{template "accent-head" .Rail}}
+<script type="module" src="/static/datastar.js"></script>
+</head>
+<body>{{template "icons"}}<div class="app perm-app">{{template "rail" .Rail}}<main class="main">
+<header class="topbar"><div class="crumbs"><span>Workspace</span><span class="sep">›</span><span class="here">Permissions</span></div></header>
+<div class="perm-scroll"><div class="perm-page">
+<header class="perm-heading"><h1>Permissions</h1><p>Workspace responsibility and team access are separate. Review who can do what before changing a grant.</p></header>
+{{with .Page}}
+{{if .Error}}<div class="perm-message perm-error" role="alert">{{.Error}}</div>{{end}}
+{{if .Success}}<div class="perm-message" role="status">{{.Success}}</div>{{end}}
+{{if .NeedsAdmin}}<section class="perm-section"><h2>A workspace Admin must open this page</h2><p>Broad team access does not confer this role. An operator can assign the initial Admin through the CLI:</p><pre>lll member access NAME --workspace-role admin \
+  --admin-email OPERATOR --admin-password -</pre><p>The password is read from stdin. Admin responsibility does not add team content access.</p></section>{{end}}
+{{if .People}}<form class="perm-person" method="get" action="/permissions"><label for="permission-member">Person or bot</label><div><select id="permission-member" name="member">{{range .People}}<option value="{{.Id}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}</select><button type="submit" class="btn">Open</button></div></form>{{end}}
+{{if .Review}}<section class="perm-review" aria-labelledby="permission-review-heading"><h2 id="permission-review-heading">Review this change for {{.Selected.Name}}</h2>
+{{if ne .WorkspaceBefore .WorkspaceAfter}}<p>Workspace responsibility: <strong>{{.WorkspaceBefore}}</strong> to <strong>{{.WorkspaceAfter}}</strong>. Team grants stay unchanged.</p>{{end}}
+{{if .Changes}}<dl class="perm-diff">{{range .Changes}}<div><dt>{{.Team}}</dt><dd>{{.Before}} to <strong>{{.After}}</strong></dd></div>{{end}}</dl>{{end}}
+{{if .FutureLost}}<p><strong>Future-team access will be removed.</strong> Current team roles are preserved except for the change shown here. New teams will require an explicit grant.</p>{{end}}
+{{if .LegacyLost}}<p>The legacy all-team management grant will also be removed. Assign workspace Admin separately if this person should continue managing the workspace.</p>{{end}}
+{{if .Changed}}<form method="post" action="/permissions/change" id="permission-apply"><input type="hidden" name="action" value="apply"><input type="hidden" name="member" value="{{.Request.Member}}"><input type="hidden" name="revision" value="{{.Request.Revision}}"><input type="hidden" name="team" value="{{.Request.Team}}"><input type="hidden" name="role" value="{{.Request.Role}}"><input type="hidden" name="workspace_role" value="{{.Request.WorkspaceRole}}">{{if .Request.ConvertAll}}<input type="hidden" name="convert_all" value="1">{{end}}<button class="btn perm-primary" type="submit">Apply this change</button><a href="/permissions?member={{.Selected.Id}}">Cancel</a></form>{{else}}<p>These permissions already apply. Nothing needs to change.</p>{{end}}
+</section>{{end}}
+{{if .Ready}}
+<nav class="perm-jumps" aria-label="Permission sections"><a href="#permission-teams">Team access</a><a href="#permission-workspace">Workspace role</a></nav>
+<section class="perm-section perm-identity"><h2>{{.Selected.Name}}</h2>{{if eq .Selected.Kind "bot"}}<p>Bot · {{if .Owner}}owned by {{.Owner}}{{else}}no human owner{{end}}.{{if .Creator}} Delegated by {{.Creator}}.{{end}} Its grants cannot exceed its owner or creator. Sessions add no authority.</p>{{else}}<p>Person · workspace {{if eq .Selected.WorkspaceRole "admin"}}Admin{{else}}Member{{end}}. Administration manages grants; team roles determine content access.</p>{{end}}</section>
+
+<section class="perm-section" id="permission-teams"><h2>Team access</h2><p>Viewer reads team content. Editor can change it, including deleting content. Projects inherit the team's access. Archived teams remain read-only.</p>
+{{if .Selected.All}}<div class="perm-legacy"><strong>All current and future teams · {{if eq .Selected.DefaultRole "editor"}}Editor{{else}}Viewer{{end}}</strong><p>This retained grant includes teams created later. Changing one team's role converts it to explicit current-team roles.</p>{{if .Selected.LegacyManagement}}<p>Legacy management rights are also retained. This does not make {{.Selected.Name}} a workspace Admin.</p>{{end}}</div>{{end}}
+<table class="perm-teams"><caption class="perm-hidden-label">Team grants and effective access for {{.Selected.Name}}</caption><thead><tr><th scope="col">Team</th><th scope="col">Grant</th><th scope="col">Effective access</th><th scope="col">Change</th></tr></thead><tbody>
+{{range .Teams}}<tr><th scope="row"><strong>{{.Key}}</strong><span>{{.Name}}</span></th><td data-label="Grant">{{.Role}}</td><td data-label="Effective access"><strong>{{.Effective}}</strong>{{if .Limited}}<span>Bounded by owner / creator</span>{{end}}</td><td class="perm-change"><details><summary>Change role<span class="perm-hidden-label"> for {{.Key}}</span></summary><form method="post" action="/permissions/change"><input type="hidden" name="action" value="preview"><input type="hidden" name="member" value="{{.Member}}"><input type="hidden" name="revision" value="{{.Revision}}"><input type="hidden" name="team" value="{{.Id}}"><label for="role-{{.Id}}" class="perm-hidden-label">Role for {{.Key}}</label><select id="role-{{.Id}}" name="role"><option value="none"{{if eq .Choice "none"}} selected{{end}}>No access</option><option value="viewer"{{if eq .Choice "viewer"}} selected{{end}}>Viewer</option><option value="editor"{{if eq .Choice "editor"}} selected{{end}}>Editor</option></select>{{if .All}}<label class="perm-convert"><input type="checkbox" name="convert_all" value="1">Convert to current-team roles, losing future-team access and legacy management rights</label>{{end}}<button type="submit" class="btn">Preview change</button></form></details></td></tr>{{end}}
+</tbody></table>
+</section>
+<section class="perm-section" id="permission-workspace"><h2>Workspace role</h2><p>Admin can manage people, team grants and team lifecycle. It grants no private issues or documents by itself. Self-grants are explicit and audited.</p>
+{{if .CanAssignAdmin}}<form class="perm-role-form" method="post" action="/permissions/change"><input type="hidden" name="action" value="preview"><input type="hidden" name="member" value="{{.Selected.Id}}"><input type="hidden" name="revision" value="{{.Selected.Revision}}"><label for="workspace-role">Workspace role</label><select id="workspace-role" name="workspace_role"><option value="member"{{if eq .Selected.WorkspaceRole "member"}} selected{{end}}>Member</option><option value="admin"{{if eq .Selected.WorkspaceRole "admin"}} selected{{end}}>Admin</option></select><button type="submit" class="btn">Preview role change</button></form>{{else}}<p class="perm-readonly">Workspace role: Member. Only independent people can be Admin.</p>{{end}}
+</section>
+{{end}}
+<p class="perm-footer">Every applied grant change has a server audit record. Revocation takes effect on new requests and active streams; an open session does not preserve access.</p>
+<a class="perm-login" href="/me">Your login</a>
+{{end}}
+</div></div></main></div></body></html>{{end}}

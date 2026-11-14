@@ -97,6 +97,10 @@ pub struct Member {
   pub teams: Slice<TeamId>,
   #[json("mode", omitempty)]
   pub mode_wire: string,
+  #[json(omitempty)]
+  pub editor_teams: Slice<TeamId>,
+  #[json(omitempty)]
+  pub workspace_role: string,
   // Keys of `teams` the caller can see; filled by 'member list --json' only.
   #[json(omitempty)]
   pub team_keys: Slice<string>,
@@ -130,7 +134,7 @@ impl Member {
   /// predates scoped members). A bot's effective access is this within its
   /// owner's: records.effective_access.
   pub fn access(self) -> Option<Access> {
-    Access.parse(self.scope_wire, self.teams, self.mode_wire)
+    Access.parse(self.scope_wire, self.teams, self.mode_wire).map(|a| Access { editors: self.editor_teams, ..a })
   }
 
   /// Person or bot; None when the server does not say.
@@ -144,7 +148,7 @@ impl Member {
 
   /// This member with `access` in its wire fields.
   pub fn with_access(self, access: Access) -> Member {
-    Member { scope_wire: access.scope_wire(), teams: access.team_ids(), mode_wire: access.mode.wire(), ..self }
+    Member { scope_wire: access.scope_wire(), teams: access.team_ids(), mode_wire: access.mode.wire(), editor_teams: access.editors, ..self }
   }
 }
 
@@ -627,7 +631,7 @@ pub struct BotRotate {
 
 /// One team in an /api/lll/access answer.
 #[json]
-pub struct AccessTeam { pub id: TeamId, pub key: string }
+pub struct AccessTeam { pub id: TeamId, pub key: string, pub role: string }
 
 /// /api/lll/access: the calling member's effective access (a bot's within
 /// its owner's), read by `lll login` and the board's gate.
@@ -637,6 +641,7 @@ pub struct AccessReply {
   pub name: string,
   #[json("rw")]
   pub rw_wire: bool,
+  pub can_manage_permissions: bool,
   #[json("all")]
   pub all_wire: bool,
   pub teams: Slice<AccessTeam>,
@@ -647,6 +652,6 @@ impl AccessReply {
   pub fn access(self) -> Access {
     let reach = if self.all_wire { Reach.Every } else { Reach.Teams(self.teams.map(|t| t.id)) }
     let mode = if self.rw_wire { Mode.ReadWrite } else { Mode.ReadOnly }
-    Access { reach, mode }
+    Access { reach, mode, editors: self.teams.filter(|t| t.role == "editor").map(|t| t.id) }
   }
 }

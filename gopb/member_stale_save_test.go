@@ -54,7 +54,7 @@ func TestAStaleSelfSaveKeepsACommittedRotationAndDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The owner rotates the leaked token away.
-	if _, _, err := rotateBot(f.app, f.human, false, "bot-w", 3600); err != nil {
+	if _, _, err := rotateBot(f.app, f.human, "bot-w", 3600); err != nil {
 		t.Fatal(err)
 	}
 	if err := staleSave(f.app, stale); err != nil {
@@ -106,7 +106,7 @@ func TestConcurrentSelfSavesNeverRestoreARotatedToken(t *testing.T) {
 	}
 	var stranded []string
 	for i := 0; i < 40; i++ {
-		token, _, err := rotateBot(f.app, f.human, false, "bot-w", 3600)
+		token, _, err := rotateBot(f.app, f.human, "bot-w", 3600)
 		if err != nil {
 			t.Fatal(err)
 		}

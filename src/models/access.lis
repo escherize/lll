@@ -1,3 +1,5 @@
+import "go:strings"
+
 // What a member may do (LLL-542, LLL-543, LLL-675). The server decides
 // access (gopb effectiveAccess and the collection rules); these types are
 // how lll reads its answer and says what it asks for, so no code passes
@@ -44,6 +46,7 @@ pub enum Reach {
 pub struct Access {
   pub reach: Reach,
   pub mode: Mode,
+  pub editors: Slice<TeamId>,
 }
 
 impl Access {
@@ -53,8 +56,8 @@ impl Access {
   pub fn parse(scope: string, teams: Slice<TeamId>, mode: string) -> Option<Access> {
     let Some(m) = Mode.parse(mode) else { return None }
     match scope {
-      "all" => Some(Access { reach: Reach.Every, mode: m }),
-      "teams" => Some(Access { reach: Reach.Teams(teams), mode: m }),
+      "all" => Some(Access { reach: Reach.Every, mode: m, .. }),
+      "teams" => Some(Access { reach: Reach.Teams(teams), mode: m, .. }),
       _ => None,
     }
   }
@@ -70,7 +73,13 @@ impl Access {
       (Reach.Teams(mine), Reach.Every) => Reach.Teams(mine),
       (Reach.Teams(mine), Reach.Teams(theirs)) => Reach.Teams(mine.filter(|t| theirs.contains(t))),
     }
-    Access { reach, mode }
+    let mut editors: Slice<TeamId> = []
+    if !mode.writes() {
+      for id in self.editors.append(owner.editors...) {
+        if self.writes_team(id) && owner.writes_team(id) && !editors.contains(id) { editors = editors.append(id) }
+      }
+    }
+    Access { reach, mode, editors }
   }
 
   /// The wire scope: "all" or "teams".
@@ -96,8 +105,26 @@ impl Access {
     }
   }
 
+  pub fn sees_team(self, team: TeamId) -> bool {
+    self.every_team() || self.team_ids().contains(team)
+  }
+
+  pub fn writes_team(self, team: TeamId) -> bool {
+    self.sees_team(team) && (self.mode.writes() || self.editors.contains(team))
+  }
+
+  pub fn has_writes(self) -> bool {
+    self.mode.writes() || self.editors.any(|id| self.sees_team(id))
+  }
+
+  /// A stream is tied to the exact grant it rendered. Revocation or a change
+  /// in any team role closes it before another stale fragment is delivered.
+  pub fn signature(self) -> string {
+    f"{self.scope_wire()}:{self.mode.wire()}:{strings.Join(self.team_ids().map(|t| t.string()), ",")}:{strings.Join(self.editors.map(|t| t.string()), ",")}"
+  }
+
   pub fn same_as(self, other: Access) -> bool {
-    self.mode == other.mode && self.every_team() == other.every_team() && self.team_ids().equals(other.team_ids())
+    self.mode == other.mode && self.every_team() == other.every_team() && self.team_ids().equals(other.team_ids()) && self.editors.equals(other.editors)
   }
 }
 

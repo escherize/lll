@@ -6,6 +6,37 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-14
+
+### Added
+
+- Per-team Viewer/Editor grants and a separate workspace Admin responsibility,
+  with revision-guarded previews and permission-change audit records (LLL-793).
+- Admins can inspect and change grants with `lll member permissions` and `member access
+  --role` / `--workspace-role`, or use the mobile Permissions page. Login hints
+  and issue editing controls follow the selected team's role (LLL-793).
+
+### Fixed
+
+- Queued issue, record, invitation, management and bot-token writes recheck
+  current identity, ownership and credential state inside the write transaction;
+  committed narrowing or token retirement cannot retain stale authority (LLL-793).
+- Invitations accepted by existing people merge grants per team without
+  upgrading or downgrading unrelated teams (LLL-793).
+
+### Changed
+
+- The additive permissions migration preserves existing grants, credentials and
+  all-team coverage of future teams. Admin promotion and conversion are explicit;
+  conversion previews lost future coverage and legacy management. Unsafe
+  downgrades refuse, with upgrade/restart and backup restoration rehearsed
+  (LLL-793).
+- Claim, native record, invitation, membership and project cascade writes
+  consume resource-bound authorization values inside their transaction. Lifetime
+  guards reject use after the scope closes (LLL-793).
+- Permission documentation distinguishes identity, team access, bot ownership
+  and infrastructure operators, and labels earlier designs as history (LLL-791).
+
 ## [1.7.0] - 2026-11-13
 
 ### Added

@@ -1,0 +1,105 @@
+import "go:encoding/hex"
+import "go:encoding/json"
+import "go:net/url"
+
+import "models"
+import "pb"
+
+#[json]
+struct PermissionRequest {
+  revision: string,
+  #[json(omitempty)]
+  team: Option<models.TeamId>,
+  #[json(omitempty)]
+  role: Option<string>,
+  #[json(omitempty)]
+  workspace_role: Option<string>,
+  #[json(omitempty)]
+  convert_all_teams: bool,
+  preview: bool,
+}
+
+pub fn permission_members(
+  ctx: pb.Client,
+) -> Result<models.PermissionsIndex, pb.CliError> {
+  require_permission_management(ctx)?
+  let raw = ctx.get("/api/lll/permissions")?
+  let mut reply = models.PermissionsIndex { .. }
+  json
+    .Unmarshal(raw.bytes(), &reply)
+    .map_err(|e| pb.failed(f"decoding permissions: {e}"))?
+  if reply.members.any(
+    |m| m.id.is_empty() || m.name == "" ||
+    !valid_permission_revision(m.revision),
+  ) {
+    return Err(pb.failed(
+      "the permission roster is incomplete; nothing was changed",
+    ))
+  }
+  Ok(reply)
+}
+
+pub fn permission_change(
+  ctx: pb.Client,
+  observed: models.MemberPermissions,
+  mutation: models.PermissionMutation,
+  preview: bool,
+) -> Result<models.PermissionPlan, pb.CliError> {
+  require_permission_management(ctx)?
+  if observed.id.is_empty() || !valid_permission_revision(observed.revision) {
+    return Err(pb.failed(
+      "read the current permission revision before changing access",
+    ))
+  }
+  let request = match mutation {
+    models.PermissionMutation.Team { team, role, convert_all } => PermissionRequest {
+      revision: observed.revision,
+      team: Some(team),
+      role: Some(role.wire()),
+      convert_all_teams: convert_all,
+      preview,
+      ..,
+    },
+    models.PermissionMutation.Workspace(role) => PermissionRequest {
+      revision: observed.revision,
+      workspace_role: Some(role.wire()),
+      preview,
+      ..,
+    },
+  }
+  let raw = ctx
+    .post(
+      f"/api/lll/permissions/{url.PathEscape(observed.id.string())}",
+      encode(request, "permission change")?,
+    )
+    .map_err(|e| if e.status == 0 || e.status >= 500 {
+      e.with_message(
+        f"{e.message}\nThe request may have completed; read the current permissions before retrying.",
+      )
+    } else {
+      e
+    })?
+  let mut reply = models.PermissionPlan { .. }
+  let decoded = json.Unmarshal(raw.bytes(), &reply)
+  if decoded.is_err() || reply.before.id != observed.id || reply.after.id != observed.id || !valid_permission_revision(
+    reply.after.revision,
+  ) || reply.applied == preview {
+    return Err(pb.failed(
+      "the permission response was incomplete or named another member; read current permissions before retrying",
+    ))
+  }
+  Ok(reply)
+}
+
+fn require_permission_management(ctx: pb.Client) -> Result<(), pb.CliError> {
+  require_capability(
+    ctx,
+    "permissions.workspace",
+    "/api/lll/permissions/support",
+    "team-role and workspace administration; upgrade the server before retrying",
+  )
+}
+
+fn valid_permission_revision(value: string) -> bool {
+  value.length() == 64 && hex.DecodeString(value).is_ok()
+}

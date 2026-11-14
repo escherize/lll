@@ -46,10 +46,22 @@ static assets are embedded in the binary.
 - Filtering exists: filter chips (assignee/label/priority/state), hideable
   columns, saved views, favorites, and `/search?q=…` which queries the database
   rather than the rendered page.
-- Auth exists (ADR-1, 2026-08-29): `members` is a PocketBase auth collection,
-  every collection rule is `@request.auth.id != ""`, humans sign in with email
-  + password and agents ride static impersonate tokens. The board is separately
-  gated by a board token.
+- One instance is one workspace containing teams. Projects group work inside
+  one team; they are not a separate sharing boundary. Issues belong to a team
+  and can also belong to a project or an issue hierarchy.
+- Identity is a member credential. People can join through invitations and
+  use the same identity in the browser and CLI; bots have their own identities
+  and credentials. Effective bot access is bounded by its human owner and,
+  for delegated workers, its creator.
+- Native PocketBase rules and server hooks enforce team access. Board pages,
+  search and live fragments read as their viewer. Personal sign-in, an
+  operator's bootstrap credentials and the shared board credential serve
+  different purposes; a session label adds no authority.
+- Team data access uses Viewer/Editor grants; workspace Admin is a separate
+  responsibility. The 1.8 migration preserves legacy all-team/future-team grants
+  and credentials, promotes nobody automatically, and explains explicit
+  conversion. See [the permissions contract](docs/permissions.md) and
+  [migration procedure](docs/permissions-migration.md).
 - No build step, no JS beyond Datastar, CSS custom properties for tokens. [user-confirmed]
 
 ## Brand Commitments

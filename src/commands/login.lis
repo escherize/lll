@@ -446,9 +446,23 @@ fn settle_team(ctx: pb.Client, read_only: bool) -> output.Output {
     "ready: lll issue create \"a title\""
   }
   let Ok(cfg) = ctx.settings.config() else { return output.none() }
+  let mut access = models.AccessReply { .. }
+  if let Ok(body) = ctx.get("/api/lll/access") { let _ = json.Unmarshal(body.bytes(), &access) }
+  let ready_for = |team: models.Team| -> string {
+    let role = access.teams.find(|t| t.id == team.id).map_or("", |t| t.role)
+    if role == "viewer" { "ready (read-only): lll issue list" }
+    else if role == "editor" { "ready: lll issue create \"a title\"" }
+    else { ready }
+  }
   let teams = match records.list_teams(ctx) {
     Ok(teams) => teams,
     Err(e) => return output.line(f"authenticated, but could not verify team setup: {e.message}\nnext: lll team list, then lll attach --key KEY"),
+  }
+  if access.can_manage_permissions && access.teams.is_empty() {
+    return output.line("authenticated as workspace Admin with no team content grants. Review Permissions on the board or use 'lll member permissions'; administration does not grant team content access.")
+  }
+  if cfg.team != "" && access.can_manage_permissions && !access.teams.any(|t| t.key == cfg.team) {
+    return output.line(f"authenticated as workspace Admin; team {cfg.team} has no content grant. Review Permissions on the board or use 'lll member permissions'; administration does not grant team content access.")
   }
   if cfg.team != "" {
     return match teams.items.find(|t| t.key == cfg.team) {
@@ -456,13 +470,13 @@ fn settle_team(ctx: pb.Client, read_only: bool) -> output.Output {
         if team.archived {
           output.line(f"authenticated, but team {cfg.team} is archived; run 'lll team unarchive {cfg.team}' to restore it, or attach to another team")
         } else {
-          output.line(f"team {cfg.team}: {ready}")
+          output.line(f"team {cfg.team}: {ready_for(team)}")
         }
       },
       None => output.line(f"authenticated, but team {cfg.team} is missing on this server. Check 'lll team list --archived' and reattach with 'lll attach --key EXISTING_KEY'. Only if you intend a new team, run 'lll attach --key {cfg.team}'."),
     }
   }
-  let live = teams.items.filter(|t| !t.archived)
+  let live = teams.items.filter(|t| !t.archived && (!access.can_manage_permissions || access.teams.any(|a| a.id == t.id)))
   if live.length() == 1 {
     let key = live[0].key
     let Ok(path) = set_home_key(ctx.settings, "team", key) else {
@@ -471,7 +485,7 @@ fn settle_team(ctx: pb.Client, read_only: bool) -> output.Output {
     // "you can see": a team-scoped member is shown only its teams, so "the
     // server's only team" was false for it (verification fleet, LLL-552).
     return output.line(f"team = \"{key}\" in {path} (the only team you can see)")
-      .line(ready)
+      .line(ready_for(live[0]))
       .line("in a shared repo, 'lll attach' writes .lll.toml; commit that file with Git if clones should inherit the team")
   }
   if live.length() > 1 {

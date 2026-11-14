@@ -62,7 +62,7 @@ contacted server; a loopback fallback for a remote API is also refused before
 creating an invite. Set `LLL_WEB_URL` to the
 shared board address if your server does not advertise one.
 
-Only a full read-write person member without an owner, or a superuser, can
+A workspace Admin, a legacy full read-write person without an owner, or a superuser can
 create invites. The command does not send messages or create the recipients'
 bots. Invite links and the tokens on the setup page are credentials; send
 each person only their link, and keep tokens out of shared drafts.
@@ -73,7 +73,9 @@ Acceptance uses the member authenticated in the browser, never a name or member
 ID from the form. It adds the invited teams without creating a second account
 or replacing the current token. Existing CLI logins keep working.
 
-Access mode is currently member-wide. An invite that would widen or downgrade
-unrelated teams is refused without being spent; ask an administrator to resolve
-that combination. Bots and owned identities cannot accept grants outside their
-owner relationship. Existing bots are not automatically granted extra teams.
+Acceptance adds the invited Viewer or Editor grants without changing unrelated
+team roles. A Viewer invitation does not downgrade an existing Editor grant;
+an Editor invitation upgrades only its named teams. Existing all-team and
+future-team coverage stays intact. Bots and owned identities cannot accept
+independent grants. A refused identity leaves the invitation unused. Existing
+bots are not automatically granted extra teams.
