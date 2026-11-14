@@ -200,7 +200,7 @@ func rotateBotIn(app core.App, auth *core.Record, superuser bool, name string, d
 	// creator re-owned or left without an owner rotates nothing.
 	createdByCaller := auth != nil && bot.GetString("created_by") != "" && auth.Id == bot.GetString("created_by") &&
 		auth.GetString("owner") != "" && auth.GetString("owner") == bot.GetString("owner")
-	if createdByCaller && !effectiveAccess(app, auth).rw {
+	if createdByCaller && !effectiveAccess(app, auth).hasWrite() {
 		return "", nil, router.NewForbiddenError("a read-only bot cannot rotate the bots it created; ask their owner", nil)
 	}
 	if createdByCaller && !effectiveAccess(app, auth).covers(effectiveAccess(app, bot)) {

@@ -53,7 +53,7 @@ func prepareProjectCascade(app core.App, auth *core.Record, id string, writing b
 		return out, nil, router.NewNotFoundError("project not found", nil)
 	}
 	if writing {
-		if !acc.rw {
+		if !acc.writes(project.GetString("team")) {
 			return out, nil, router.NewForbiddenError(readOnlyRefusal(caller), nil)
 		}
 		if err := archivedRefusal(app, caller, project.GetString("team")); err != nil {

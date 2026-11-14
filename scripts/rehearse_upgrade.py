@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 
 from board_startup import wait_for_endpoints
+from permission_rehearsal import PermissionRehearsal
 
 
 def free_port():
@@ -32,6 +33,7 @@ def main():
     parser.add_argument('--before', required=True, type=Path)
     parser.add_argument('--after', required=True, type=Path)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--permissions', action='store_true', help='compare populated identity grants across upgrade and backup restore (requires 1.7+ baseline)')
     args = parser.parse_args()
     before, after = args.before.resolve(), args.after.resolve()
     for binary in (before, after):
@@ -74,8 +76,8 @@ def main():
             api = wait_for_endpoints(log)['db_url']
             assert child.poll() is None, 'isolated server exited during startup'
 
-        def request(path, body=None, auth=None):
-            req = urllib.request.Request(api + path, data=None if body is None else json.dumps(body).encode(),
+        def request(path, body=None, auth=None, method=None):
+            req = urllib.request.Request(api + path, method=method, data=None if body is None else json.dumps(body).encode(),
                 headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token if auth is None else auth)})
             try:
                 response = urllib.request.urlopen(req, timeout=15)
@@ -152,6 +154,10 @@ def main():
                 else:
                     assert capability == 200
                     report['old_server_activity_webhook'] = 'supported by baseline'
+            permissions = None
+            if args.permissions:
+                permissions = PermissionRehearsal(request, admin)
+                report['permissions_before'] = permissions.seed()
             stop()
             # A stopped copy includes the consistent SQLite database, WAL and
             # embedded migration state. Never restore by downgrading migrated data.
@@ -160,6 +166,13 @@ def main():
             start(after, data, 'after')
             verify(before, 'after')
             verify(after, 'after')
+            if permissions:
+                status, infrastructure = request('/api/collections/_superusers/auth-with-password',
+                    {'identity': env['LLL_ADMIN_EMAIL'], 'password': env['LLL_ADMIN_PASSWORD']}, '')
+                assert status == 200
+                permissions.admin = infrastructure['token']
+                report['permissions_upgrade'] = permissions.verify('upgraded server')
+                report['permissions_future_teams'] = permissions.verify_future_team()
             status, support = request('/api/lll/comments/idempotency')
             assert status == 200 and support.get('supported') is True
             argv = ('issue', 'comment', key, '-b', 'Retried after upgrade', '--idempotency-key', 'upgrade-comment', '--json')
@@ -173,6 +186,8 @@ def main():
             shutil.copytree(snapshot, restored)
             start(before, restored, 'restored-before')
             view = verify(before, 'restored-before')
+            if permissions:
+                report['permissions_restore'] = permissions.verify('restored baseline backup')
             assert [c['body'] for c in view['comments']] == ['Before upgrade']
             report['restore'] = 'old binary starts stopped pre-upgrade backup; original member token works; post-backup writes absent'
             report['result'] = 'pass'

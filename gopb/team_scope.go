@@ -53,7 +53,7 @@ func issueWritable(re *core.RequestEvent, issueID string) error {
 	if !acc.sees(issue.GetString("team")) {
 		return re.NotFoundError("", nil)
 	}
-	if !acc.rw {
+	if !acc.writes(issue.GetString("team")) {
 		return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 	}
 	return archivedRefusal(re.App, re.Auth, issue.GetString("team"))
@@ -69,6 +69,40 @@ func issueWritable(re *core.RequestEvent, issueID string) error {
 // variant, so seeding and direct saves get it too. Only a missing value is
 // filled; "teams" with no teams stays exactly that.
 func registerMemberScopeDefault(app core.App) {
+
+	// Legacy clients cannot describe an Editor subset. Refuse their access
+	// mutations on a mixed identity instead of silently widening or dropping it.
+	app.OnRecordUpdateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		info, err := e.RequestInfo()
+		if err != nil {
+			return err
+		}
+		current, err := e.App.FindRecordById("members", e.Record.Id)
+		if err != nil {
+			return err
+		}
+		if len(current.GetStringSlice("editor_teams")) > 0 {
+			_, explicit := info.Body["editor_teams"]
+			for _, field := range []string{"scope", "mode", "teams", "teams+", "teams-"} {
+				if _, sent := info.Body[field]; sent && !explicit {
+					return withCode(router.NewBadRequestError("this member has per-team roles; upgrade the client and use team-role management before changing access", nil), "team_roles_required")
+				}
+			}
+		}
+		return e.Next()
+	})
+	app.OnRecordCreateRequest("members").BindFunc(func(e *core.RecordRequestEvent) error {
+		if e.Auth != nil && !e.Auth.IsSuperuser() && e.Record.GetString("kind") == botKind {
+			caller, err := lifecycleCaller(e.App, e.Auth)
+			if err != nil {
+				return err
+			}
+			if !effectiveAccess(e.App, caller).hasWrite() {
+				return router.NewForbiddenError("a Viewer cannot provision bots", nil)
+			}
+		}
+		return e.Next()
+	})
 	app.OnRecordCreate("members").BindFunc(func(e *core.RecordEvent) error {
 		def := access{all: true, rw: true}
 		if e.Record.GetString("kind") == botKind && e.Record.GetString("owner") != "" {
@@ -82,6 +116,7 @@ func registerMemberScopeDefault(app core.App) {
 			def = effectiveAccess(e.App, creator)
 		}
 		if e.Record.GetString("scope") == "" {
+			e.Record.Set("editor_teams", def.editors)
 			if def.all {
 				e.Record.Set("scope", "all")
 			} else {
@@ -128,7 +163,7 @@ func registerMemberScopeDefault(app core.App) {
 		if before.GetString("created_by") != "" && e.Record.GetString("created_by") == "" {
 			e.Record.RefreshTokenKey()
 		}
-		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode"} {
+		for _, field := range []string{"kind", "owner", "created_by", "scope", "teams", "mode", "editor_teams"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				if err := checkOwner(e.App, e.Record); err != nil {
 					return err
@@ -145,7 +180,7 @@ func registerMemberScopeDefault(app core.App) {
 
 // guardedMemberFields are the member columns a save must not roll back:
 // who owns and created the member, what it may do, and its token key.
-var guardedMemberFields = []string{"kind", "owner", "created_by", "scope", "teams", "mode", core.FieldNameTokenKey}
+var guardedMemberFields = []string{"kind", "owner", "created_by", "scope", "teams", "mode", "editor_teams", core.FieldNameTokenKey}
 
 // keepCommitted returns the member as stored now and keeps, on m, every
 // committed value the save did not itself change (LLL-709 review F5,
@@ -255,6 +290,10 @@ func detachStaleCreator(app core.App, m, before *core.Record) {
 
 // setAccess writes a to m's scope, teams and mode.
 func setAccess(m *core.Record, a access) {
+	if m.Collection().Fields.GetByName("editor_teams") != nil {
+		m.Set("editor_teams", a.editors)
+	}
+
 	m.Set("teams", []string{})
 	if a.all {
 		m.Set("scope", "all")
@@ -286,6 +325,13 @@ func setAccess(m *core.Record, a access) {
 // when its kind, owner, created_by or access changes. Narrowing an owner is not checked: what it owns narrows with it.
 // An owner id that does not exist is left to the relation validator.
 func checkOwner(app core.App, m *core.Record) error {
+	own := ownAccess(m)
+	for _, id := range own.editors {
+		if !own.sees(id) {
+			return router.NewBadRequestError("an Editor grant requires readable membership in the same team", nil)
+		}
+	}
+
 	name := m.GetString("name")
 	if err := checkCreator(app, m); err != nil {
 		return err
@@ -495,7 +541,7 @@ func refuseReadOnlyWrites(re *core.RequestEvent) error {
 		return re.Next()
 	}
 	name := re.Request.PathValue("collection")
-	if name == "" || re.Auth == nil || effectiveAccess(re.App, re.Auth).rw {
+	if name == "" || re.Auth == nil || effectiveAccess(re.App, re.Auth).hasWrite() {
 		return re.Next()
 	}
 	if c, err := re.App.FindCachedCollectionByNameOrId(name); err == nil {
@@ -528,21 +574,27 @@ func registerAccessRoute(routes *router.Router[*core.RequestEvent]) {
 			return re.InternalServerError("failed to read teams", err)
 		}
 		type team struct {
-			ID  string `json:"id"`
-			Key string `json:"key"`
+			ID   string `json:"id"`
+			Key  string `json:"key"`
+			Role string `json:"role"`
 		}
 		teams := []team{}
 		for _, t := range all {
 			if acc.sees(t.Id) {
-				teams = append(teams, team{ID: t.Id, Key: t.GetString("key")})
+				role := "viewer"
+				if acc.writes(t.Id) {
+					role = "editor"
+				}
+				teams = append(teams, team{ID: t.Id, Key: t.GetString("key"), Role: role})
 			}
 		}
 		return re.JSON(http.StatusOK, map[string]any{
-			"id":    re.Auth.Id,
-			"name":  re.Auth.GetString("name"),
-			"rw":    acc.rw,
-			"all":   acc.all,
-			"teams": teams,
+			"permissions_version": 2,
+			"id":                  re.Auth.Id,
+			"name":                re.Auth.GetString("name"),
+			"rw":                  acc.rw,
+			"all":                 acc.all,
+			"teams":               teams,
 		})
 	})
 }

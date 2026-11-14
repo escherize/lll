@@ -1450,6 +1450,7 @@ python3 "$REPO_ROOT"/scripts/test_cli_contract.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_watch_activity.py "$LLL_ABS"
 # --- member invite --team: one team over the API and the board ---
 python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
+python3 "$REPO_ROOT"/scripts/test_team_roles.py "$LLL_ABS"
 # --- who made or owns a record is the server's word, not a member's (LLL-681) ---
 python3 "$REPO_ROOT"/scripts/test_identity_fields.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_board_head.py "$LLL_ABS"

@@ -115,3 +115,29 @@ when loaded before a concurrent permission change.
   rollback, matching-backup restore, future teams and both client-skew paths.
 - Product: CLI and mobile board show roles and why access exists, distinguish
   workspace responsibility from team grants, and explain legacy all-team grants.
+
+## Reproducible upgrade evidence
+
+The permission fixture is deliberately optional for older release rehearsals;
+its baseline must support the 1.7 member/bot/creator contract:
+
+```sh
+python3 scripts/rehearse_upgrade.py --before /path/to/lll-1.7.0 \
+  --after /path/to/candidate --permissions --report /tmp/permissions-upgrade.json
+python3 scripts/test_team_roles.py /path/to/candidate \
+  --report /tmp/team-role-enforcement.json
+```
+
+The first command creates ten distinct identities (people, empty scopes,
+unowned and personal/delegated bots), records actual read/write decisions,
+upgrades the populated database, reuses the original member credentials and
+compares those decisions. It tests a team created after upgrade, then starts
+the old binary on the stopped pre-upgrade backup and compares the original
+matrix again. Operator authentication is renewed after boot; member tokens
+are not renewed. A passing receipt is baseline-preservation evidence, not
+proof that every new role-management feature works.
+
+The second command checks new mixed-role enforcement, source/destination
+moves, native/custom route agreement, self-escalation refusal, hidden roster
+probes, safe legacy mutation refusal, bot inheritance and owner revocation.
+Both commands own throwaway databases and accept no hosted server URL.

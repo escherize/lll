@@ -113,8 +113,10 @@ func registerRosterScope(app core.App) {
 			e.Record.IgnoreEmailVisibility(true)
 			return e.Next()
 		}
-		teams := e.Record.GetStringSlice("teams")
-		e.Record.Set("teams", slices.DeleteFunc(slices.Clone(teams), func(id string) bool { return !acc.sees(id) }))
+		for _, field := range []string{"teams", "editor_teams"} {
+			ids := e.Record.GetStringSlice(field)
+			e.Record.Set(field, slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return !acc.sees(id) }))
+		}
 		return e.Next()
 	})
 
@@ -134,7 +136,7 @@ func registerRosterScope(app core.App) {
 	// cached record.
 	app.OnRecordAfterUpdateSuccess("members").BindFunc(func(e *core.RecordEvent) error {
 		before := e.Record.Original()
-		for _, field := range []string{"scope", "teams", "owner", "mode"} {
+		for _, field := range []string{"scope", "teams", "owner", "mode", "editor_teams"} {
 			if !slices.Equal(e.Record.GetStringSlice(field), before.GetStringSlice(field)) {
 				dropRefusedSubscriptions(e.App, e.Record.Id)
 				break
@@ -479,7 +481,7 @@ func pathCrossesRoster(app core.App, base *core.Collection, path string) bool {
 	props := strings.Split(path, ".")
 	current := base
 	if base.Name == "members" {
-		if first, _, _ := strings.Cut(props[0], ":"); first == core.FieldNameEmail || first == "teams" {
+		if first, _, _ := strings.Cut(props[0], ":"); first == core.FieldNameEmail || (first == "teams" || first == "editor_teams") {
 			return true
 		}
 	}

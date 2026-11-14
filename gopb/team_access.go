@@ -16,7 +16,7 @@ type access struct {
 }
 
 func ownAccess(m *core.Record) access {
-	return access{all: m.GetString("scope") == "all", teams: m.GetStringSlice("teams"), rw: m.GetString("mode") == "rw"}
+	return access{all: m.GetString("scope") == "all", teams: m.GetStringSlice("teams"), rw: m.GetString("mode") == "rw", editors: m.GetStringSlice("editor_teams")}
 }
 func (a access) sees(team string) bool { return a.all || slices.Contains(a.teams, team) }
 func (a access) writes(team string) bool {
@@ -71,4 +71,13 @@ func (a access) covers(b access) bool {
 		}
 	}
 	return true
+}
+
+// hasWrite is for provisioning and diagnostic middleware, never a content
+// authorization decision; content needs writes(theActualTeam).
+func (a access) hasWrite() bool {
+	if a.rw {
+		return true
+	}
+	return slices.ContainsFunc(a.editors, a.sees)
 }
