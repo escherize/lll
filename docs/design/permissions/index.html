@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>lll · Permission management study</title>
+  <link rel="stylesheet" href="study.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#maps" aria-label="lll permission study"><span class="brand-mark">L</span><strong>lll</strong></a>
+    <span class="top-divider" aria-hidden="true"></span><span>Permission management</span>
+    <span class="study-label">Design study · fictional people · no server connection</span>
+    <button id="reset" class="quiet" type="button">Reset example</button>
+  </header>
+  <main>
+    <div class="intro">
+      <div><h1>Who can do what, and why?</h1><p>The same people and work, viewed through the shipped model and a membership-based proposal.</p></div>
+      <span class="version">Current: v1.7.0 <span aria-hidden="true">/</span> Proposal: draft</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Permission study views">
+      <button id="tab-maps" role="tab" aria-selected="true" aria-controls="maps" data-view="maps" tabindex="0">Relationship maps</button>
+      <button id="tab-manage" role="tab" aria-selected="false" aria-controls="manage" data-view="manage" tabindex="-1">Manage access</button>
+      <button id="tab-bots" role="tab" aria-selected="false" aria-controls="bots" data-view="bots" tabindex="-1">Bot authority</button>
+      <button id="tab-research" role="tab" aria-selected="false" aria-controls="research" data-view="research" tabindex="-1">Research & decisions</button>
+    </nav>
+    <div id="maps" class="view" role="tabpanel" aria-labelledby="tab-maps"></div>
+    <div id="manage" class="view" role="tabpanel" aria-labelledby="tab-manage" hidden></div>
+    <div id="bots" class="view" role="tabpanel" aria-labelledby="tab-bots" hidden></div>
+    <section id="research" class="view research" role="tabpanel" aria-labelledby="tab-research" hidden>
+      <div class="research-intro"><h2>Yes to focused research. No universal hierarchy to copy.</h2><p>Established products make different choices about administrator visibility, inherited access and automation ownership. The useful research is deciding those boundaries for lll, then testing whether people can predict the result.</p><p class="muted">Primary documentation checked 13 November 2026. These are product-pattern observations, not an independent security certification.</p></div>
+      <div class="table-scroll"><table class="research-table"><caption>What comparable systems teach us</caption><thead><tr><th scope="col">Source</th><th scope="col">Observed pattern</th><th scope="col">Implication for lll · our interpretation</th></tr></thead><tbody>
+        <tr><th scope="row"><a href="https://linear.app/docs/members-roles">Linear roles</a><br><a href="https://linear.app/docs/private-teams">Private teams</a></th><td data-label="Observed pattern">Workspace authority and team membership are distinct. Private-team issue access requires membership; privileged users can join through an explicit confirmation.</td><td data-label="Implication for lll">Do not let the word “Admin” silently answer the private-data question. Show when and why an administrator enters a restricted team.</td></tr>
+        <tr><th scope="row"><a href="https://docs.github.com/en/enterprise-cloud@latest/organizations/managing-user-access-to-your-organizations-repositories/managing-repository-roles/repository-roles-for-an-organization">GitHub repository roles</a></th><td data-label="Observed pattern">Organization authority and repository roles are separate concepts. Organization owners have administrative access to every repository.</td><td data-label="Implication for lll">This is a different, valid policy from an explicit private-team join. Pick the trust model deliberately; do not mix their labels and expectations.</td></tr>
+        <tr><th scope="row"><a href="https://docs.gitlab.com/user/permissions/">GitLab permissions</a></th><td data-label="Observed pattern">Roles attach to groups and projects. When several memberships apply, the highest applicable role wins.</td><td data-label="Implication for lll">Borrow resource-specific roles and an explanation of access sources. Avoid nested groups and additive inheritance until there is a real need. A delegated bot ceiling is an intersection, not a highest-role rule.</td></tr>
+        <tr><th scope="row"><a href="https://docs.gitlab.com/user/profile/service_accounts/">GitLab service accounts</a></th><td data-label="Observed pattern">Non-human identities can belong to an instance, group or project, with scope-specific provisioning rules and stable automation credentials.</td><td data-label="Implication for lll">A personal coding agent and a durable CI bot may need different ownership lifecycles. Workspace-owned automation needs explicit grants and a responsible human, not automatic broad access.</td></tr>
+        <tr><th scope="row"><a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">OWASP authorization guidance</a></th><td data-label="Observed pattern">Use least privilege, deny by default and check every request. Roles alone do not capture contextual and relationship constraints.</td><td data-label="Implication for lll">Viewer and Editor are understandable labels, not the entire evaluator. Keep owner/creator ceilings, team checks, revocation, reference guards and stream checks underneath.</td></tr>
+      </tbody></table></div>
+      <h2>Decisions to test before implementation</h2>
+      <div class="decision-list">
+        <article><h3>Can a workspace administrator read Finance?</h3><p>Compare automatic access with an explicit, audited join. Define whether an administrator can grant themselves access. A settings role alone must not leave this ambiguous.</p><p class="test-case">Walkthrough: a workspace admin who is not in Finance tries to open a payroll issue.</p></article>
+        <article><h3>What happens when a bot’s human leaves?</h3><p>Retain fail-closed behavior for personal agents. Separately decide whether durable CI belongs to the workspace and how its steward, credentials and grants transfer.</p><p class="test-case">Walkthrough: Alice leaves while the release bot has an active token and two running sessions.</p></article>
+        <article><h3>Is a project ever a separate sharing boundary?</h3><p>The draft keeps today’s rule: projects inherit team access. If clients must see one project only, compare a dedicated team with a fully specified project-grant model, including docs, labels, members, search and issue moves.</p><p class="test-case">Walkthrough: an external reviewer should see one project but none of the team’s other work or metadata.</p></article>
+        <article><h3>Which actions count as editing work?</h3><p>Confirm the capability matrix for issue deletion, project archival, labels and bot provisioning. Avoid adding a new role for every action before the common Viewer / Editor distinction is understood.</p><p class="test-case">Walkthrough: a team Editor tries to delete a project, invite a person and create their own bot.</p></article>
+      </div>
+      <div class="next-research"><h2>A bounded next research round</h2><p>Run these four scenarios with three people who would administer or use lll. Ask them to predict access before using the mockup. Record the surprises, agree on one permission matrix and offboarding policy, then turn those into adversarial acceptance cases before migrating data.</p><p>Keep the first implementation small: explicit workspace administration, per-team Viewer / Editor membership, personal bots with bounded grants, and sessions with no independent authority. Project ACLs, nested organizations, custom roles and durable service-bot ownership remain separate decisions.</p></div>
+      <details class="implementation-truth"><summary>Source notes for the current-world maps</summary><p>The current model is taken from v1.7.0: <code>gopb/team_scope.go</code>, <code>gopb/invites.go</code>, <code>gopb/bot_lifecycle.go</code>, <code>docs/inviting.md</code> and the collection-rule snapshot. Read/write is member-wide; owner and creator rules bound delegation. A “board” is a view or local setup term, not a separate organization record. The management screens are explanatory reconstructions, not screenshots of the shipped UI.</p><p>LLL-791 tracks stale permission documentation. This study does not update the authorization model or turn historical design sketches into current policy.</p></details>
+    </section>
+    <footer><span>LLL-792 · Review artifact, not a product implementation.</span><a href="#research" data-go="research">Sources and unresolved decisions</a></footer>
+  </main>
+  <div class="sr-only" id="announcement" role="status" aria-live="polite"></div>
+  <script src="study.js"></script>
+</body>
+</html>
