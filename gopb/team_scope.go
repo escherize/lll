@@ -567,6 +567,58 @@ func refuseReadOnlyWrites(re *core.RequestEvent) error {
 	return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 }
 
+// managesTeams mirrors the teams create/update/delete rules: a workspace
+// Admin, or a legacy all-team read-write grant whose owner, if any, holds
+// the same. It only decides whether refuseTeamManagement can name the
+// reason; the rules remain the enforcement.
+func managesTeams(app core.App, auth *core.Record) bool {
+	if isWorkspaceAdmin(auth) {
+		return true
+	}
+	legacy := func(m *core.Record) bool {
+		return m.GetString("scope") == "all" && m.GetString("mode") == "rw"
+	}
+	if !legacy(auth) {
+		return false
+	}
+	owner := auth.GetString("owner")
+	if owner == "" {
+		return true
+	}
+	o, err := app.FindRecordById(auth.Collection(), owner)
+	return err == nil && legacy(o)
+}
+
+func teamManagementRefusal(auth *core.Record) string {
+	return "team management refused: creating, renaming, archiving or deleting a team needs a workspace Admin or a legacy all-team read-write grant, and " +
+		auth.GetString("name") + " has neither. 'lll whoami' shows your access; ask a workspace Admin"
+}
+
+// refuseTeamManagement answers a member's team write that the teams rules
+// would refuse with a 403 that says why, instead of the rule's bare "Failed
+// to create record." (400) or "The requested resource wasn't found." (404)
+// (LLL-800: three of five fleet workers could not tell a refusal from a
+// missing team). Like refuseReadOnlyWrites it answers before any record
+// lookup, so the reply is the same whether or not the id exists.
+func refuseTeamManagement(re *core.RequestEvent) error {
+	method := re.Request.Method
+	if method != http.MethodPost && method != http.MethodPatch && method != http.MethodDelete {
+		return re.Next()
+	}
+	name := re.Request.PathValue("collection")
+	if name == "" || re.Auth == nil || re.Auth.Collection().Name != "members" ||
+		!strings.HasPrefix(re.Request.URL.Path, "/api/collections/") {
+		return re.Next()
+	}
+	if c, err := re.App.FindCachedCollectionByNameOrId(name); err == nil {
+		name = c.Name
+	}
+	if name != "teams" || managesTeams(re.App, re.Auth) {
+		return re.Next()
+	}
+	return re.ForbiddenError(teamManagementRefusal(re.Auth), nil)
+}
+
 // registerAccessRoute answers GET /api/lll/access with the calling member's
 // effective access (LLL-545): the board resolves a member-token cookie
 // through it on every request. PocketBase's auth middleware has already
