@@ -75,6 +75,10 @@ Invite teammates as people, then let each person connect their own agents.
 They can also follow a view-only board link in a browser without installing
 anything. [Inviting and sharing](docs/inviting.md) explains the access choices.
 
+To have an agent answer comments on a task, `lll issue watch KEY-12 --until
+@agent` waits for one; `lll skill get lll` has the recipe under "Drive an
+agent from an issue".
+
 For a fuller optional workflow, `lll skill get software-factory` describes
 claiming, isolating, building, verifying, merging and recording. Use it as a
 starting point for your own process.

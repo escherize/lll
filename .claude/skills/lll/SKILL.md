@@ -338,6 +338,48 @@ comment. A matching retry reports `Reused the comment` (`reused: true` with
 fingerprint includes the agent label, so retry with the same `--agent`. The
 CLI checks server support before writing and refuses on an older server.
 
+## Drive an agent from an issue
+
+A person writes a comment on the board; an agent waiting on that issue acts
+and answers in a comment. Agree on a marker the person will type, such as
+`@agent`.
+
+For one request, wait, act, reply:
+
+```sh
+lll issue watch KEY-12 --until @agent --json --timeout 3600 | tail -n 1   # the matching comment
+# ... act on .record.body ...
+lll issue comment KEY-12 -b "what I did"
+```
+
+`--until` exits 0 on the first comment containing the text and nonzero when
+`--timeout` runs out. With `--json` it prints every comment event that arrives
+while it waits; the match is the last line.
+
+**Do not put `--until` in a loop.** A comment that already matches ends the
+wait at once (`action` is `snapshot`), and it is the earliest match, so the
+second pass returns the request you just handled. To keep answering, hold one
+stream open and filter it:
+
+```sh
+lll issue watch KEY-12 --json |
+  jq --unbuffered -r 'select(.topic == "comments" and .action == "create"
+      and (.record.body | contains("@agent"))) | .record.body' |
+  while read -r request; do
+    # ... act on "$request" ...
+    lll issue comment KEY-12 -b "what I did"
+  done
+```
+
+Keep the marker out of your replies, or the stream hands them back to you as
+requests. The stream is live-only: a comment written while nothing was
+watching is not replayed, so read `lll issue view KEY-12 --raw` once on start.
+
+`lll issue watch` covers one issue. For every issue in a team, filter
+`lll watch --activity --json` the same way. A hosted receiver gets comments
+only from a registration added with `lll webhook add URL --activity`; a plain
+registration delivers issue changes alone.
+
 ## Always document friction and feature requests
 
 **This is not optional and it is not a nicety.** Every agent hits the same walls,
