@@ -2,6 +2,7 @@
 """Current comment/claim cursor reads on an owned, isolated board."""
 import datetime
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -247,7 +248,7 @@ with tempfile.TemporaryDirectory(prefix='lll-bulk-reads-') as temporary:
             ('comment', 'capped', 1, 'lower --limit'),
             ('comment', 'control', 0, ''),
         ]:
-            with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy) as proxy:
+            with LocalHTTPServer(('127.0.0.1', 0), Proxy) as proxy:
                 proxy.noun, proxy.mode, proxy.methods, proxy.paths = noun, mode, [], []
                 thread = threading.Thread(target=proxy.serve_forever, daemon=True)
                 thread.start()

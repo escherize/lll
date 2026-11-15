@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Typed stderr diagnostics through the native CLI, including older servers."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import re
@@ -86,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='lll-json-errors-') as home:
         def log_message(self, *args):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Answers)
+    server = LocalHTTPServer(('127.0.0.1', 0), Answers)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

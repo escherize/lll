@@ -29,6 +29,7 @@ import sys
 import tempfile
 import threading
 import http.server
+from local_http import LocalHTTPServer
 import tomllib
 import urllib.error
 import urllib.request
@@ -382,7 +383,7 @@ def stub_discovery(version):
         def log_message(self, *a):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server = LocalHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 

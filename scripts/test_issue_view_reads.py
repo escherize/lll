@@ -3,6 +3,7 @@
 import base64
 import collections
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -177,7 +178,7 @@ def normalized(text):
     return re.sub(r'\b\d+[mhd] ago\b', '<age>', text)
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+server = LocalHTTPServer(('127.0.0.1', 0), Handler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 results = {}

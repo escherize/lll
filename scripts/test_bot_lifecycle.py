@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Owned lifecycle through the installed CLI and the real collection rules."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import pty
@@ -142,7 +143,7 @@ with tempfile.TemporaryDirectory(prefix='lll-owner-bots-') as home:
         def log_message(self, *args):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Unsupported)
+    server = LocalHTTPServer(('127.0.0.1', 0), Unsupported)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

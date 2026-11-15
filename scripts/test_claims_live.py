@@ -2,6 +2,7 @@
 """Atomic claim operations through real authenticated HTTP and CLI clients."""
 from concurrent.futures import ThreadPoolExecutor
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import subprocess
@@ -160,7 +161,7 @@ class UnsupportedServer(http.server.BaseHTTPRequestHandler):
             self.wfile.write(response.read())
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), UnsupportedServer)
+server = LocalHTTPServer(('127.0.0.1', 0), UnsupportedServer)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:
@@ -256,7 +257,7 @@ class DelayedAssignment(UnsupportedServer):
             self.wfile.write(response.read())
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), DelayedAssignment)
+server = LocalHTTPServer(('127.0.0.1', 0), DelayedAssignment)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:
@@ -283,7 +284,7 @@ finally:
 
 # Unsupported assignment routes must not trigger either legacy write.
 UnsupportedServer.writes = []
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), UnsupportedServer)
+server = LocalHTTPServer(('127.0.0.1', 0), UnsupportedServer)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

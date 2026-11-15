@@ -16,6 +16,7 @@ Every case waits out a real limit, so they all run side by side.
 """
 import http.client
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import re
@@ -126,7 +127,7 @@ class Forward(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def serve(handler, server_class=http.server.ThreadingHTTPServer):
+def serve(handler, server_class=LocalHTTPServer):
     server = server_class(('127.0.0.1', 0), handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -149,7 +150,7 @@ UPLOAD_SECONDS = ANSWER_SECONDS + 10
 CHUNK = 64 * 1024
 
 
-class SlowLink(http.server.ThreadingHTTPServer):
+class SlowLink(LocalHTTPServer):
     """A small receive buffer, so the CLI's send really waits on the reads."""
     def server_bind(self):
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, CHUNK)

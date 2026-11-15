@@ -117,6 +117,7 @@ python3 -m unittest discover -s scripts -p 'test_typed_sources.py'
 python3 -m unittest discover -s scripts -p 'test_secret_flags.py'
 python3 -m unittest discover -s scripts -p 'test_command_table.py'
 python3 -m unittest discover -s scripts -p 'test_migration_names.py'
+python3 -m unittest discover -s scripts -p 'test_local_http.py'
 python3 scripts/check_assets.py
 """
 

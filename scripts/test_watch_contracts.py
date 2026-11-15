@@ -13,6 +13,7 @@ Run by e2e.sh with the built binary, the server URL, the suite's member token
 in LLL_TOKEN and a fresh superuser token in LLL_TEST_SUPERUSER_TOKEN.
 """
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import selectors
@@ -367,7 +368,7 @@ class Flaky(http.server.BaseHTTPRequestHandler):
         pass
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Flaky)
+server = LocalHTTPServer(('127.0.0.1', 0), Flaky)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 config_home = tempfile.mkdtemp(prefix='watch-contracts-config-')

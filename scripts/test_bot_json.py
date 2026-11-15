@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Machine bot credentials keep the existing ownership and retry rules."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import re
@@ -91,7 +92,7 @@ class RejectIO(http.server.BaseHTTPRequestHandler):
         pass
 
 
-guard = http.server.ThreadingHTTPServer(('127.0.0.1', 0), RejectIO)
+guard = LocalHTTPServer(('127.0.0.1', 0), RejectIO)
 guard.daemon_threads = True
 thread = threading.Thread(target=guard.serve_forever, daemon=True)
 thread.start()
@@ -188,7 +189,7 @@ class FailMint(http.server.BaseHTTPRequestHandler):
         pass
 
 
-proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FailMint)
+proxy = LocalHTTPServer(('127.0.0.1', 0), FailMint)
 proxy.daemon_threads = True
 thread = threading.Thread(target=proxy.serve_forever, daemon=True)
 thread.start()

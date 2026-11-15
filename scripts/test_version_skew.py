@@ -6,6 +6,7 @@ versions are silent. A stub discovery server stands in for a newer, an older
 and a pre-version server, so no test-only override is needed in the binary.
 """
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -57,7 +58,7 @@ def stub(discovery):
         def log_message(self, *a):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+    server = LocalHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 

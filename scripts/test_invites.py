@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from board_startup import wait_for_endpoints
+from local_http import LocalHTTPServer
 
 binary = str(Path(sys.argv[1]).resolve())
 FIX = 'ask whoever invited you for a new link'
@@ -429,7 +430,7 @@ with tempfile.TemporaryDirectory(prefix='lll-invites-') as directory:
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps(body).encode())
-        proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), PartialInvites)
+        proxy = LocalHTTPServer(('127.0.0.1', 0), PartialInvites)
         thread = threading.Thread(target=proxy.serve_forever, daemon=True)
         thread.start()
         try:

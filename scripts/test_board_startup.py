@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """A relocated board must not let fixtures probe an unrelated listener."""
 import http.server
+from local_http import LocalHTTPServer
 import os
 from pathlib import Path
 import re
@@ -29,7 +30,7 @@ binary = str(Path(sys.argv[1]).resolve())
 with tempfile.TemporaryDirectory(prefix='lll-243-') as directory:
     base = Path(directory)
     (base / 'home').mkdir()
-    stranger = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Stranger)
+    stranger = LocalHTTPServer(('127.0.0.1', 0), Stranger)
     threading.Thread(target=stranger.serve_forever, daemon=True).start()
     web = stranger.server_port
     with socket.socket() as reservation:

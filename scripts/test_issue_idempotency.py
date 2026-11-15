@@ -2,6 +2,7 @@
 """LLL-438: keyed creates survive retries without another issue or mutation."""
 import concurrent.futures
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import subprocess
@@ -186,7 +187,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         pass
 
 
-proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+proxy = LocalHTTPServer(('127.0.0.1', 0), Proxy)
 thread = threading.Thread(target=proxy.serve_forever, daemon=True)
 thread.start()
 proxy_url = f'http://127.0.0.1:{proxy.server_port}'

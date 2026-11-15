@@ -2,6 +2,7 @@
 """Exercise PR body transport with a real issue API and a recording gh."""
 import json
 import http.server
+from local_http import LocalHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
@@ -99,7 +100,7 @@ sys.exit(int(os.environ.get('PR_EXIT', '0')))
             self.wfile.write(b'{"message":"reference write unavailable"}')
         def log_message(self, *args): pass
 
-    proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), RefFailure)
+    proxy = LocalHTTPServer(('127.0.0.1', 0), RefFailure)
     threading.Thread(target=proxy.serve_forever, daemon=True).start()
     try:
         for status in [503, 404]:

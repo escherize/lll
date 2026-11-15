@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise private machine config writes through login, config and logout."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -49,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='lll-config-permissions-') as directory:
     env.update(HOME=directory, LLL_CONFIG_HOME=str(root / 'config'),
                XDG_CONFIG_HOME=str(root / 'config'))
     config = root / 'config/lll/lll.toml'
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Auth)
+    server = LocalHTTPServer(('127.0.0.1', 0), Auth)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     api = f'http://127.0.0.1:{server.server_port}'

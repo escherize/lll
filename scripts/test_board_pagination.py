@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import base64
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -137,7 +138,7 @@ class Stream:
         raise AssertionError('missing board stream barrier')
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+server = LocalHTTPServer(('127.0.0.1', 0), Proxy)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 with tempfile.TemporaryDirectory(prefix='lll-board-pages-') as directory:
     # Adopt only the owned loopback fixture through its proxy. This second
