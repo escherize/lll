@@ -1,7 +1,7 @@
 # Leave a record your next agent can use
 
-A chat ends; the investigation should survive it. lll keeps the task, evidence
-and reasoning together so the next agent can retrieve them before changing code.
+lll keeps shared tasks, claims, evidence and decisions available across
+sessions. The next agent can retrieve that context before changing code.
 
 ## The working loop
 

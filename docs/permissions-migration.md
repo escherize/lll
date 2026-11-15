@@ -43,17 +43,32 @@ credential; a session name never adds authority.
 
 An Editor can perform the existing team-content writes: issues, comments,
 claims, documents, labels, projects and webhooks, including archive/delete
-operations already supported for those records. Archived teams remain read-only.
-An Editor cannot manage workspace roles, team memberships or team lifecycle.
+operations already supported for those records. Content in archived teams
+remains read-only. The Editor role alone cannot manage workspace roles, team
+memberships or team lifecycle.
 A Viewer reads team content and can manage their own favorites/saved views.
 
-Compatibility exception: an existing all-team read-write grant retains its
-historical team lifecycle powers and, for independent people, invitation powers.
-The management API identifies this as `legacy_management`. It does not promote
-the person to Admin or authorize changes to other people's grants. Converting
-to explicit team roles removes both that legacy grant and future-team coverage;
-the preview reports both losses. Operators can assign Admin separately before
-converting a legacy manager.
+Compatibility exception: effective legacy all-current-and-future-team
+read-write access permits team creation, rename, archive, unarchive and deletion,
+subject to each operation's other constraints. This includes bots and their
+worker identities when their own grants, human owner's grant and any creating
+bot's delegation limit retain that access. Existing unowned operator-created
+bots with that grant retain these lifecycle powers too. The management
+API identifies the effective grant as `legacy_management`.
+
+This grant does not confer Admin or permission to change other members' grants.
+Only independent people with Admin or retained legacy all-team read-write access,
+and infrastructure operators, can create people or invitations. Bots cannot.
+See [legacy team lifecycle authority](permissions.md#legacy-team-lifecycle-authority)
+for the distinction.
+
+Converting to finite team roles removes future-team coverage and legacy
+lifecycle authority even when all current teams remain Editor; the preview
+reports both losses. Narrowing the owner below all-team read-write removes
+that effective authority from owned bots and workers. Narrowing a creating
+bot also narrows its workers' stored grants. A separately assigned Admin role
+retains team lifecycle authority for an independent person after conversion;
+conversion does not change workspace responsibility.
 
 Workspace administrators can manage people and team grants. Administration
 alone does not make private team content readable. Granting oneself access is

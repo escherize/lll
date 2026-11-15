@@ -10,7 +10,8 @@ For a release, follow `docs/release-checklist.md`: five fresh workers across
 the cases touched by that release, with at most three active workers. Record
 the chosen cases and worker count on the release issue before provisioning.
 Pair cases need even counts; the total can mix independent and paired cases.
-The older ten-worker case01/case06 runs in `plan.md` are a research baseline,
+The older ten-worker runs in `plan.md` are a research baseline (historical
+cases 01 and 05, now cases 01 and 06),
 not the size or case restriction for every release. Explicit user scope wins.
 
 Use fresh agents, not follow-up tasks that have already learned the CLI.
@@ -122,13 +123,13 @@ config (wrong URL, expired token) in the worker's HOME, which the worker
 repairs. Its supplied `fleet-login` sends the token to the audited CLI over
 stdin; `fleet-as-helper ENV_FILE` in case 15 runs audited `whoami` using the
 saved helper token without evaluating exports as shell code. These helpers
-preserve CLI exit codes and never print credentials. Cases 15 and 19 honour a worker-set `LLL_TOKEN` or `LLL_CONFIG_HOME`
+preserve CLI exit codes and never print credentials. Cases 15 and 19 honor a worker-set `LLL_TOKEN` or `LLL_CONFIG_HOME`
 (inside the worker directory) so a worker can act as a second identity; the
 URL always comes from conn.txt.
 
 Before launching cases 15 and 19, clear ambient `LLL_TOKEN` and
 `LLL_CONFIG_HOME` from the worker environment. These override-mode wrappers
-honour inherited credentials as intentional identity switches; an operator's
+honor inherited credentials as intentional identity switches; an operator's
 valid token for another board will therefore cause authentication failures.
 If the agent runner cannot set its tool environment, launch each shell call
 through a clean child, for example:

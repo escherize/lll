@@ -14,9 +14,21 @@ Requests authenticate with a member token as a Bearer header:
 
 `lll login` stores your token from an interactive login; `lll token create`
 mints a long-lived one for an agent (superuser only). Both live wherever the
-CLI reads them, and every collection rule is written against
-`@request.auth.id` — an authenticated member — so scripts should send a token
-too.
+CLI reads them. Scripts should authenticate too. Member access depends on
+the collection rules, team grants and server hooks; a token does not grant
+access to every collection or operation. Database superusers are separate
+from members with the workspace Admin role. See [Permissions](permissions.md)
+and the generated schema for each operation's access rules.
+
+## The schema
+
+`lll api --schema` prints the collection/field reference: every collection
+and field, its type, whether it is required, and the access rules a member
+token answers to. It is generated from the migrations (their end state — what
+the server actually enforces), not hand-typed; regenerate after schema
+changes with `mise run api-schema`. The gate runs
+`gen_api_schema.py --check` in e2e to detect differences between the generated
+reference and schema (LLL-435).
 
 ## The raw passthrough
 
@@ -34,7 +46,8 @@ errors:
 header: pass the `updated` stamp your read returned, and the server answers
 `412` — without applying the write — when the record has changed since. The
 refusal body names the current stamp to retry with. Without the header the
-PATCH behaves exactly as before. (`lll issue update --if-unchanged-since`
+PATCH skips this timestamp precondition; other access and validation checks
+still apply. (`lll issue update --if-unchanged-since`
 sends it for you.) The header applies to the `issues` collection only.
 
 ## Retried issue creation
@@ -104,21 +117,13 @@ team's issue events. `lll webhook --help` describes the payload and retries.
   creator can read the webhook's team. Webhooks created before this field
   existed, or by a superuser, have no creator; they deliver while their team
   exists. Deleting the creator deletes its webhooks.
-- **Webhooks cannot be edited.** `PATCH` is superuser-only. Delete the
+- **Members cannot edit webhooks.** `PATCH` is superuser-only, including
+  when the member has the workspace Admin role. Members must delete the
   webhook and create it again.
 - **Deliveries are not queued.** A delivery waiting to be sent or retried
   when the server stops is lost.
 
-## The schema
-
-`lll api --schema` prints the collection/field reference: every collection
-and field, its type, whether it is required, and the access rules a member
-token answers to. It is generated from the migrations (their end state — what
-the server actually enforces), not hand-typed; regenerate after schema
-changes with `mise run api-schema`. The gate verifies the two agree —
-`gen_api_schema.py --check` runs in e2e and fails naming what drifted, to detect drift between the reference and schema (LLL-435).
-
-## Comment and claim event delivery
+### Comment and claim event delivery
 
 Existing webhook registrations and `lll watch` remain issue-only. Use
 `lll watch --activity --json` for live comment and claim events, or

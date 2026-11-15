@@ -326,7 +326,7 @@ keep historical proof and compatibility detail in native, no-JS disclosures. -->
       <a class="next-step" href="#t-start">Then, bring your agent</a>
     </div>
 
-    <div class="agents" aria-label="Harnesses lll has been run with">
+    <div class="agents" aria-label="Coding-agent and shell clients">
       <ul>
         <li><span class="chip" style="--h: var(--h-claude)"><i></i>Claude Code</span><small>laptop</small></li>
         <li><span class="chip" style="--h: var(--h-codex)"><i></i>Codex</span><small>ci-runner</small></li>
@@ -362,7 +362,7 @@ keep historical proof and compatibility detail in native, no-JS disclosures. -->
     <p class="intro prose">The next agent can look up what was learned about the code it is about to touch.</p>
     <ol class="memory-flow">
       <li><h3>An agent investigates</h3><p>A test flakes when parallel workers share a temporary directory.</p></li>
-      <li><h3>It records the trap</h3><p>A finding attached to <code>scripts/</code>: <strong>give each worker its own temporary directory.</strong></p></li>
+      <li><h3>It records the finding</h3><p>A finding attached to <code>scripts/</code>: <strong>give each worker its own temporary directory.</strong></p></li>
       <li><h3>The next agent checks</h3><pre><code>lll finding near scripts</code></pre><p>The reason is there before it edits.</p></li>
     </ol>
     <p class="memory-note">Illustrative handoff. <a href="working-with-agents.html">See how findings, decisions and work fit together.</a></p>
@@ -419,19 +419,19 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   <section class="s wrap" aria-labelledby="t-proof">
     <h2 class="t" id="t-proof">Hardened through 2,000+ agent trials.</h2>
     <p class="intro prose">Across <strong>145 recorded test runs</strong>, agents tried finding context, creating work and collaborating without collisions. Their mistakes and failures shaped the CLI. Testing continues with every release.</p>
-    <p class="memory-note">The October research record documents 2,061 agent trials. <a href="verification.html#research-at-scale">See the testing history and ongoing release checks.</a></p>
+    <p class="memory-note">The October research record documents 2,061 agent trials. <a href="verification.html#historical-research">See the testing history and ongoing release checks.</a></p>
     <ul class="proof-checks">
       <li><h3>Unsafe writes refused</h3><p>In the 11 November 2026 checks, <strong>434 requests across 31 write routes</strong> were refused in the board-origin test, including requests with valid cookies.</p></li>
       <li><h3>Retries without duplicates</h3><p>Those checks raced <strong>24 issue-create calls and 12 comment calls</strong> with shared retry keys and verified lost-response retries.</p></li>
       <li><h3>Upgrades rehearsed</h3><p><strong>Four old/new client-server pairs</strong>, a stopped backup restore, downloaded binaries and the actual Homebrew install are checked before a release is called done.</p></li>
     </ul>
-    <p class="memory-note">The scripted harness also checks all 20 task scenarios against correct and deliberately wrong workers. Those controls are separate from the real-agent counts above. <a href="verification.html#hardening-checks">See what each check proves.</a></p>
+    <p class="memory-note">In those checks, the scripted harness covered all 20 task scenarios against correct and deliberately wrong workers. Those controls are separate from the real-agent counts above. <a href="verification.html#hardening-checks">See what each check proves.</a></p>
     <details class="disclosure">
       <summary>Earlier 20-case replay and methodology</summary>
       <p class="memory-note">The bars count agents who hit a tool-owned failure. Outcome scores measure each agent’s final result after recovery; paired agents share a board.</p>
     <div class="proof-figs">
       <figure class="trend">
-        <figcaption><b>Agents tripped up by lll</b>, per 100</figcaption>
+        <figcaption><b>Agents encountering lll failures</b>, per 100</figcaption>
         <table class="bars">
           <tr><th scope="row">First pass<small>run 1, before 1.0</small></th><td><span class="track"><span class="fill" style="--v: 24.2"></span></span><span class="val">24</span></td></tr>
           <tr><th scope="row">1.0.0 replay<small>run 10</small></th><td><span class="track"><span class="fill" style="--v: 11.1"></span></span><span class="val">11</span></td></tr>
@@ -473,7 +473,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <tr class="tier"><td colspan="4">Two agents at once</td></tr>
           <tr><td class="n">16</td><td class="c">Hand a claim to a partner<small>five pairs</small></td><td class="d" aria-label="10 of 10 agent outcomes correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span></td><td class="r">10/10</td></tr>
           <tr><td class="n">17</td><td class="c">Edit one description concurrently<small>five pairs</small></td><td class="d" aria-label="10 of 10 agent outcomes correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span></td><td class="r">10/10</td></tr>
-          <tr class="has-miss"><td class="n">18</td><td class="c">Consume a partner's live changes<small>one agent sent its comment twice, which failed the board it shares with its partner</small></td><td class="d" aria-label="8 of 10 agent outcomes correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot miss"></span><span class="dot miss"></span></span></td><td class="r">8/10</td></tr>
+          <tr class="has-miss"><td class="n">18</td><td class="c">Consume a partner's live changes<small>one agent sent its comment twice, which caused the shared board check to fail for both partners</small></td><td class="d" aria-label="8 of 10 agent outcomes correct"><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot"></span><span class="dot"></span></span><span class="pair"><span class="dot miss"></span><span class="dot miss"></span></span></td><td class="r">8/10</td></tr>
           <tr class="has-miss"><td class="n">19</td><td class="c">Invite a scoped colleague<small>one agent's report wasn't valid JSON</small></td><td class="d" aria-label="9 of 10 agent outcomes correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot miss"></span><span class="dot"></span></td><td class="r">9/10</td></tr>
           <tr><td class="n">20</td><td class="c">Recover from a wrong command<small>judged on recovery</small></td><td class="d" aria-label="10 of 10 agent outcomes correct"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></td><td class="r">10/10</td></tr>
         </tbody>
@@ -484,7 +484,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <img src="board-claims.webp" width="920" height="1090" alt="Board columns In progress and In review, every card claimed by an agent's bot." loading="lazy">
           <figcaption>Judged here: the server's own state.</figcaption>
         </figure>
-        <p>In that earlier replay, <strong>196 of 200 agent outcomes</strong> came out right (the 1.0.0 replay: 197). None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which cost its partner the shared board), and one wrote a report that wasn't valid JSON.</p>
+        <p>In that earlier replay, <strong>196 of 200 agent outcomes</strong> met the outcome checks (the 1.0.0 replay: 197). None of the four misses traced to lll: a sandbox blocked one agent's commands, one agent sent the same comment twice (which caused the shared board check to fail for both partners), and one wrote a report that wasn't valid JSON.</p>
         <p>Where agents still guess wrong, the error names the command to run next. Case 20 is judged on that recovery.</p>
         <div class="key">
           <span><span class="dot" aria-hidden="true"></span> board correct</span>
@@ -523,9 +523,9 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   <section class="s wrap" id="docs" aria-labelledby="t-docs">
     <h2 class="t" id="t-docs">Docs</h2>
     <nav class="docs" aria-label="Get started with lll">
-      <a href="setup.html"><b>Start or join a board</b><span>One new-project path, or connect to an existing board.</span></a>
+      <a href="setup.html"><b>Start or join a board</b><span>Start your own board or join an existing one.</span></a>
       <a href="working-with-agents.html"><b>Work with your agents</b><span>Keep tasks, evidence and reasoning for the next session.</span></a>
-      <a href="inviting.html"><b>Invite teammates</b><span>Share the work with people and their agents.</span></a>
+      <a href="inviting.html"><b>Invite your team</b><span>Share the work with people and their agents.</span></a>
     </nav>
     <details class="disclosure">
       <summary>Reference, hosting and project history</summary>
@@ -537,7 +537,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       <a href="ci-deployment.html"><b>Hosting</b><span>Deploying the binary, CI, and the Dockerfile and fly.toml it ships with.</span></a>
       <a href="hosted-recovery.html"><b>Recovery</b><span>Backing up and restoring a hosted database.</span></a>
       <a href="api.html"><b>API</b><span>The PocketBase collections and the rules behind them.</span></a>
-      <a href="verification.html"><b>How lll is tested</b><span>Recent release evidence, hardening checks and how a run is judged.</span></a>
+      <a href="verification.html"><b>How lll is verified</b><span>Recent release evidence, hardening checks and how a run is judged.</span></a>
       <a href="https://github.com/escherize/lll/blob/main/CHANGELOG.md"><b>Changelog</b><span>Every release, newest first.</span></a>
       <a href="https://github.com/escherize/lll/releases/latest"><b>Releases</b><span>Binaries for macOS and Linux, with checksums.</span></a>
     </nav>

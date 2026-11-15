@@ -28,8 +28,8 @@ and verify that the old token no longer authenticates.
 4. Prove the old token fails: run `whoami` with `helper-NN.env` again and
    record the exit code in the call log. Expected exit code 6 ("not authenticated")
    confirms the retired-token check passed. Record the call and actual exit
-   code, mark the refusal as expected, and distinguish it from an unexpected
-   tool-owned failure.
+   code, mark the refusal as expected, and keep that successful negative check
+   out of `failures`. An unexpected result still needs to be reported.
 5. Prove the new one works: run `whoami` with `helper-NN-rotated.env`.
 
 Exact forms, so no token is ever displayed or typed:
@@ -57,7 +57,7 @@ conn.txt without shell eval, clears inherited LLL/XDG settings, sets
 HOME/config to your own directory and runs the pinned binary there. All CLI
 calls must use that wrapper: run it as `./lll` from your worker directory.
 
-In this case you also act as a second identity. The wrapper honours two
+In this case you also act as a second identity. The wrapper honors two
 settings you give it for one command, and always uses conn.txt's server:
 `LLL_TOKEN` (a token, read from a file you saved, never typed) and
 `LLL_CONFIG_HOME` (a directory inside your worker directory, holding that

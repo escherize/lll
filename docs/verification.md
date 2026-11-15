@@ -4,7 +4,7 @@ Agents exercise the CLI. An independent reviewer compares their reports with
 captured calls and the board’s actual records. Scripted tests separately probe
 concurrency, access boundaries and upgrade recovery.
 
-## Research at scale
+## Historical research
 
 The original research record documents **2,061 Claude Code agent trials across
 145 fleet runs**, plus 36 workers in the first `gpt-5.6-luna` harness. The
@@ -25,7 +25,7 @@ a board: those 200 outcomes are not 200 independent boards. That historical
 replay is retained in the landing page’s expandable ledger. It is not a
 current-build pass rate.
 
-## Recent published releases
+## Release checks: 6–11 November 2026
 
 Checked 11 November 2026. These are the retained release checks for 1.4.1,
 1.5.0, 1.6.0 and 1.6.1, run on 6–11 November. They are a bounded sample, not a lifetime
@@ -70,9 +70,8 @@ they describe that source revision, not every future build.
 | A client or server is upgraded first | Four baseline/candidate client-server pairs, preserved records and a stopped pre-upgrade backup restored with its matching old binary. Missing capabilities refuse before writes when the tested baseline lacks them. |
 | CI passes but the installed package is wrong | Release downloads checked outside the checkout; native behavior rerun; actual Homebrew path, version and binary bytes checked, then authenticated hosted reads. Linux assets are hash-verified, with a separate Linux container/browser gate; they were not executed locally on the Mac. |
 
-The release checks include recovery, not just a green version banner. They do
-not establish safe database downgrades or turn a finite test run into a claim
-that the product has no defects.
+These checks cover the listed cases and revisions, including recovery. They
+do not establish safe database downgrades.
 
 ## Follow a run
 

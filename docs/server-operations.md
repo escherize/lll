@@ -10,12 +10,17 @@ an invitation, use [setup](setup.md). For a public deployment, follow
 
 `lll new "Payments rewrite"` chooses key `PAY`; `--key` chooses another.
 Its data lives in `~/.config/lll/boards/pay`. Run the same command to reopen
-a local or shared board. A shared attachment is recognized by verifying its
-privately saved member login against the cached database, without contacting
-the network address. If that proof is missing or retired, the command keeps the
-attachment unchanged: remove its URL as the refusal explains, or use an
-unattached directory to reopen the saved data, then attach deliberately. A key used by a different title, or a directory attached to another board,
-is refused rather than silently replaced. Ctrl-C stops the server.
+a local or shared board. A key used by a different title, or a directory
+attached to another board, is refused rather than silently replaced.
+Ctrl-C stops the server.
+
+#### Recovery when the saved login is missing
+
+A shared attachment is recognized by verifying its privately saved member
+login against the cached database, without contacting the network address.
+If that proof is missing or retired, the command keeps the attachment unchanged.
+Remove its URL as the refusal explains, or use an unattached directory to
+reopen the saved data, then attach deliberately.
 
 ### Explicit server settings
 
@@ -39,7 +44,7 @@ server already answers at the API URL, `lll up` uses it, unless only a repo
 | `api` | the server's API url, with `(already running)` when it reused one |
 | `team` | the team the board shows |
 | `member` | the member the board and the CLI act as |
-| `admin` | where the administrator credentials are kept, never the password |
+| `admin` | where the database superuser credentials are kept, never the password |
 | `cli` | whether it logged your CLI in, or why not |
 | `board` | the board's url |
 | `board  login` | a link that signs your browser in; `lll board` prints it again |

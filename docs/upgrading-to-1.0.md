@@ -10,7 +10,7 @@ This page lists every 0.9 -> 1.0 change a consumer can observe. The full history
 
 ## 1. Credentials and which server a token reaches (security, LLL-688)
 
-| Change | Breaks you if | Check |
+| Change | Affected when | Check |
 |---|---|---|
 | The token in your home config is sent only to the url saved beside it. If a repo `.lll.toml`, `LLL_URL` or `--url` names another server, commands that need the token exit **6** and name where that url came from. | A repo's `.lll.toml` or `LLL_URL` points at a different server than `~/.config/lll/lll.toml`, and you relied on the home token being sent there. | `lll config list`: the `url` and `token` rows should name the same file, or the token should come from `LLL_TOKEN`. |
 | `lll login` without `--url` exits **2** when the url came only from a repo file or `LLL_URL`. | Your setup runs a bare `lll login` inside a repo or with `LLL_URL` set. | Pass `--url` explicitly. |

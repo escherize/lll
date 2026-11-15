@@ -41,7 +41,7 @@ categories; a recovery runbook needs steps in execution order.
 | Bot | A member identity used for automated work, with its own credential |
 | Worker | The agent or process doing the work |
 | Agent label | A coordination label for a session; it grants no authority |
-| Workspace Admin | Responsibility for people, team grants and team lifecycle |
+| Workspace Admin | A separate responsibility for people, team grants and team lifecycle; grants no team content access by itself |
 | Infrastructure operator / superuser | The server's bootstrap and recovery authority |
 | Team role | None, Viewer or Editor content access |
 | Human owner / creating bot | The relationships that bound a delegated bot's access |
@@ -52,7 +52,9 @@ Use **issue** for the record and **card** for its visible board representation.
 Use **run owner** for the coordinator of a test run, so it is distinct from a
 bot's human owner. Keep exact CLI spellings, API fields and UI labels when
 describing an interface. See [the permissions contract](permissions.md) for
-the authority model.
+the authority model, including the retained legacy lifecycle powers of all-team
+read-write identities. Keep those powers distinct from Admin and the narrower
+authority to invite people.
 
 ## Separate facts, history and proposals
 
@@ -86,6 +88,16 @@ Preserve command syntax, fixture strings, credential handling, refusal
 conditions and recovery loss windows during an editorial edit. Describe an
 expected negative check separately from an unexpected tool failure. Report
 an actual runner permission refusal as a harness blocker.
+
+## Check every output surface
+
+Before adding markup to a shared document, check where it is rendered or
+printed. For example, `scripts/release_check.py` prints `docs/release-checklist.md`
+verbatim in the terminal. Keep that source readable as plain Markdown and
+preserve compatible heading IDs. Put web-only diagrams or markup in Jekyll
+layouts or includes so raw HTML does not appear in CLI output. This applies
+to documents reused by the CLI; web-specific sources can use the markup their
+renderer supports.
 
 ## Review before publishing
 

@@ -1,12 +1,12 @@
 # The lll CLI contract
 
-`lll help contract` prints this page, then a command reference generated
-from the binary's command table: every verb, whether it writes, whether it
-takes `--json`, and its other spellings.
-
 This is the surface lll 1.0.0 promises under SemVer. Changing one of these
 parts in a way that breaks a script needs a new major version; anything not
 listed here can change in a minor release.
+
+`lll help contract` prints this page, then a command reference generated
+from the binary's command table: every verb, whether it writes, whether it
+takes `--json`, and its other spellings.
 
 Covered:
 
@@ -112,8 +112,8 @@ else, on either stream.
 
 ## JSON output
 
-`--json` prints one JSON value on stdout and nothing else. Messages that a
-command prints next to its result go to stderr when `--json` is given.
+The fields and envelopes below are covered by the contract. See
+[Output streams](#output-streams) for notices and streaming output.
 
 ### Timestamps
 
@@ -138,14 +138,15 @@ Every `list --json` prints one envelope, whatever its flags:
 - `items` is always an array, never `null`.
 - `totalItems` counts every match, not only this page.
 - Lists that are read whole (labels, projects, docs, teams, members, webhooks,
-  findings, search hits, comments) are one page: `page` 1, `perPage` equal to
-  `totalItems`, `totalPages` 1, or 0 when empty.
+  findings, search hits and `issue comment KEY` without a body) are one page:
+  `page` 1, `perPage` equal to `totalItems`, `totalPages` 1, or 0 when empty.
 - `issue list --ready`, `--blocked` and `--sort priority` read every page
   before they filter or order, then apply `--page` and `--limit`.
 
 The envelope is printed by `issue list`, `issue comment KEY` (without a body),
 `doc list`, `finding list`, `finding near`, `label list`, `project list`,
-`team list`, `member list`, `webhook list` and `search`.
+`team list`, `member list`, `webhook list` and `search`. Bulk `comment list`
+and `claim list` add cursor pagination; see [Bulk current reads](#bulk-current-reads).
 
 ### The issue object
 
@@ -242,7 +243,7 @@ and new or newly matching ids behind the cursor require a fresh scan.
 Use `activity` for ordered write history; these lists are not a change feed
 or an atomic snapshot. Ordinary member visibility rules still apply.
 
-### Other records
+### Bot lifecycle and credentials
 
 `bot disable --json` returns `{id, name, disabled: true}`.
 `bot remove --json` (alias `delete`) returns
@@ -266,6 +267,8 @@ before server or credential requests. Create still refuses an existing bot;
 only rotate invalidates its prior tokens. A failed credential write exits 1
 and names a recovery command without copying the token to stderr.
 
+### Other records
+
 | Record | Covered fields |
 |---|---|
 | comment | `id`, `issue`, `author`, `author_name`, `author_kind`, `server_record`, `agent`, `body`, `created`, `updated` |
@@ -280,7 +283,7 @@ and names a recovery command without copying the token to stderr.
 A member's `owner`, `created_by`, `scope`, `teams`, `mode` and `team_keys` are
 absent when empty. `created_by` is the member record id of the bot that
 created a bot, set by the server; such a bot's `owner` is that bot's owner. A comment's `author_kind` is `"system"` on a comment the server wrote on
-its own (today only the claim-expiry note, which has no `author`), and absent
+its own (the claim-expiry note has no `author`), and absent
 otherwise. A doc's `last_editor` is the member record id of the member who last
 changed its content (`slug`, `title`, `kind`, `body`, `area` or `paths`), set
 by the server: the author until another member edits it. Linking an issue,
@@ -377,6 +380,10 @@ A server's unauthenticated `GET /.well-known/lll` names its `version` and
 lists its `capabilities`, for example
 `{"service":"lll","version":"1.2.0","capabilities":["issues.idempotency","comments.idempotency","webhooks.activity"]}`.
 A name, once listed, is never removed or renamed.
+
+Selected capabilities are listed below; the server discovery response is the
+full list for that server. It also advertises bot lifecycle, project cascade
+and permission-management capabilities described in their respective guides.
 
 | Capability | Commands that need it |
 |---|---|

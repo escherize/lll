@@ -14,17 +14,16 @@ edit the supplied wrapper.
 
 Read every object in full before you change it.
 
-The upload retry flake is supposedly fixed, but someone wants a second pair of
-eyes on it. Get that issue in front of reviewers, and leave a short note on it
-that starts with `fleet-20-NN:`.
+The upload retry issue needs review. Get it in front of reviewers and leave
+a short note on it that starts with `fleet-20-NN:`.
 
-That is the whole brief. This case measures how lll helps you RECOVER, so:
+This case measures how lll helps you recover from command errors:
 
 - Find the issue with `./lll search "upload retry"`, then read it in full
   with `./lll issue view KEY` (required, and not a guess).
-- Then run your two first guesses BACK TO BACK, with no call between them:
+- Then run your first two guesses back to back, with no call between them:
   first your natural command for sending it to review, then your natural
-  command for leaving the note. Type each WITHOUT reading any `--help`.
+  command for leaving the note. Type each without reading any `--help`.
   Record both commands in `report.json` as `answer.first_guesses` (a list of
   two strings, in that order). Only after both have run, recover from
   whichever failed.
