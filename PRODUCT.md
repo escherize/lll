@@ -21,8 +21,8 @@ It began as a Linear-style issue tracker and now connects tasks and claims with
 durable findings, decisions, attribution and handoffs. Team roles and bounded
 bot delegation control access to that work. The CLI is the primary interface;
 the live web board lets people follow and update it. Success means workers can
-resume with the context previous workers recorded, and people can see who is
-doing what.
+resume with the context previous workers recorded, and people can see who has
+claimed work and what progress they have recorded.
 
 ## Positioning
 
@@ -52,8 +52,9 @@ static assets are embedded in the binary.
 - One instance is one workspace containing teams. Projects group work inside
   one team; they are not a separate sharing boundary. Issues belong to a team
   and can also belong to a project or an issue hierarchy.
-- Identity is a member credential. People can join through invitations and
-  use the same identity in the browser and CLI; bots have their own identities
+- A member identity identifies a person or bot; its credential authenticates
+  requests. People can join through invitations and use the same identity in
+  the browser and CLI; bots have their own identities
   and credentials. Effective bot access is bounded by its human owner and,
   for delegated workers, its creator.
 - Native PocketBase rules and server hooks enforce team access. Board pages,
@@ -62,8 +63,10 @@ static assets are embedded in the binary.
   different purposes; a session label adds no authority.
 - Team data access uses Viewer/Editor grants; workspace Admin is a separate
   responsibility. The 1.8 migration preserves legacy all-team/future-team grants
-  and credentials, promotes nobody automatically, and explains explicit
-  conversion. See [the permissions contract](docs/permissions.md) and
+  and credentials, including team lifecycle powers for bots whose effective
+  access remains all-team read-write. It promotes nobody automatically;
+  conversion to finite roles is explicit. See
+  [the permissions contract](docs/permissions.md) and
   [migration procedure](docs/permissions-migration.md).
 - No frontend build step. Server-rendered templates use Datastar, with
   JavaScript for navigation, project preferences and Mermaid diagrams. CSS custom

@@ -75,14 +75,15 @@ Flatpak can still update the shared runtime.
 
 On Linux, install `flatpak`, Python 3 and the Freedesktop Platform `25.08`
 runtime for the target architecture. No compiler SDK is needed: packaging
-copies an already built release binary into the application.
+copies an already built release binary into the application. This example
+packages release 1.8.0, dated 14 November 2026:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user flathub org.freedesktop.Platform//25.08
 python3 scripts/build_flatpak.py --binary ./lll-linux-amd64 --arch x86_64 \
-  --version 1.6.1 --date 2026-11-11 --output ./lll-1.6.1-x86_64.flatpak
-flatpak install --user ./lll-1.6.1-x86_64.flatpak
+  --version 1.8.0 --date 2026-11-14 --output ./lll-1.8.0-x86_64.flatpak
+flatpak install --user ./lll-1.8.0-x86_64.flatpak
 flatpak run io.github.escherize.lll --version
 ```
 

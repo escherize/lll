@@ -14,6 +14,27 @@ Members can claim only for themselves; an omitted member ID uses the
 authenticated member. Superusers must name the intended member. Naming the
 observed claim prevents a delayed release from deleting a replacement hold.
 
+## Repeated acquisition and agent labels
+
+Claiming an issue already held by the same member succeeds, retains the claim
+ID and creation time, and restores assignment to that member. Another member's
+claim is refused. Releasing an unclaimed issue is an error. A transaction
+failure rolls back the claim, assignment and comment writes.
+
+A claim may carry an agent label (LLL-521: `--agent NAME` or `LLL_AGENT`),
+stored on the hold. The same member claiming with a different non-empty label
+is refused, naming the holder's label. An empty label on either side keeps the
+same-member retry above. Renewal applies the same test: a session whose label
+differs from the holder's cannot renew the hold. Release treats such a session
+like another member: without force it is refused, naming the holder's label;
+with force it goes through, and the comment names both sessions, for example
+"Alpha (agent wt-b) force-released Alpha (agent wt-a)'s claim." The label is self-asserted: it separates agents
+sharing one member token, not members, and proves nothing about identity.
+A label is at most 64 characters from A-Z, a-z, 0-9, `.`, `_` and `-`; empty
+means no label. The claim, renew and release routes, the `agent` fields and the
+CLI all refuse anything else, because the label is rendered into comments.
+Comments carry the same label, and every view shows it after the author.
+
 ## Release and close
 
 Only the holder can release a claim without force (LLL-512). Any other caller
@@ -136,28 +157,11 @@ watch and webhook delivery, attribution and project scope.
 
 Watch remains live-only. Comments and claims do not bump `issue.updated`, so
 `issue list --since` does not reconcile their missed events. Re-read comments
-and claims after reconnect when a complete current snapshot is required.
-
-## Repeated acquisition and agent labels
-
-Claiming an issue already held by the same member succeeds, retains the claim
-ID and creation time, and restores assignment to that member. Another member's
-claim is refused. Releasing an unclaimed issue is an error. A transaction
-failure rolls back the claim, assignment and comment writes.
-
-A claim may carry an agent label (LLL-521: `--agent NAME` or `LLL_AGENT`),
-stored on the hold. The same member claiming with a different non-empty label
-is refused, naming the holder's label. An empty label on either side keeps the
-same-member retry above. Renewal applies the same test: a session whose label
-differs from the holder's cannot renew the hold. Release treats such a session
-like another member: without force it is refused, naming the holder's label;
-with force it goes through, and the comment names both sessions, for example
-"Alpha (agent wt-b) force-released Alpha (agent wt-a)'s claim." The label is self-asserted: it separates agents
-sharing one member token, not members, and proves nothing about identity.
-A label is at most 64 characters from A-Z, a-z, 0-9, `.`, `_` and `-`; empty
-means no label. The claim, renew and release routes, the `agent` fields and the
-CLI all refuse anything else, because the label is rendered into comments.
-Comments carry the same label, and every view shows it after the author.
+and claims after reconnect when current state is required; paginated
+[bulk reads](cli-contract.md#bulk-current-reads) are not atomic snapshots.
+For ordered retained history, use `lll activity --since CURSOR` and advance
+to the last returned `seq`. [Audit-log](api.md#the-audit-log) visibility and
+retention limit which history is available.
 
 ## Assignment edits
 

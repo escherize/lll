@@ -22,7 +22,8 @@ Read every object in full before you change it.
    - body `The retry path takes the cache lock before the upload finishes.`
    - confidence `suspected` (you are not sure yet).
 2. Read it back and check every field.
-3. You have now verified it: mark the finding confirmed with lll.
+3. For this fixture, assume the finding has been verified. Mark it confirmed
+   with lll.
 4. Read it back again and confirm its confidence is confirmed and nothing
    else changed.
 

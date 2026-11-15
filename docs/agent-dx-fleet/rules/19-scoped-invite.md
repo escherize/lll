@@ -51,7 +51,7 @@ conn.txt without shell eval, clears inherited LLL/XDG settings, sets
 HOME/config to your own directory and runs the pinned binary there. All CLI
 calls must use that wrapper: run it as `./lll` from your worker directory.
 
-In this case you also act as a second identity. The wrapper honours two
+In this case you also act as a second identity. The wrapper honors two
 settings you give it for one command, and always uses conn.txt's server:
 `LLL_TOKEN` (a token, read from a file you saved, never typed) and
 `LLL_CONFIG_HOME` (a directory inside your worker directory, holding that

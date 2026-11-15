@@ -30,20 +30,19 @@ The export is byte-stable: the same server state exported twice produces
 identical files, so a scheduled mirror under Git commits only real changes.
 Comment timestamps are absolute for the same reason (LLL-453).
 
-## Reading it back
+## Restore a mirror
+
+`lll import dir` refuses a team that already has issues. `--replace` deletes
+every issue in the team before importing. There is no merge or per-field diff.
 
 ```sh
 lll import dir mirror            # into a team with no issues
 lll import dir mirror --replace  # delete every issue in the team, then import
 ```
 
-This is a restore, not a sync. `lll import dir` refuses a team that already has
-issues, because mixing two sets of numbering is not something it can undo;
-`--replace` empties the team first. There is no merge and no per-field diff:
-two writable copies of the same record need a reconciler, and
-`lll doc view issue-text-and-state-live-in-lll` rejected that trade. Editing a
-file in the mirror changes nothing until you import it, and importing rebuilds
-the team from what is on disk.
+Editing a mirror file changes nothing on the server until import. Import
+rebuilds the issues from disk. The decision record is
+`lll doc view issue-text-and-state-live-in-lll`.
 
 A malformed file fails the whole import with nothing written — every file is
 parsed before the first record is created.
@@ -54,17 +53,19 @@ restore. Missing parents, duplicate keys and cycles refuse before any writes,
 including `--replace`; a mirror with parents also requires server support
 before replacement starts. Older files without `parent` restore as roots.
 
-What does come back: numbers, sort order, titles, descriptions, states,
-priorities, emoji, assignees, projects, labels, refs, the original creation
+## Restored fields
+
+Issue numbers follow the restore-identity table above. Import restores sort
+order, titles, descriptions, states, priorities, emoji, assignees, projects, labels, refs, the original creation
 origin, `blocked_by` dependency links, documents with their kind and retrieval
 coordinates, and attachment bytes. Issue links inside documents and dependency
 links between issues use mirror keys, resolved to the new record ids after
 every issue exists. These links survive renumbering; issue keys written inside
 description text stay as written.
 
-Five things do not come back:
+## Fields not restored
 
-- **comments**, because nothing can forge another member's authorship
+- **comments and their authorship**; comments are export-only
 - **`created` / `updated`**, because a restored record is a new record and
   PocketBase stamps it on insert
 - **attachment filenames**, because PocketBase assigns its own stored name on
@@ -80,10 +81,10 @@ Five things do not come back:
   member as every document's author, and a superuser import leaves them
   authorless.
 
-## What this is not
+## Database backups
 
-It is not a database backup. It carries no record ids, no member accounts and
-no comment authorship. Use the [hosted recovery procedure](hosted-recovery.md)
+A Markdown mirror is not a database backup. It carries no record ids, no
+member accounts and no comment authorship. Use the [hosted recovery procedure](hosted-recovery.md)
 — Fly volume snapshots — for a restorable backup. This is for reading the
 tracker without a server, grepping it, and keeping its history in Git beside
 the code's.

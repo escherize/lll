@@ -8,12 +8,9 @@ worker number NN, your partner's number PP (always two digits: write
 the `lll` wrapper path when launching you. You and your partner share one
 board; each of you has your own bot and your own wrapper.
 
-Your role comes from your worker number:
-
-| NN | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 |
-|----|----|----|----|----|----|----|----|----|----|----|
-| role | A | B | A | B | A | B | A | B | A | B |
-Do not change your mind about your role.
+Odd-numbered workers are role A; even-numbered workers are role B. For
+example, 09 is role A. Keep that role for the entire case, even if your
+partner is delayed.
 
 ## Task
 
@@ -45,14 +42,8 @@ Role B:
 3. Add exactly one comment: `fleet-16-NN: picked up from bot-fleet-worker-PP.`
 4. Read back: you hold the claim and are the assignee; both comments present.
 
-Your role is the one the table gives your number. Do not change your
-mind.
-
 The artifact is the issue held by and assigned to B, with A's comment then
 B's. Touch nothing else.
-
-Look your number up in the table above; 09 is role A.
-Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
 

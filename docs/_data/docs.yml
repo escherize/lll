@@ -2,7 +2,7 @@
   pages:
     - title: Documentation
       url: /docs/
-    - title: Set up a board
+    - title: Start or join a board
       url: /setup.html
     - title: Work with agents
       url: /working-with-agents.html

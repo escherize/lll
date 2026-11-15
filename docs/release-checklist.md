@@ -23,17 +23,15 @@ An early `release-check` of the baseline is useful preparation, but does not
 replace the final `mise run release-check CUT=<sha>` before publication.
 Never tag the pre-bump baseline with the new version.
 
-<a id="2-4-automated"></a>
-
-## 2-4. Run automated release checks
+## 2-4. Automated
 
 Run `mise run release-check CUT=<sha>`. It verifies that main is green and
-deployed at the cut, no security work is half-landed, and version skew works
-in both directions. The command prints a results table with one row per check.
+deployed at the cut and tests version skew in both directions. It checks for
+security-labelled issues in progress or review, and warns about open urgent or
+high-priority security issues. These board checks depend on issue labels and
+states; they do not inspect unfinished implementation work.
 
-<a id="clientserver-compatibility-and-migration-rehearsal"></a>
-
-### Before step 5: rehearse compatibility and migration
+## Client/server compatibility and migration rehearsal
 
 Before tagging, follow [the upgrade procedure](upgrading.md). Run
 `scripts/rehearse_upgrade.py` with the published baseline and the candidate
@@ -43,9 +41,7 @@ unsupported-feature refusal. Confirm a pre-upgrade backup can be started with
 its matching old binary; a version-skew warning is not a compatibility test.
 This synthetic rehearsal is separate from the agent DX fleet below.
 
-<a id="5-agent-dx-fleet"></a>
-
-## 5. Run the agent DX fleet
+## 5. Agent DX fleet
 
 Run a small agent-dx fleet: 5 workers over the cases that the release touched.
 Use a binary built from the cut. Follow `docs/agent-dx-fleet/how-to-run.md`
@@ -55,9 +51,7 @@ It passes when the board check confirms every artifact and fewer than 2
 workers hit a tool-owned failure. A repeated tool failure gets its own issue
 and a fix, then a fresh run.
 
-<a id="6-release-order"></a>
-
-## 6. Publish the release in order
+## 6. Release order
 
 1. Bump the version in `lisette.toml` and the literal in
    `src/buildinfo/version.lis`, and merge the bump. The release workflow

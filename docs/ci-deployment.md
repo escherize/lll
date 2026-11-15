@@ -1,5 +1,10 @@
 # CI and deployment
 
+Pull requests run macOS and Linux gates. Successful main builds deploy the
+verified source context to Fly; CLI releases use a separate tagged workflow.
+
+## Gates
+
 Every pull request and main push runs the macOS compiler/unit/full end-to-end
 gate with pinned Playwright CLI and its matching bundled Chromium installed.
 The browser cache has an explicit job-local path so fixture HOME isolation
@@ -19,12 +24,16 @@ Successful main pushes deploy that same source context to Fly. PRs never
 deploy. Main runs are serialized so a newer push cannot cancel a rollout.
 Fly rebuilds the verified context on its remote builder.
 
+## Deployment setup
+
 One-time repository setup: configure `FLY_API_TOKEN` in GitHub Actions secrets
 with an app-scoped deploy token for the app in `fly.toml`. Generate it with
 `fly tokens create deploy --app escherize-lll --expiry 8760h`, then enter it through GitHub's
 secret UI or pipe it into `gh secret set FLY_API_TOKEN`. Do not commit tokens.
 Without the secret, the deployment job fails with a setup instruction; the
 build and browser evidence remains available.
+
+## Manual deployment
 
 For a manual deployment, run `mise exec -- bash scripts/fly-deploy.sh` from a
 committed checkout. It uses the same context preparation and cleans up its
@@ -33,4 +42,5 @@ uncommitted edits are excluded. Keep the volume and restore procedure in
 [hosted-recovery.md](hosted-recovery.md) in place before deploying migrations.
 
 Tagged release binaries remain a separate workflow. The server must ship
-before clients that require its new claim/assignment endpoints (LLL-276).
+before clients that require its capabilities. LLL-276 established this order
+for the claim/assignment endpoints.
