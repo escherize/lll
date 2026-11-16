@@ -6,6 +6,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Fixed
+
+- On the Permissions page, changing a team role for a member who holds an
+  all-team grant now opens a conversion preview. It lists every resulting team
+  role and what is lost. Before, the first attempt failed with an error naming
+  an API field unless a checkbox was ticked (LLL-810).
+
 ## [1.8.0] - 2026-11-14
 
 ### Added

@@ -20,11 +20,10 @@ async page => {
     must(response.ok(),'permissions page did not open');
     await page.evaluate(()=>document.fonts.ready);
   };
-  const change = async (key,role,apply=true,convert=false) => {
+  const change = async (key,role,apply=true) => {
     const team = row(key);
     await team.locator('summary').click();
     await team.locator('select[name="role"]').selectOption(role);
-    if(convert) await team.locator('input[name="convert_all"]').check();
     await team.getByRole('button',{name:'Preview change',exact:true}).click();
     await page.locator('#permission-review-heading').waitFor();
     must(await page.locator('#permission-apply').isVisible(),'review did not bind an apply form');
@@ -82,9 +81,20 @@ async page => {
   await row('ENG').scrollIntoViewIfNeeded();
   await shot('mobile-bot-authority');
   await open(fixture.broad);
-  await change('FIN','viewer',false,true);
-  must((await page.locator('.perm-review').innerText()).includes('Future-team access will be removed'),'conversion hides future-team loss');
-  must((await page.locator('.perm-review').innerText()).includes('legacy all-team management grant'),'conversion hides management loss');
+  // LLL-810: a role change on an all-team member IS a conversion. The first
+  // attempt reaches the preview; no checkbox stands in the way.
+  must(await page.locator('.perm-teams input[type="checkbox"]').count()===0,'conversion still hides behind a checkbox');
+  const teamCount = await page.locator('.perm-teams tbody tr').count();
+  await change('FIN','viewer',false);
+  const conversion = await page.locator('.perm-review').innerText();
+  must((await page.locator('#permission-review-heading').innerText()).startsWith('Convert '),'conversion preview is not named as one');
+  must(conversion.includes('Future-team access will be removed'),'conversion hides future-team loss');
+  must(conversion.includes('legacy all-team management grant'),'conversion hides management loss');
+  must(conversion.includes('cannot restore'),'conversion does not say it is one-way here');
+  must(!conversion.includes('convert_all') && await page.locator('.perm-error').count()===0,'conversion preview leaks an API name or errors');
+  must(await page.locator('.perm-review .perm-diff > div').count()===teamCount,'conversion preview does not list every resulting team role');
+  must((await page.locator('#permission-apply button[type="submit"]').innerText())==='Convert and apply','apply button does not name the conversion');
+  must((await page.request.get(fixture.api+'/api/lll/permissions/'+fixture.broad,{headers:{Authorization:'Bearer '+fixture.managerToken}}).then(r=>r.json())).all===true,'previewing a conversion applied it');
   await page.locator('.perm-review').scrollIntoViewIfNeeded();
   await shot('mobile-legacy-conversion');
   // Data pages use the viewer's role for this team, not a global "can write".
