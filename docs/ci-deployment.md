@@ -3,8 +3,9 @@
 Every pull request and main push runs the macOS compiler, unit and full
 end-to-end gate with pinned Playwright CLI and its matching bundled Chromium
 installed. The gate runs as parallel jobs on separate runners: unit tests,
-the core end-to-end script, the binary-only suites in two shares (the second
-also runs the `lll up` suite), and the web board suite. Together they run what
+the core end-to-end script, the binary-only suites with the `lll up` suite,
+and the web board suite. With the deployment context that is five macOS jobs,
+the most GitHub runs at once on its hosted macOS runners. Together they run what
 `mise run gate` runs locally; `scripts/test_ci_parts.py` fails when a part is
 missing from the workflow. A job named `gate` passes only when every part and
 the deployment context pass.

@@ -38,10 +38,10 @@ jobs:
             run: "mise run build ::: test"
           - name: e2e core
             run: mise run e2e-core
-          - name: e2e standalone 1/2
-            run: E2E_SHARD=1/2 mise run e2e-standalone
-          - name: e2e standalone 2/2 and lll up
-            run: E2E_SHARD=2/2 mise run e2e-standalone && mise run e2e-up
+          # One share, not two: GitHub runs at most five macOS jobs at once
+          # and the deployment context is the fifth. A sixth job queues.
+          - name: e2e standalone and lll up
+            run: E2E_SHARD=1/1 mise run e2e-standalone && mise run e2e-up
           - name: e2e web
             run: mise run e2e-web
     steps:
