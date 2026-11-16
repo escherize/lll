@@ -6,6 +6,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+### Added
+
+- The Permissions page opens on an overview: every member against every team,
+  with workspace Admins, bots and their owners, and the members who still hold
+  an all-team grant. A name filter narrows it and a row opens that member
+  (LLL-812).
+
 ### Fixed
 
 - On the Permissions page, changing a team role for a member who holds an
