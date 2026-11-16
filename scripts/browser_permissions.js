@@ -39,6 +39,38 @@ async page => {
   await page.setViewportSize({width:1440,height:1200});
   await page.goto(board+'/');
   must((await page.evaluate(()=>location.pathname))==='/permissions','admin without data was stranded at the root');
+  // LLL-812: with no member chosen the page is the whole workspace at a
+  // glance: one row per member, one column per team.
+  const roster = (await page.request.get(fixture.api+'/api/lll/permissions',{headers:{Authorization:'Bearer '+fixture.managerToken}}).then(r=>r.json())).members;
+  const grid = page.locator('.perm-overview');
+  const member = name => grid.locator('tbody tr').filter({has:page.locator('th a',{hasText:new RegExp('^'+name+'$')})});
+  must(await grid.locator('tbody tr').count()===roster.length,'overview does not list every member');
+  must(await page.locator('#permission-member').count()===0,'overview still asks for one member at a time');
+  const aliceName = roster.find(m=>m.id===fixture.alice).name;
+  must((await member(aliceName).locator('td[data-team="ENG"]').innerText()).trim()==='Editor','overview hides the Engineering role');
+  must((await member(aliceName).locator('td[data-team="FIN"]').innerText()).trim()==='Viewer','overview hides the Finance role');
+  const legacy = roster.filter(m=>m.all).length;
+  must(legacy>0 && (await page.locator('.perm-summary').innerText()).includes(legacy+' with an all-team grant'),'overview does not count the remaining all-team grants');
+  must(await grid.locator('tbody tr .perm-all').count()===legacy,'overview does not mark each all-team grant');
+  must(await grid.locator('tbody tr td[data-label="Workspace"]',{hasText:/^Admin$/}).count()===roster.filter(m=>m.workspace_role==='admin').length,'overview does not show who is Admin');
+  const botName = roster.find(m=>m.id===fixture.bot).name;
+  must((await member(botName).locator('th').innerText()).includes('bot'),'overview does not mark bots');
+  await shot('desktop-overview');
+  await page.locator('.perm-filter input[name="q"]').fill(aliceName.slice(0,3));
+  await page.locator('.perm-filter button[type="submit"]').click();
+  await grid.waitFor();
+  const shown = await grid.locator('tbody tr th a').allInnerTexts();
+  must(shown.length>0 && shown.length<roster.length && shown.every(n=>n.toLowerCase().includes(aliceName.slice(0,3).toLowerCase())),'filter did not narrow the members: '+shown.join(','));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(board+'/permissions');
+  must(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'overview makes the phone page scroll sideways');
+  await shot('mobile-overview');
+  await page.setViewportSize({width:1440,height:1200});
+  await member(aliceName).locator('th a').click();
+  await page.locator('.perm-identity').waitFor();
+  must((await page.locator('.perm-identity h2').innerText())===aliceName,'a row did not open its member');
+  await page.locator('.crumbs a[href="/permissions"]').click();
+  await grid.waitFor();
   await open(fixture.alice);
   must((await row('ENG').locator('td[data-label="Grant"]').innerText())==='Editor' && (await row('ENG').locator('td[data-label="Effective access"] strong').innerText())==='Editor','Engineering grant/effective role missing');
   must((await row('FIN').locator('td[data-label="Grant"]').innerText())==='Viewer' && (await row('FIN').locator('td[data-label="Effective access"] strong').innerText())==='Viewer','Finance grant/effective role missing');
@@ -149,7 +181,7 @@ async page => {
   // The board login's cookie is valid, and the member sign-in still replaces it.
   await page.locator('.perm-refusal input[name="board_token"]').fill(fixture.managerToken);
   await page.locator('.perm-refusal form[action="/login"] button[type="submit"]').click();
-  await page.locator('#permission-member').waitFor();
+  await page.locator('.perm-overview').waitFor();
   must((await page.evaluate(()=>location.pathname))==='/permissions','member sign-in did not return to Permissions');
   await page.locator('.perm-scroll').evaluate(el=>el.scrollTo(0,0));
   const missing=await page.goto(board+'/permissions?member=nobody-here');

@@ -1,6 +1,7 @@
 import "go:encoding/json"
 import "go:net/http"
 import "go:net/url"
+import "go:strings"
 
 import "models"
 import "pb"
@@ -42,7 +43,40 @@ pub struct PermissionFormVM {
   pub convert_all: bool,
 }
 
+/// One team's cell in the overview: what the member can do there.
+pub struct PermissionCellVM {
+  pub key: string,
+  pub role: string,
+  pub level: string,
+  pub limited: bool,
+}
+
+/// One member in the overview (LLL-812).
+pub struct PermissionRowVM {
+  pub id: string,
+  pub name: string,
+  pub bot: bool,
+  pub owner: string,
+  pub admin: bool,
+  pub all: bool,
+  pub cells: Slice<PermissionCellVM>,
+}
+
+pub struct PermissionColumnVM {
+  pub key: string,
+  pub name: string,
+}
+
 pub struct PermissionsVM {
+  // The overview: every member against every team. Shown when no member is
+  // chosen, so "who is Admin" and "who can edit PAY" are one look.
+  pub overview: bool,
+  pub columns: Slice<PermissionColumnVM>,
+  pub rows: Slice<PermissionRowVM>,
+  pub query: string,
+  pub total: int,
+  pub admins: int,
+  pub legacy: int,
   pub people: Slice<PermissionPersonVM>,
   pub selected: models.MemberPermissions,
   pub teams: Slice<PermissionTeamVM>,
@@ -92,6 +126,39 @@ fn permission_people(
     name: m.name,
     selected: m.id.string() == selected,
   })
+}
+
+fn permissions_overview(index: models.PermissionsIndex, query: string) -> PermissionsVM {
+  let wanted = strings.ToLower(strings.TrimSpace(query))
+  let columns = index.members
+    .get(0)
+    .map_or([], |m| m.teams.map(|t| PermissionColumnVM { key: t.key, name: t.name }))
+  let rows = index.members
+    .filter(|m| wanted == "" || strings.Contains(strings.ToLower(m.name), wanted))
+    .map(|m| PermissionRowVM {
+      id: m.id.string(),
+      name: m.name,
+      bot: m.kind == "bot",
+      owner: index.members.find(|o| o.id == m.owner).map_or("", |o| o.name),
+      admin: m.workspace_role == "admin",
+      all: m.all,
+      cells: m.teams.map(|t| PermissionCellVM {
+        key: t.key,
+        role: permission_label(t.effective),
+        level: t.effective,
+        limited: t.role != t.effective,
+      }),
+    })
+  PermissionsVM {
+    overview: true,
+    columns,
+    rows,
+    query: strings.TrimSpace(query),
+    total: index.members.length(),
+    admins: index.members.filter(|m| m.workspace_role == "admin").length(),
+    legacy: index.members.filter(|m| m.all).length(),
+    ..,
+  }
 }
 
 /// An unknown member is the viewer's stale or mistyped link, not a server
@@ -224,7 +291,12 @@ fn permissions_page(w: http.ResponseWriter, r: Ref<http.Request>, view: Viewing)
       return
     },
   }
-  let mut vm = match permissions_vm(index, query_param(r, "member")) {
+  let wanted = query_param(r, "member")
+  if wanted == "" && !wants_raw(w, r) {
+    permission_page_render(w, view, permissions_overview(index, query_param(r, "q")), 200)
+    return
+  }
+  let mut vm = match permissions_vm(index, wanted) {
     Ok(vm) => vm,
     Err(error) => {
       permission_member_missing(w, view, index, error)

@@ -8,7 +8,7 @@
 <script type="module" src="/static/datastar.js"></script>
 </head>
 <body>{{template "icons"}}<div class="app perm-app">{{template "rail" .Rail}}<main class="main">
-<header class="topbar"><div class="crumbs"><span>Workspace</span><span class="sep">›</span><span class="here">Permissions</span></div></header>
+<header class="topbar"><div class="crumbs"><span>Workspace</span><span class="sep">›</span>{{if .Page.Ready}}<a href="/permissions">Permissions</a><span class="sep">›</span><span class="here">{{.Page.Selected.Name}}</span>{{else}}<span class="here">Permissions</span>{{end}}</div></header>
 <div class="perm-scroll"><div class="perm-page">
 <header class="perm-heading"><h1>Permissions</h1><p>Workspace responsibility and team access are separate. Review who can do what before changing a grant.</p></header>
 {{with .Page}}
@@ -22,6 +22,13 @@
 <p>A workspace Admin's personal token opens this page. <code>lll token create NAME</code> prints one. It replaces this browser's current login.</p>
 <h3>No Admin yet</h3><p>Broad team access does not confer this role. An operator can assign the initial Admin through the CLI:</p><pre>lll member access NAME --workspace-role admin \
   --admin-email OPERATOR --admin-password -</pre><p>The password is read from stdin. Admin responsibility does not add team content access.</p></section>{{end}}
+{{if .Overview}}<section class="perm-roster" aria-labelledby="permission-roster-heading"><h2 id="permission-roster-heading" class="perm-hidden-label">Members</h2>
+<div class="perm-roster-bar"><p class="perm-summary">{{.Total}} {{if eq .Total 1}}member{{else}}members{{end}} · {{.Admins}} {{if eq .Admins 1}}Admin{{else}}Admins{{end}}{{if .Legacy}} · {{.Legacy}} with an all-team grant{{end}}</p>
+<form class="perm-filter" method="get" action="/permissions" role="search"><label for="permission-filter" class="perm-hidden-label">Filter members by name</label><input id="permission-filter" type="search" name="q" value="{{.Query}}" placeholder="Filter by name" autocomplete="off"><button type="submit" class="btn">Filter</button>{{if .Query}}<a href="/permissions">Clear</a>{{end}}</form></div>
+{{if .Rows}}<div class="perm-grid"><table class="perm-overview"><caption class="perm-hidden-label">Workspace role and access to each team, per member</caption><thead><tr><th scope="col">Member</th><th scope="col">Workspace</th>{{range .Columns}}<th scope="col" title="{{.Name}}">{{.Key}}</th>{{end}}</tr></thead><tbody>
+{{range .Rows}}<tr><th scope="row"><a href="/permissions?member={{.Id}}">{{.Name}}</a>{{if .Bot}}<span class="perm-kind">bot{{if .Owner}} · {{.Owner}}{{end}}</span>{{end}}{{if .All}}<span class="perm-all" title="Holds every current and future team. Open the member to convert it to per-team roles.">all teams</span>{{end}}</th><td data-label="Workspace" class="{{if .Admin}}perm-is-admin{{else}}perm-is-none{{end}}">{{if .Admin}}Admin{{else}}Member{{end}}</td>{{range .Cells}}<td data-team="{{.Key}}" class="perm-is-{{.Level}}"{{if .Limited}} title="Limited by the bot's owner or creator"{{end}}>{{if eq .Level "none"}}<span aria-hidden="true">–</span><span class="perm-hidden-label">No access</span>{{else}}{{.Role}}{{end}}{{if .Limited}}<span class="perm-hidden-label"> (limited by owner)</span>{{end}}</td>{{end}}</tr>{{end}}
+</tbody></table></div>{{else}}<p class="perm-empty">No member's name contains “{{.Query}}”. <a href="/permissions">Show everyone</a></p>{{end}}
+<p class="perm-roster-note">Open a member to change a role. Cells show effective access: a bot never exceeds its owner.</p></section>{{end}}
 {{if .People}}<form class="perm-person" method="get" action="/permissions"><label for="permission-member">Person or bot</label><div><select id="permission-member" name="member">{{range .People}}<option value="{{.Id}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}</select><button type="submit" class="btn">Open</button></div></form>{{end}}
 {{if .Review}}<section class="perm-review" aria-labelledby="permission-review-heading"><h2 id="permission-review-heading">{{if .Conversion}}Convert {{.Selected.Name}} to per-team roles{{else}}Review this change for {{.Selected.Name}}{{end}}</h2>
 {{if ne .WorkspaceBefore .WorkspaceAfter}}<p>Workspace responsibility: <strong>{{.WorkspaceBefore}}</strong> to <strong>{{.WorkspaceAfter}}</strong>. Team grants stay unchanged.</p>{{end}}
