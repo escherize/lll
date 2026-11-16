@@ -54,6 +54,10 @@ pub struct PermissionsVM {
   pub review: bool,
   pub changed: bool,
   pub changes: Slice<PermissionDiffVM>,
+  // A role change on an all-team grant: the review lists every resulting
+  // team role, because the conversion rewrites all of them (LLL-810).
+  pub conversion: bool,
+  pub resulting: Slice<PermissionDiffVM>,
   pub future_lost: bool,
   pub legacy_lost: bool,
   pub workspace_before: string,
@@ -228,7 +232,7 @@ fn permissions_change(
 ) {
   let mut form = r.Clone(r.Context())
   form.Body = Some(http.MaxBytesReader(w, form.Body, 8192))
-  let requested = PermissionFormVM {
+  let mut requested = PermissionFormVM {
     member: form.PostFormValue("member"),
     revision: form.PostFormValue("revision"),
     team: form.PostFormValue("team"),
@@ -273,6 +277,17 @@ fn permissions_change(
     let Some(role) = models.TeamRole.parse(requested.role) else {
       http.Error(w, "Choose No access, Viewer or Editor.", 400)
       return
+    }
+    // LLL-810: on an all-team grant any role change is a conversion, so the
+    // preview asks for it and its review carries the consent. An apply must
+    // come from that review; one that does not is sent back to it.
+    if vm.selected.all && !requested.convert_all {
+      if action == "apply" {
+        vm.error = f"{vm.selected.name} holds an all-team grant, so this change converts it. Preview the change again to see what is kept and lost."
+        permission_page_render(w, view, vm, 409)
+        return
+      }
+      requested.convert_all = true
     }
     models.PermissionMutation.Team {
       team: team.id,
@@ -344,6 +359,14 @@ fn permissions_change(
   vm.review = true
   vm.changed = reply.before.revision != reply.after.revision
   vm.changes = changes
+  vm.conversion = requested.convert_all && reply.before.all
+  vm.resulting = reply.after.teams.map(|after| PermissionDiffVM {
+    team: after.key,
+    before: reply.before.teams
+      .find(|t| t.id == after.id)
+      .map_or("", |t| permission_label(t.role)),
+    after: permission_label(after.role),
+  })
   vm.future_lost = reply.future_team_access_lost
   vm.legacy_lost = reply.legacy_management_lost
   vm.workspace_before = permission_label(reply.before.workspace_role)
