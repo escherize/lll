@@ -7,12 +7,9 @@ worker number NN, your partner's number PP, your absolute worker directory and
 the `lll` wrapper path when launching you. You and your partner share one
 board; each of you has your own bot and your own wrapper.
 
-Your role comes from your worker number:
-
-| NN | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 |
-|----|----|----|----|----|----|----|----|----|----|----|
-| role | A | B | A | B | A | B | A | B | A | B |
-Do not change your mind about your role.
+Odd-numbered workers are role A; even-numbered workers are role B. For
+example, 09 is role A. Keep that role for the entire case, even if your
+partner is delayed.
 
 ## Task
 
@@ -42,9 +39,6 @@ Both roles:
 4. Read back until both lines are present (bounded: at most 10 minutes,
    every 5 seconds). Report whether your partner's line arrived.
 
-Your role is the one the table gives your number. Do not change your
-mind.
-
 ## Guarded replacement variant
 
 Repeat on `Guarded release notes (workers AA and BB)`, with the same two lines:
@@ -58,7 +52,8 @@ Repeat on `Guarded release notes (workers AA and BB)`, with the same two lines:
 4. One initial write should be refused because both agents read the same
    version. On exit 4, read the issue again and retry with the new description
    and stamp, preserving your partner's line. Do not repeat the barrier.
-   Record this expected stale-write refusal separately from tool friction.
+   Record this expected stale-write refusal in the call log, separately from
+   tool friction and outside `failures`. Report any unexpected refusal.
 5. Read back until both lines are present, with the same bounded wait above.
 
 The artifacts are two descriptions, each with the original first line and
@@ -68,9 +63,6 @@ stale-write refusal and successful guarded updates by both roles. Touch nothing
 else. A missing partner is a harness blocker, not an lll failure. The barriers
 force overlapping read/write intentions; they do not force an internal HTTP
 transaction interleaving.
-
-Look your number up in the table above; 09 is role A.
-Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
 

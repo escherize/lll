@@ -7,12 +7,9 @@ worker number NN, your partner's number PP, your absolute worker directory and
 the `lll` wrapper path when launching you. You and your partner share one
 board; each of you has your own bot and your own wrapper.
 
-Your role comes from your worker number:
-
-| NN | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 |
-|----|----|----|----|----|----|----|----|----|----|----|
-| role | A | B | A | B | A | B | A | B | A | B |
-Do not change your mind about your role.
+Odd-numbered workers are role A; even-numbered workers are role B. For
+example, 09 is role A. Keep that role for the entire case, even if your
+partner is delayed.
 
 ## Task
 
@@ -27,12 +24,12 @@ Role A watches the board live; role B makes changes A must see. Shared
 issue: `Watch handshake (workers AA and BB)`, where AA is role A's number
 and BB is role B's (e.g. `workers 07 and 08`).
 
-Role A:
-NN and PP are always TWO digits, zero-padded: worker 9 is `09`, so A's
-comment is `fleet-18-09: watching`, never `fleet-18-9`. If a bounded wait
+For both roles, NN and PP are always two digits, zero-padded: worker 9 is
+`09`, so A's comment is `fleet-18-09: watching`, never `fleet-18-9`. If a bounded wait
 times out, stop and report blocked (role A still stops its stream first, step
-4). This applies to BOTH roles.
+4).
 
+Role A:
 1. Start lll's live event stream for team FLEET in machine-readable form in
    the background, stdout to `fleet-18-NN-watch.jsonl` and stderr to
    `fleet-18-NN-watch.err` in your directory.
@@ -55,14 +52,8 @@ Role B:
 3. Add exactly one comment to the shared issue: `fleet-18-NN: done KEY`,
    where KEY is the issue you created.
 
-Your role is the one the table gives your number. Do not change your
-mind.
-
 The artifacts are B's one issue (priority high), the two comments and A's
 log holding the create and update events for B's issue.
-
-Look your number up in the table above; 09 is role A.
-Do not change your mind about your role, even if your partner seems slow.
 
 ## Environment
 

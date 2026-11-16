@@ -12,7 +12,11 @@ HTTP, `lll api`, a database, the web UI, repository source, another worker's
 files or a hosted board. Write your own reports within your directory; do not
 edit the supplied wrapper. Prefer its `--help` to guessing.
 
-Read every object in full before you change it.
+Read every object in full before you change it, with one exception for this
+loop: `issue next --claim` may atomically select and claim an issue before
+the full read. Read the selected issue in full before closing it or making
+any other mutation, including a comment. With `issue next --claim --json`,
+the returned object supplies that full read; no separate view call is required.
 
 Team FLEET has issues labelled `sweep`. Some are ready to work; one is blocked
 and must stay open.
@@ -20,7 +24,10 @@ and must stay open.
 1. Write a shell script `fleet-13-NN.sh` in your directory. It takes the
    label as its only argument (`$1`, no default). It must loop: ask lll for
    the next ready issue with that label and take it in the same call, close
-   it, and repeat. It must branch on lll's EXIT CODES, not on message text: on
+   it, and repeat. Read the selected issue in full before closing it;
+   `issue next --claim --json` can return the full issue in the selection call,
+   so a separate view call is not required when that response supplies the read.
+   It must branch on lll's exit codes, not on message text: on
    "nothing to do" it stops and exits 0; on any other failure it exits with
    that code. Read `./lll issue next --help` before writing it, and capture
    the key from stdout only (no `2>&1`).
@@ -42,6 +49,9 @@ and must stay open.
    behind is expected, so do not clear it), and the blocked one is untouched.
    Take "nothing to do" from the sweep run's own output and exit status; if
    you check again, use `./lll issue next --label sweep` with no `--claim`.
+
+The loop's expected "nothing to do" exit is normal completion. Log that call
+and its exit code separately from unexpected failures.
 
 The artifacts are the script file and the board: ready sweep issues done, no
 claims, nothing else changed.

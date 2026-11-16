@@ -52,8 +52,8 @@ the team grants and delegation rules below.
 
 Editor covers issues, comments, claims, documents, labels, projects and
 webhooks. Rules such as comment authorship and claim ownership still apply.
-Archived teams remain read-only for every actor. Moving content requires
-Editor access in both source and destination teams, and must satisfy the
+Content in archived teams remains read-only for every actor. Moving content
+requires Editor access in both source and destination teams, and must satisfy the
 record's reference constraints. Projects inherit their team's roles.
 
 An Editor cannot manage workspace roles, team memberships or team lifecycle
@@ -68,12 +68,29 @@ themselves team access; these changes are audited. Only an independent person
 can be Admin. An infrastructure operator assigns the first Admin explicitly;
 migration promotes nobody.
 
-Existing all-team read-write grants retain their historical management powers
-as a compatibility grant, including invitation powers for independent people.
-They retain access to future teams and do not automatically become Admins.
-Converting an all-team grant to individual team roles requires an explicit
-preview and confirmation: future-team coverage and the legacy management grant
-are both removed. Admin can be assigned separately when needed.
+### Legacy team lifecycle authority
+
+In 1.8, an effective legacy all-team read-write grant also permits creating,
+renaming, archiving, unarchiving and deleting teams, subject to the operation's
+other constraints. This includes bots and the worker identities they create:
+the bot's own grant, its human owner's grant and any creating bot's delegation
+limit must preserve all-current-and-future-team read-write access. Existing
+unowned operator-created bots with that grant retain these powers too. The
+permissions API reports this effective grant as `legacy_management`.
+
+These team lifecycle powers do not make the identity an Admin or authorize
+changes to other members' grants. Creating people or invitation links requires
+an independent person with Admin or retained legacy all-team read-write access,
+or an infrastructure operator. Bots cannot create people or invite them.
+
+Converting an all-team grant to finite team roles removes its future-team
+coverage and legacy lifecycle authority, even if every current team remains
+Editor. Conversion is explicit, and its preview reports the losses. For an
+owned bot, converting or narrowing the owner's grant so it no longer provides
+all-team read-write access removes that authority from the bot and its workers.
+Narrowing a creating bot likewise narrows the grants stored for its workers.
+A separately assigned Admin role continues to authorize team lifecycle for an
+independent person after conversion; bots cannot hold that role.
 
 ## Bot ownership and delegation
 

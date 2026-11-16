@@ -19,6 +19,8 @@ main binary. The final report and sanitized evidence were to be attached to
 LLL-402 so recording that replay would not change the binary's embedded Go
 revision metadata and require another replay.
 
+## Measured outcomes and revisions
+
 | Case | Run | Exact artifacts | Captured calls | Failed calls | Workers with tool failures | Verdict |
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | 1 | 10/10 | 81 | 2 | 2 | FAIL: repeated search scope flag rejection |
@@ -42,6 +44,8 @@ Both corrected initial cases used fix commit
 `ab0f28e1e04107d06d060d0f2d9822221e651365df57e2bd53f46b314cfa6752`.
 Seven distinct case 01 rerun workers successfully used `search --team`.
 
+## Audit limitations and harness corrections
+
 The baseline checker omitted webhooks. All ten after-only webhook checks were
 empty, but the missing before state cannot be reconstructed; baseline coverage
 remains qualified. The recorded reruns captured all eleven member-writable collections,
@@ -57,21 +61,22 @@ were inferred from worker claims or repaired JSON. The fresh reviewer classified
 the run as incomplete harness evidence. Case 01 audits retain the original
 wrapper schema and showed no such replacement.
 
-The corrected controller captures primary audits outside worker directories and
-publishes them only after workers return. Worker briefs explicitly prohibit
-editing instrumentation. Any worker-supplied audit is preserved separately.
+At the recorded rerun revision, the corrected controller captured primary
+audits outside worker directories and published them only after workers
+returned. Worker briefs explicitly prohibited
+editing instrumentation. Any worker-supplied audit was preserved separately.
 Case 05 run 2 had no worker-supplied audit, and every published file matched its
-private primary byte for byte. Contract tests verify that worker tampering cannot
-change the authoritative calls, publication is repeatable, credentials are
-redacted, and only owned children are terminated and reaped.
+private primary byte for byte. At that revision, contract tests verified that worker tampering could not
+change the authoritative calls, publication was repeatable, credentials were
+redacted, and only owned children were terminated and reaped.
 
 Prelaunch failures are separate harness events: inherited administrator settings
 overrode the person token when minting bots, then REST project seeding omitted a
 required status. Both failed before workers launched and were cleaned up.
 Independent preflight also led to complete collection coverage, secret
 redaction, fresh-path enforcement, constructor cleanup and a self-contained
-case 05 brief. The controller pins binary, wrapper and startup-helper code before
-launch so later checkout edits cannot alter live workers.
+case 05 brief. That controller pinned binary, wrapper and startup-helper code before
+launch so later checkout edits could not alter live workers.
 
 Shared skill corrections landed upstream in
 [PR 1](https://github.com/metabase/agent-instructions/pull/1) and
@@ -81,6 +86,8 @@ ground truth, complete evidence review, private authoritative audits, honest
 unavailable-count handling and final-build replays. Legacy shell helpers are
 explicitly qualified; this change does not claim to rewrite their lifecycle.
 
+## Reported usability friction
+
 The documented title-only issue-list filter produced navigation papercuts for
 seven baseline and five rerun workers, without failed invocations. LLL-484
 records the product decision about empty-result guidance. Its filter semantics
@@ -89,6 +96,8 @@ were not changed by this audit.
 Nine case 05 workers reported reconstructing the issue key from JSON number and
 expanded team key. All read-backs succeeded; this is a successful-call papercut,
 not a failed invocation class. LLL-485 records the output-contract decision.
+
+## Evidence and follow-up at the snapshot
 
 Baseline and aborted-run sanitized evidence are attached to LLL-402. Completed
 controllers verified all twenty owned listeners gone and removed connections,

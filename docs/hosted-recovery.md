@@ -3,10 +3,6 @@
 Restore a Fly volume snapshot into an isolated machine, verify the data, then
 arrange a single active writer before cutover.
 
-Maintain this procedure in `docs/hosted-recovery.md` and publish that file's
-contents to the hosted `hosted-recovery` wiki document. The repository copy
-is available when the board is down; do not maintain two independent versions.
-
 Owner: the project maintainer (Bryan Maass), using the Fly account with machine,
 volume and SSH access to `escherize-lll`. Recovery requires Fly access and this
 runbook; it does not require the primary lll server to answer. Keep Fly account
@@ -32,8 +28,7 @@ and ID, and record the deployed image and machine configuration. Snapshot
 list order is not a recency guarantee; compare `created_at` values.
 
 If the primary is unavailable, these Fly control-plane operations still give
-the recovery inputs. The September 12 drill used the already deployed image;
-it did not require a new build or a functioning primary database.
+the recovery inputs.
 
 ## Restore without accepting production traffic
 
@@ -135,6 +130,9 @@ Confirm both temporary IDs are gone and production configuration is unchanged.
 
 ## Verified drill: September 12, 2026 (LLL-274)
 
+The drill used the already deployed image; it did not require a new build or
+a functioning primary database.
+
 - Production: machine `080d290a0d7318`, encrypted 1 GiB volume
   `vol_r68dmpqeo8m23k14`, region `ord`. Automatic backups enabled, retention
   30 days, 11 completed snapshots observed. An unrelated unattached volume
@@ -152,3 +150,9 @@ Confirm both temporary IDs are gone and production configuration is unchanged.
   `bryan.maass` token also authenticated against the restored member records.
 - Temporary machine `784ed161f97d28` and volume `vol_re1kzme3p79z06o4` were
   destroyed after verification. Production configuration was unchanged.
+
+## Maintain this runbook
+
+Maintain this procedure in `docs/hosted-recovery.md` and publish that file's
+contents to the hosted `hosted-recovery` wiki document. The repository copy
+is available when the board is down; do not maintain two independent versions.

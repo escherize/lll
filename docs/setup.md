@@ -62,8 +62,9 @@ lll attach --key PAY
 
 This writes the attachment to `.lll.toml` at the repository root; commit it
 so clones and worktrees use the same board. Outside Git, it attaches the
-working directory and its subdirectories. Use your board’s team key; it creates that team if missing;
-without `--key`, a server with one team selects that team.
+working directory and its subdirectories. Use your board’s team key. The
+command creates that team if missing. Without `--key`, a server with one team
+selects that team.
 
 Separate teams keep separate backlogs. `lll team archive KEY` hides a finished
 team while retaining its work and links; `lll team unarchive KEY` restores it.

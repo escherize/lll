@@ -27,11 +27,21 @@ lll issue close               # finish APP-2; release your claim and keep the as
 For an unfinished handoff, use `lll issue release APP-2` instead of closing.
 It releases your claim and clears the assignee when it still names you.
 
-The PR helper needs a GitHub remote; the watch commands stream until Ctrl-C:
+### GitHub integration
 
-<!-- example-check: skip: needs a GitHub remote, or streams until Ctrl-C -->
+The PR helper needs a GitHub remote:
+
+<!-- example-check: skip: needs a GitHub remote -->
 ```sh
 lll issue pr                  # gh pr create titled "APP-2: Fix login"; records gh#N
+```
+
+### Live events
+
+These commands stream until Ctrl-C:
+
+<!-- example-check: skip: streams until Ctrl-C -->
+```sh
 lll watch --state in-review   # live NDJSON-able event stream for a query
 lll issue watch APP-2        # one issue + its comments, until Ctrl-C
 ```
@@ -60,7 +70,7 @@ its subtree; deleting a parent detaches its children. Closing with open
 descendants exits 4 unless you explicitly use `--force`, which leaves those
 descendants unchanged. Projects remain a separate way to group work.
 
-## More commands
+## Teams and configuration
 
 ```sh
 lll team list
@@ -70,22 +80,33 @@ lll config list               # every value and the file it came from
 lll config get team           # one effective value, for scripts
 lll config check              # does the configured url answer as a PocketBase API?
 lll whoami                    # which member, server and team you are acting as
-lll member invite lee --email lee@example.com  # add a colleague + temp password, in one
-lll bot create bot-myrepo     # a bot member you own, and an agent prompt with its token; refuses an existing bot
-lll bot rotate bot-myrepo --env > agent.env  # a new token (the old one stops working), printing only the LLL_URL/LLL_TOKEN exports
 lll board -w                  # open the web board
 lll completions zsh           # bash, zsh, fish
 ```
 
-These need a hosted server, a LAN board or administrator credentials:
+## Identity and access
 
-<!-- example-check: skip: needs a hosted server, a LAN board or administrator credentials; logout would end the session -->
+Create a bot under your own member identity:
+
 ```sh
+lll bot create bot-myrepo     # a bot member you own, and an agent prompt with its token; refuses an existing bot
+lll bot rotate bot-myrepo --env > agent.env  # a new token (the old one stops working), printing only the LLL_URL/LLL_TOKEN exports
+```
+
+The following account operations require database superuser credentials.
+A workspace Admin role alone does not supply those credentials:
+
+<!-- example-check: skip: requires database superuser credentials -->
+```sh
+lll member invite lee --email lee@example.com  # add a colleague + temp password, in one
 lll member set-password NAME --password <pw>  # superuser gives a member credentials
 lll member delete NAME        # delete a member with nothing assigned (superuser only)
 lll token create NAME         # a one-year agent token (superuser only), printed once
-lll logout                    # clear the stored token
 ```
+
+Use `lll logout` to clear the stored token.
+
+## Attachments and script output
 
 `lll issue attach APP-1 ./shot.png` attaches a file (at most 20 per issue,
 20 MiB each); `issue download` and `issue detach` take the filename.
@@ -130,7 +151,7 @@ Server settings, environment only, read by `lll up`:
 
 | Env | Meaning |
 |---|---|
-| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | server administrator; set both or neither |
+| `LLL_ADMIN_EMAIL` / `LLL_ADMIN_PASSWORD` | database superuser; set both or neither |
 | `LLL_ALLOWED_ORIGINS` | extra browser origins that may read API responses; default none |
 | `LLL_BIND` | bind address for both ports; default `127.0.0.1` |
 | `LLL_BOARD_TOKEN` | pins the board's access token; default a new one each boot |

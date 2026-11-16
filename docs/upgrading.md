@@ -1,5 +1,8 @@
 # Predictable client and server upgrades
 
+Back up the server data, upgrade the server first, and verify the exact
+client/server pair before upgrading clients.
+
 The CLI and the server are separate binaries. A version-skew warning is
 advice, not a compatibility handshake. A Homebrew client may update itself
 when its server is newer ([auto-update](cli-contract.md#version-skew-and-auto-update));
@@ -40,9 +43,13 @@ key and retry automatically: that would give up the duplicate-write guarantee.
 A newer watcher must treat an old server's missing release actor as unknown,
 not infer that the holder released the claim. Watch is live-only: reconnects
 do not replay gaps. `issue list --since` does not catch comment/claim-only
-activity; re-read comments and claims when reconciling a complete snapshot.
+activity. For ordered retained history, use `lll activity --since CURSOR`
+and advance the cursor to the last returned `seq`; see [the audit log](api.md#the-audit-log).
+History is limited by visibility and retention. For current state, re-read
+comments and claims; [bulk reads](cli-contract.md#bulk-current-reads) are
+paginated scans, not atomic snapshots.
 
-## Record tested pairs, not a blanket compatibility claim
+## Tested client/server pairs
 
 For each release, retain a report with the exact before/after binary hashes.
 `version` alone is insufficient: a candidate may still print the current
@@ -81,7 +88,7 @@ own temporary data. The report contains versions, binary hashes and checks,
 never credentials. Exit 0 means every check passed; an assertion is a failed
 rehearsal and should block that release until understood.
 
-## Operator window
+## Upgrade window
 
 1. Declare the exact server/client cut and read its migration and compatibility
    notes. Stop writers and long-running watchers for the upgrade window.

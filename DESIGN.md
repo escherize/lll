@@ -234,20 +234,18 @@ components:
 
 **Creative North Star: "The Instrument Panel"**
 
-lll is a dark, dense, quiet issue board: every issue's state legible in one
-glance, refusing the airy marketing-card look of generic kanban tools. The
-world is Linear's grammar rebuilt in lll's own materials — a near-black ground,
-hairline white-alpha borders, one small variable typeface at 13px, muted gray
-text, and semantic state color carried almost entirely by small drawn icons.
-Chrome recedes; the data is the interface.
+lll uses a dark, dense board layout with compact controls and visible issue
+states. Its Linear-inspired layout uses a near-black background, thin
+translucent white borders, one variable typeface at 13px, muted gray text and
+semantic state colors carried by small drawn icons. Controls and navigation
+use subdued colors to keep issue content prominent.
 
-Color is rationed. The single accent, an ember orange (#f0883e), appears only
-where the user can act (primary buttons, focus rings, selection, the workspace
-mark) and on exactly one piece of data: urgent priority. Errors get one voice
-of their own — a muted red flash strip patched in over SSE. Everything else
-speaks in three grays and the six semantic state hues. Depth is tonal, not
-shadowed: five closely-spaced dark surfaces layer the UI, and the one real
-shadow is a 1px whisper under cards.
+The single accent, ember orange (#f0883e), marks primary buttons, focus rings,
+selection, the workspace mark and urgent priority. Errors use a muted red
+flash strip patched over SSE. Other content uses three grays and six semantic
+state hues. Five closely spaced dark surfaces provide depth, with a small
+shadow under cards. The landing page and documentation reading surface have
+the scoped exceptions described below.
 
 Orange #f0883e is the canonical accent, matching PRODUCT.md and the shipped
 tokens and icons.
@@ -263,7 +261,7 @@ tokens and icons.
 
 ## Colors
 
-A near-black tonal ladder, three gray text voices, one rationed orange accent,
+A near-black tonal ladder, three gray text roles, one orange accent,
 one muted error red, and six semantic state hues.
 
 ### Primary
@@ -319,11 +317,11 @@ through `av-3`) so a member's color is stable across sessions and surfaces:
 nothing else. Never use it for decoration, emphasis, headings, or non-urgent
 data.
 
-**The One Error Voice Rule.** Failure speaks only through the flash strip's
+**The One Error Voice Rule.** Display failures through the flash strip's
 muted red trio (#f0827b on rgba(229,83,75,0.12), rgba(229,83,75,0.4) border).
 No other red, no red text inline, no red icons.
 
-**The Icon-Carries-Color Rule.** State color reaches the page only through the
+**The Icon-Carries-Color Rule.** Apply state color through the
 14px state icon (`color: var(--st-*)` + `currentColor`). Text next to the icon
 stays gray; no colored text, no colored column headers, no tinted card
 backgrounds.

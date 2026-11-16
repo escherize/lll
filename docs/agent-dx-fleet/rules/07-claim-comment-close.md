@@ -15,7 +15,7 @@ edit the supplied wrapper. Prefer its `--help` to guessing.
 Read every object in full before you change it.
 
 1. Find the issue `Flush the export queue` in team FLEET and read it in full.
-2. Claim it, so nobody else takes it while you work.
+2. Claim it under your provisioned bot identity.
 3. Add exactly one comment with this exact body:
    `fleet-07-NN: flushed the export queue; closing.`
 4. Close the issue.
