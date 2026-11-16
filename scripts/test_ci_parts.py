@@ -46,7 +46,7 @@ class CIParts(unittest.TestCase):
         self.assertTrue(shards, "no standalone shard in the workflow")
         total = shards[0][1]
         self.assertEqual(shards, [(str(i), total) for i in range(1, int(total) + 1)])
-        for part in ("build test", "e2e-core", "e2e-web", "e2e-up"):
+        for part in ("build ::: test", "e2e-core", "e2e-web", "e2e-up"):
             self.assertRegex(workflow, rf"mise run {part}\b")
 
     def test_full_gate_still_runs_everything(self):
