@@ -21,6 +21,14 @@
 # (login --url, member set-password, web_url derivation, errors naming the
 # server; task-203/195), and the lll up web board (via e2e_web.sh).
 set -euo pipefail
+# E2E_PART=core runs only what needs this script's shared board. CI runs the
+# rest (e2e_standalone.sh, e2e_web.sh, e2e_up.sh) as separate jobs (LLL-805);
+# the default runs everything, which is what `mise run gate` does.
+E2E_PART=${E2E_PART:-all}
+case "$E2E_PART" in
+  all | core) ;;
+  *) echo "E2E_PART must be 'all' or 'core', got '$E2E_PART'" >&2; exit 2 ;;
+esac
 . "$(dirname "$0")/lib.sh"   # free_port, wait_ok, fail, assert_*, e2e_begin/end
 e2e_begin
 
@@ -1433,7 +1441,11 @@ assert_contains "$out" "no comment containing 'never-coming'" "--timeout names w
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY" 2>&1 >/dev/null)
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until on stderr"
 
-python3 "$REPO_ROOT"/scripts/test_response_reads.py "$LLL_ABS"
+# The suites that take only the binary run from their own script, so CI can
+# put them on other runners (LLL-805). E2E_PART=core leaves them out.
+if [ "$E2E_PART" = all ]; then
+  HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_standalone.sh --prebuilt "$LLL_ABS"
+fi
 python3 "$REPO_ROOT"/scripts/test_watch_until.py "$LLL_ABS" "$URL" "$WKEY"
 
 # LLL-464: bot help must succeed without a name, credentials or a server,
@@ -1444,46 +1456,9 @@ for bot_help in --help -h; do
   out=$(env -u LLL_TOKEN -u LLL_ADMIN_EMAIL -u LLL_ADMIN_PASSWORD LLL_URL=http://127.0.0.1:1 "$LIN" bot rotate "$bot_help") || fail "bot rotate $bot_help refused help"
   assert_contains "$out" "lll bot rotate bot-NAME" "bot rotation help names its invocation"
 done
-# --- lll search: full text over issues, comments and docs, ranked, with context (LLL-96) ---
-python3 "$REPO_ROOT"/scripts/test_search_team.py "$LLL_ABS"
-# --- the 1.0 CLI contract: exit codes, list envelope, issue JSON, time flags (LLL-645) ---
-python3 "$REPO_ROOT"/scripts/test_cli_contract.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_watch_activity.py "$LLL_ABS"
-# --- member invite --team: one team over the API and the board ---
-python3 "$REPO_ROOT"/scripts/test_team_scope.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_team_roles.py "$LLL_ABS" --browser
-# --- who made or owns a record is the server's word, not a member's (LLL-681) ---
-python3 "$REPO_ROOT"/scripts/test_identity_fields.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_board_head.py "$LLL_ABS"
-# --- an archived team is read-only on the server, every collection classified (LLL-660) ---
-python3 "$REPO_ROOT"/scripts/test_archived_guard.py "$LLL_ABS"
-# --- a member token in the board cookie scopes pages, search and the stream (LLL-545) ---
-python3 "$REPO_ROOT"/scripts/test_board_viewer_scope.py "$LLL_ABS"
-# --- the board reads as its viewer: team links, the link-token route, one access check (LLL-658) ---
-python3 "$REPO_ROOT"/scripts/test_viewer_reads.py "$LLL_ABS"
-# --- every registered non-GET board route refuses another origin (LLL-630) ---
-python3 "$REPO_ROOT"/scripts/test_board_origin.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_access_agent_prompt.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_access_agent_prompt.py "$LLL_ABS" lan
-# --- invite create + /join/<code>: single-use, bounded by the creator (LLL-544) ---
-python3 "$REPO_ROOT"/scripts/test_invites.py "$LLL_ABS"
-# --- the real invites migration on a board with names differing only by case ---
-python3 "$REPO_ROOT"/scripts/test_name_index_migration.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_board_add_bot.py "$LLL_ABS"
-# --- the members roster a team-scoped member sees: API, CLI, board (LLL-551) ---
-python3 "$REPO_ROOT"/scripts/test_roster_scope.py "$LLL_ABS"
-# --- references stay in one team; relation filters cannot read hidden rows; team key rule (LLL-631, 634, 628) ---
-python3 "$REPO_ROOT"/scripts/test_team_refs.py "$LLL_ABS"
-# --- an older CLI than its server says so once a day, on stderr only (LLL-607) ---
-python3 "$REPO_ROOT"/scripts/test_version_skew.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_whoami_malformed.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_bot_json.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_bot_lifecycle.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_json_errors.py "$LLL_ABS" "$URL"
-# --- lll upgrade picks its command from how lll was installed (LLL-608) ---
-python3 "$REPO_ROOT"/scripts/test_upgrade.py "$LLL_ABS"
-# --- a Homebrew lll older than its server updates itself in the background (LLL-721) ---
-python3 "$REPO_ROOT"/scripts/test_auto_update.py "$LLL_ABS"
 SKEY=$(env LLL_URL=$URL LLL_TEAM=ENG "$LIN" issue create -t "Rail favorites go stale" -d "First line of context.
 The zebra crossing is only mentioned in this description.
 Last line of context." | sed -n 's/^Created \([A-Z]*-[0-9]*\).*/\1/p')
@@ -1646,14 +1621,6 @@ if command -v fish >/dev/null; then
   fish -n "$DATA_DIR/comp.fish" || fail "fish completions do not parse"
 fi
 assert_contains "$(cat "$DATA_DIR/comp.fish")" "complete -c lll" "fish completions complete lll"
-python3 "$REPO_ROOT"/scripts/test_completion_commands.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_flag_policy.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_usage_exit.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_password_tty.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_write_json.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_help_exit.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_help_ticket_keys.py "$LIN"
-python3 "$REPO_ROOT"/scripts/test_doc_examples.py "$LIN"
 
 # task-127: help, completions and the parser read ONE table, so the gate
 for shell in bash zsh fish; do
@@ -2527,14 +2494,8 @@ fi
 assert_contains "$out" "nothing is piped in" "-d - with no pipe names the fix"
 
 # --- create --json (TASK-177): the raw record, pipe-safe and keyable ---
-python3 "$REPO_ROOT"/scripts/test_views_refresh.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_create_response.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_request_timeout.py "$LLL_ABS" "$URL"
-python3 "$REPO_ROOT"/scripts/test_config_permissions.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_whoami_recovery.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_new_cli_login.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_shared_reopen.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_agenda_scope.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_pr_body.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_table.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_project.py "$LLL_ABS" "$URL"
@@ -4062,13 +4023,10 @@ done
 assert_contains "$schema_out" "Rules:" "api --schema carries the access rules"
 
 # --- web board (own ephemeral PB; see e2e_web.sh) ---
-python3 "$REPO_ROOT"/scripts/test_collection_pagination.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_doc_pagination.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_since.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_issue_activity.py "$LLL_ABS" "$URL"
-python3 "$REPO_ROOT"/scripts/test_bulk_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_project_cascade.py "$LLL_ABS" "$URL"
-python3 "$REPO_ROOT"/scripts/test_issue_view_reads.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/test_export_import.py "$LLL_ABS" "$URL"
 python3 "$REPO_ROOT"/scripts/test_import_github.py "$LLL_ABS" "$URL"
 # A fresh superuser token: the mid-suite restart retired the earlier one.
@@ -4087,12 +4045,12 @@ python3 "$REPO_ROOT"/scripts/test_seed.py
 # through two releases (members kind/owner, the whole webhooks collection)
 # under a green gate. Same placement as test_seed.py: it needs the built
 # binary and boots its own throwaway board.
-python3 "$REPO_ROOT"/scripts/test_move_pagination.py "$LLL_ABS"
-python3 "$REPO_ROOT"/scripts/test_config_isolation.py "$LLL_ABS"
 python3 "$REPO_ROOT"/scripts/gen_api_schema.py --check
 
-# --- web board (own ephemeral PB; see e2e_web.sh) ---
-HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_web.sh
+if [ "$E2E_PART" = all ]; then
+  # --- web board (own ephemeral PB; see e2e_web.sh) ---
+  HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_web.sh
 
-# --- lll up runner (own ephemeral PB; see e2e_up.sh) ---
-HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_up.sh
+  # --- lll up runner (own ephemeral PB; see e2e_up.sh) ---
+  HOME="$E2E_REAL_HOME" "$REPO_ROOT"/scripts/e2e_up.sh
+fi
