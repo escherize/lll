@@ -97,6 +97,8 @@ pub enum ServerCode {
   TeamRolesRequired,
   /// Replacing an all/future-team grant requires explicit conversion.
   ConfirmAllTeamConversion,
+  /// The member's permissions moved since the revision the request names.
+  PermissionsChanged,
   /// PocketBase refused a password change's oldPassword field: the current
   /// password given is not the member's. PocketBase's own validation, read
   /// from the field it names rather than from its wording.
@@ -114,6 +116,7 @@ pub fn code_named(code: string) -> Option<ServerCode> {
     "bot_exceeds_owner" => Some(ServerCode.BotExceedsOwner),
     "team_roles_required" => Some(ServerCode.TeamRolesRequired),
     "confirm_all_team_conversion" => Some(ServerCode.ConfirmAllTeamConversion),
+    "permissions_changed" => Some(ServerCode.PermissionsChanged),
     _ => None,
   }
 }
@@ -128,6 +131,7 @@ fn is_refusal(code: Option<ServerCode>) -> bool {
     Some(ServerCode.NotClaimed) => true,
     Some(ServerCode.BotExceedsOwner) => false,
     Some(ServerCode.TeamRolesRequired) | Some(ServerCode.ConfirmAllTeamConversion) => true,
+    Some(ServerCode.PermissionsChanged) => false,
     Some(ServerCode.OldPasswordRejected) => false,
     None => false,
   }

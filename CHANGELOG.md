@@ -12,6 +12,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   all-team grant now opens a conversion preview. It lists every resulting team
   role and what is lost. Before, the first attempt failed with an error naming
   an API field unless a checkbox was ticked (LLL-810).
+- The Permissions page refuses a non-admin inside the board, with a way back
+  and a form to sign in as a member, which replaces the browser's current
+  login. An unknown member answers 404 with the member picker. A stale change
+  says so in plain words and keeps the edited team open (LLL-811).
 
 ## [1.8.0] - 2026-11-14
 

@@ -23,6 +23,7 @@ fn server_code_name(code: Option<ServerCode>) -> string {
     Some(ServerCode.BotExceedsOwner) => "bot_exceeds_owner",
     Some(ServerCode.TeamRolesRequired) => "team_roles_required",
     Some(ServerCode.ConfirmAllTeamConversion) => "confirm_all_team_conversion",
+    Some(ServerCode.PermissionsChanged) => "permissions_changed",
     Some(ServerCode.OldPasswordRejected) => "old_password_rejected",
     None => "",
   }

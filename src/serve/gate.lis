@@ -207,7 +207,11 @@ fn confirm_login(w: http.ResponseWriter, r: Ref<http.Request>, tok: string, who:
 /// Origin must name this board's own host (browsers send Origin on POSTs,
 /// plain HTTP included), so only the board's own page can set a cookie
 /// here. The cookie-replace rule holds: a scoped login never replaces a
-/// cookie that still resolves to a viewer.
+/// cookie that still resolves to a viewer. The one exception is a form that
+/// asks for it (replace=member) and sends a member's own token: that is a
+/// person deliberately signing in as themselves, the only way a browser on
+/// the shared board login can reach a page that needs a named member
+/// (LLL-811). A team link never replaces anything.
 pub fn board_login(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>) {
   let mut rc = r.Clone(r.Context())
   if !same_origin_post(rc) {
@@ -223,16 +227,16 @@ pub fn board_login(ctx: pb.Client, w: http.ResponseWriter, r: Ref<http.Request>)
     http.Redirect(w, rc, next, 303)
     return
   }
-  let age = if team_scope(tok, want).is_some() {
-    7 * 24 * 3600
-  } else if member_viewer(ctx, tok).is_some() {
-    365 * 24 * 3600
-  } else {
+  let link = team_scope(tok, want).is_some()
+  let member = !link && member_viewer(ctx, tok).is_some()
+  if !link && !member {
     refused(w, rc)
     return
   }
+  let age = if link { 7 * 24 * 3600 } else { 365 * 24 * 3600 }
   let signed_in = is_board_token(cookie, want) || cookie_viewer(ctx, cookie, want).is_some()
-  if cookie == tok || !signed_in { set_board_cookie(w, tok, age) }
+  let asked = member && rc.PostFormValue("replace") == "member"
+  if cookie == tok || !signed_in || asked { set_board_cookie(w, tok, age) }
   http.Redirect(w, rc, next, 303)
 }
 
@@ -528,7 +532,11 @@ fn admit_scoped(w: http.ResponseWriter, r: Ref<http.Request>, v: ScopedViewer) -
     return false
   }
   let admin = v.member.map_or(false, |m| m.workspace_admin)
-  if (is_read_method(r.Method) && u.Path == "/permissions") || (r.Method == "POST" && u.Path == "/permissions/change") {
+  // The page refuses a non-admin itself, inside the board, so they keep a way
+  // back and a way to sign in as someone else (LLL-811). Its data read is
+  // refused by the server for the same viewer. Changes never get that far.
+  if is_read_method(r.Method) && u.Path == "/permissions" { return true }
+  if r.Method == "POST" && u.Path == "/permissions/change" {
     if admin { return true }
     http.Error(w, "Workspace Admin is required to manage permissions. Team access does not confer that responsibility.", 403)
     return false

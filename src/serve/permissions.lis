@@ -23,6 +23,8 @@ pub struct PermissionTeamVM {
   pub all: bool,
   pub member: string,
   pub revision: string,
+  // The team a refused change was editing stays open on the reloaded page.
+  pub open: bool,
 }
 
 pub struct PermissionDiffVM {
@@ -50,6 +52,8 @@ pub struct PermissionsVM {
   pub can_assign_admin: bool,
   pub error: string,
   pub needs_admin: bool,
+  // Who the refusal is talking to; empty when the login names no member.
+  pub viewer_name: string,
   pub success: string,
   pub review: bool,
   pub changed: bool,
@@ -79,6 +83,37 @@ fn permission_label(value: string) -> string {
   }
 }
 
+fn permission_people(
+  index: models.PermissionsIndex,
+  selected: string,
+) -> Slice<PermissionPersonVM> {
+  index.members.map(|m| PermissionPersonVM {
+    id: m.id.string(),
+    name: m.name,
+    selected: m.id.string() == selected,
+  })
+}
+
+/// An unknown member is the viewer's stale or mistyped link, not a server
+/// fault: answer 404 and keep the picker so another member can be chosen.
+fn permission_member_missing(
+  w: http.ResponseWriter,
+  view: Viewing,
+  index: models.PermissionsIndex,
+  error: pb.CliError,
+) {
+  if error.kind != pb.ErrorKind.NotFound {
+    permission_page_error(w, view, error)
+    return
+  }
+  permission_page_render(
+    w,
+    view,
+    PermissionsVM { people: permission_people(index, ""), error: error.message, .. },
+    404,
+  )
+}
+
 fn permissions_vm(
   index: models.PermissionsIndex,
   wanted: string,
@@ -91,14 +126,10 @@ fn permissions_vm(
   let Some(member) = selected else {
     return Err(pb.fail(
       pb.ErrorKind.NotFound,
-      "This member is no longer available. Open Permissions again to choose a current member.",
+      "This member is no longer available. Choose a current member below.",
     ))
   }
-  let people = index.members.map(|m| PermissionPersonVM {
-    id: m.id.string(),
-    name: m.name,
-    selected: m.id == member.id,
-  })
+  let people = permission_people(index, member.id.string())
   let granted = member.teams.filter(|t| t.role != "none")
   let ungranted = member.teams.filter(|t| t.role == "none")
   let ordered = granted.append(ungranted...)
@@ -113,6 +144,7 @@ fn permissions_vm(
     all: member.all,
     member: member.id.string(),
     revision: member.revision,
+    open: false,
   })
   let owner = index.members
     .find(|m| m.id == member.owner)
@@ -151,7 +183,8 @@ fn permission_page_render(
     me,
     models.Team { .. },
   )
-  let html = match render("permissions-page", PageVM { rail, page: vm }) {
+  let shown = PermissionsVM { viewer_name: me, ..vm }
+  let html = match render("permissions-page", PageVM { rail, page: shown }) {
     Ok(html) => html,
     Err(_) => {
       http.Error(w, "Could not render Permissions. Try again.", 500)
@@ -178,7 +211,7 @@ fn permission_page_error(
   permission_page_render(
     w,
     view,
-    PermissionsVM { error: message, needs_admin: status == 403, .. },
+    PermissionsVM { error: message, needs_admin: status == 401 || status == 403, .. },
     status,
   )
 }
@@ -194,7 +227,7 @@ fn permissions_page(w: http.ResponseWriter, r: Ref<http.Request>, view: Viewing)
   let mut vm = match permissions_vm(index, query_param(r, "member")) {
     Ok(vm) => vm,
     Err(error) => {
-      permission_page_error(w, view, error)
+      permission_member_missing(w, view, index, error)
       return
     },
   }
@@ -255,7 +288,7 @@ fn permissions_change(
   let mut vm = match permissions_vm(index, requested.member) {
     Ok(vm) => vm,
     Err(error) => {
-      permission_page_error(w, view, error)
+      permission_member_missing(w, view, index, error)
       return
     },
   }
@@ -308,9 +341,15 @@ fn permissions_change(
   ) {
     Ok(reply) => reply,
     Err(error) => {
-      vm.error = error.message
+      // The page below is already the member's current state, so a stale
+      // revision needs only to be said plainly; the retry form is fresh.
+      vm.error = if error.has_code(pb.ServerCode.PermissionsChanged) {
+        f"{vm.selected.name}'s permissions changed since this page loaded. The current permissions are shown below. Preview the change again."
+      } else {
+        error.message
+      }
       vm.teams = vm.teams.map(|t| if t.id == requested.team {
-        PermissionTeamVM { choice: requested.role, ..t }
+        PermissionTeamVM { choice: requested.role, open: true, ..t }
       } else {
         t
       })

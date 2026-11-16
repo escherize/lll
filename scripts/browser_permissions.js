@@ -65,7 +65,10 @@ async page => {
   await edit(fixture.finance,'editor');
   await page.locator('#permission-apply button[type="submit"]').click();
   await page.locator('.perm-error').waitFor();
-  must((await page.locator('.perm-error').innerText()).includes('Permissions changed'),'stale preview did not explain recovery');
+  // LLL-811: a stale apply names whose permissions moved, in plain words,
+  // and leaves the team being edited open on the reloaded page.
+  must((await page.locator('.perm-error').innerText()).includes('changed since this page loaded'),'stale preview did not explain recovery');
+  must(await row('ENG').locator('details').evaluate(el=>el.open),'stale apply closed the team being edited');
   must((await access()).teams.find(t=>t.key==='ENG').role==='editor','stale apply changed Engineering');
   await page.locator('.perm-error').scrollIntoViewIfNeeded();
   await shot('mobile-stale-preview');
@@ -122,14 +125,38 @@ async page => {
   await shot('desktop-editor-issue');
   await page.setViewportSize({width:390,height:844});
 
+  // LLL-811: every non-admin gets the same refusal inside the board, with a
+  // way back and a way to sign in as someone else.
+  const refusal = async who => {
+    must(await page.locator('.perm-app .perm-refusal').isVisible(),who+' refusal is not the styled page');
+    must(await page.locator('.perm-refusal a[href="/"]').isVisible(),who+' refusal has no way back to the board');
+    must(await page.locator('.perm-refusal form[action="/login"] input[name="board_token"]').isVisible(),who+' refusal offers no member sign-in');
+    must(await page.locator('.perm-teams,#permission-member').count()===0,who+' refusal shows grants');
+  };
   const denied=await page.goto(board+'/permissions');
   must(denied.status()===403,'ordinary member opened administration');
+  await refusal('member');
+  must((await page.locator('.perm-refusal').innerText()).includes('alice'),'member refusal does not say who is signed in');
+  await shot('mobile-member-refused');
+  const posted=await page.request.post(board+'/permissions/change',{headers:{Origin:board},form:{action:'preview',member:fixture.alice,workspace_role:'admin'}});
+  must(posted.status()===403,'ordinary member reached the change route');
   await cookie(fixture.boardToken);
   const setup=await page.goto(board+'/permissions');
   must(setup.status()===403,'legacy board identity became Admin implicitly');
+  await refusal('board login');
   must((await page.locator('body').innerText()).includes('assign the initial Admin'),'initial operator setup is not explained');
   await shot('mobile-admin-required');
-  await cookie(fixture.managerToken);
+  // The board login's cookie is valid, and the member sign-in still replaces it.
+  await page.locator('.perm-refusal input[name="board_token"]').fill(fixture.managerToken);
+  await page.locator('.perm-refusal form[action="/login"] button[type="submit"]').click();
+  await page.locator('#permission-member').waitFor();
+  must((await page.evaluate(()=>location.pathname))==='/permissions','member sign-in did not return to Permissions');
+  await page.locator('.perm-scroll').evaluate(el=>el.scrollTo(0,0));
+  const missing=await page.goto(board+'/permissions?member=nobody-here');
+  must(missing.status()===404,'unknown member did not answer 404, got '+missing.status());
+  must((await page.locator('.perm-error').innerText()).includes('no longer available'),'unknown member is not explained');
+  must(await page.locator('#permission-member').isVisible(),'unknown member leaves no way to choose another');
+  await shot('mobile-unknown-member');
   await open(fixture.alice);
   const raw=await page.request.get(board+'/permissions?member='+fixture.alice+'&raw');
   must(raw.ok() && (await raw.text()).includes('"editor"'),'agent-readable permissions missing');
