@@ -241,7 +241,7 @@ func (manager permissionManager) prepare(id string, change permissionChange) (*w
 			return nil, err
 		}
 		if before.Revision != change.revision {
-			return nil, router.NewApiError(http.StatusConflict, "permissions changed; read and preview again", nil)
+			return nil, withCode(router.NewApiError(http.StatusConflict, "permissions changed; read and preview again", nil), "permissions_changed")
 		}
 		next := ownAccess(member)
 		updateAccess := false

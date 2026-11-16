@@ -236,8 +236,9 @@ def main():
                 'role': 'editor'}, manager_token)
             assert applied['applied'] is True and applied['event_id']
             assert event_count() == count + 1
-            expect(409, management + alice['id'], {'revision': snapshot['revision'], 'team': finance,
+            stale = expect(409, management + alice['id'], {'revision': snapshot['revision'], 'team': finance,
                 'role': 'editor'}, manager_token)
+            assert stale['data']['code'] == 'permissions_changed', stale
             assert event_count() == count + 1
             event = expect(200, events_path + '/' + applied['event_id'], token=manager_token)
             assert event['actor'] == manager['id'] and event['actor_kind'] == 'person'

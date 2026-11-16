@@ -147,6 +147,11 @@ Personal tokens work for browser and CLI sign-in. Invitation codes are
 single-use credentials. Bots use their own credentials; a person using a
 personal token for agent work attributes that work to their own identity.
 
+A browser already signed in keeps its login when a sign-in link is opened.
+The Permissions page is the exception a person asks for: when the current
+login is not a workspace Admin, the page offers a personal-token sign-in that
+replaces it.
+
 Operator credentials bootstrap and recover the server. Superusers bypass
 data-access rules and remain separate from ordinary member identities and
 workspace Admin. The shared board credential resolves to the configured board
