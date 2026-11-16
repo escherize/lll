@@ -23,11 +23,27 @@ permissions:
   contents: read
 
 jobs:
-  gate:
-    name: gate
+  # LLL-805: the gate's parts run on separate runners so the wall time is the
+  # slowest part, not their sum. Together the matrix runs what `mise run gate`
+  # runs; scripts/test_ci_parts.py fails when a part is missing here.
+  checks:
+    name: ${{ matrix.name }}
     runs-on: macos-15
-    # Cold runs need time for the full gate and portable deployment packaging.
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: unit tests
+            run: "mise run build ::: test"
+          - name: e2e core
+            run: mise run e2e-core
+          # One share, not two: GitHub runs at most five macOS jobs at once
+          # and the deployment context is the fifth. A sixth job queues.
+          - name: e2e standalone and lll up
+            run: E2E_SHARD=1/1 mise run e2e-standalone && mise run e2e-up
+          - name: e2e web
+            run: mise run e2e-web
     steps:
       - uses: actions/checkout@v4
 
@@ -54,10 +70,30 @@ jobs:
 
       - uses: ./.github/actions/setup-browser
 
-      - name: gate
+      - name: ${{ matrix.name }}
         run: |
           command -v playwright-cli
-          mise run gate
+          ${{ matrix.run }}
+
+  # Linux cannot emit Go from Lisette (see the note at the top), so macOS
+  # prepares the source context the Linux build and the deploy both use.
+  context:
+    name: deployment context
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+      - name: Trust repo config
+        run: mise trust
+      - name: Install tools
+        run: mise install
+      - name: Install lis 0.12.0
+        run: |
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Prepare portable deployment context
         run: |
@@ -72,9 +108,21 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  # One check named "gate" that is green only when every part is.
+  gate:
+    name: gate
+    needs: [checks, context]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every part passed
+        run: |
+          [ "${{ needs.checks.result }}" = success ] && [ "${{ needs.context.result }}" = success ]
+
   linux:
     name: Linux container and browser gate
-    needs: gate
+    needs: context
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

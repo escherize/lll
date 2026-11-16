@@ -118,6 +118,7 @@ python3 -m unittest discover -s scripts -p 'test_secret_flags.py'
 python3 -m unittest discover -s scripts -p 'test_command_table.py'
 python3 -m unittest discover -s scripts -p 'test_migration_names.py'
 python3 -m unittest discover -s scripts -p 'test_local_http.py'
+python3 -m unittest discover -s scripts -p 'test_ci_parts.py'
 python3 scripts/check_assets.py
 """
 
@@ -127,6 +128,36 @@ env = { LC_ALL = "C", PYTHONUTF8 = "1" }
 depends = ["build"]
 dir = "{{config_root}}"
 run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/e2e.sh"
+
+# LLL-805: `e2e` in the four parts CI runs on separate runners. Together they
+# run exactly what `e2e` runs; scripts/test_ci_parts.py holds that.
+[tasks.e2e-core]
+description = "e2e, only the part that drives the shared board"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+depends = ["build"]
+dir = "{{config_root}}"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; E2E_PART=core bash scripts/e2e.sh"
+
+[tasks.e2e-standalone]
+description = "e2e, the suites that take only the binary (E2E_SHARD=I/N picks a share)"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+depends = ["build"]
+dir = "{{config_root}}"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/e2e_standalone.sh"
+
+[tasks.e2e-web]
+description = "e2e, the web board suite"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+depends = ["build"]
+dir = "{{config_root}}"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/e2e_web.sh"
+
+[tasks.e2e-up]
+description = "e2e, the lll up runner suite"
+env = { LC_ALL = "C", PYTHONUTF8 = "1" }
+depends = ["build"]
+dir = "{{config_root}}"
+run = "unset XDG_CONFIG_HOME LLL_CONFIG_HOME; bash scripts/e2e_up.sh"
 
 # The agent-dx fleet's twenty cases against real scratch boards: for each, a
 # scripted correct worker must pass the judge and a scripted wrong worker must
