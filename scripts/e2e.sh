@@ -735,8 +735,9 @@ git -C "$REPO" branch -D "$occupied_branch" >/dev/null
 
 # A remote write failure after a successful switch must describe partial
 # success. A local proxy forwards reads and deterministically rejects PATCH.
-python3 - "$LLL_ABS" "$URL" "$DATA_DIR/start-remote-failure" <<'PY_START'
+PYTHONPATH="$REPO_ROOT/scripts" python3 - "$LLL_ABS" "$URL" "$DATA_DIR/start-remote-failure" <<'PY_START'
 import http.server, json, os, pathlib, subprocess, sys, threading, urllib.request
+from local_http import LocalHTTPServer
 binary, upstream, directory = sys.argv[1:]
 class RejectWrites(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -753,7 +754,7 @@ class RejectWrites(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b'{"message":"injected start failure"}')
     def log_message(self, *args):
         pass
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), RejectWrites)
+server = LocalHTTPServer(('127.0.0.1', 0), RejectWrites)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

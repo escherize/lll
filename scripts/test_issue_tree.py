@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import http.server
+from local_http import LocalHTTPServer
 import os
 import subprocess
 import sys
@@ -198,7 +199,7 @@ class NoParents(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args):
         pass
 
-proxy = http.server.ThreadingHTTPServer(('127.0.0.1',0),NoParents)
+proxy = LocalHTTPServer(('127.0.0.1',0),NoParents)
 proxy.daemon_threads = True
 thread = threading.Thread(target=proxy.serve_forever,daemon=True);thread.start()
 try:

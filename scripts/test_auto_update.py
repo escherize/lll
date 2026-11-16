@@ -8,6 +8,7 @@ upgrade ends. A stub discovery server advertises a newer version. Neither
 Homebrew nor the network is touched.
 """
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -37,7 +38,7 @@ def stub_server():
         def log_message(self, *a):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+    server = LocalHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 

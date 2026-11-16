@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic watch condition checks using the CLI suite's isolated server."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import selectors
@@ -88,7 +89,7 @@ class SetupRace(http.server.BaseHTTPRequestHandler):
         self.end_headers()
     def log_message(self, *args):
         pass
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), SetupRace)
+server = LocalHTTPServer(('127.0.0.1', 0), SetupRace)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

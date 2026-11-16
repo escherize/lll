@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Owned runtime and controlled proxy verify saved-view refresh ownership."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import queue
@@ -132,7 +133,7 @@ with tempfile.TemporaryDirectory(prefix='lll-views-refresh-') as directory:
         token = request('/api/collections/members/impersonate/' + member['id'], {'duration': 3600}, admin)['token']
         kept = request('/api/collections/views/records', {'name': 'Kept saved view', 'query': 'state=todo'}, token)
         team = next((t for t in request('/api/collections/teams/records', token=token)['items'] if t['key'] == 'RVW'))
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+        server = LocalHTTPServer(('127.0.0.1', 0), Proxy)
         server.daemon_threads = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
         home = root / 'secondary'

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """A successful create remains successful when subsequent detail reads fail."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import subprocess
@@ -48,7 +49,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         pass
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+server = LocalHTTPServer(('127.0.0.1', 0), Proxy)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

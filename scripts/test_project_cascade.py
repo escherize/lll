@@ -2,6 +2,7 @@
 """Guarded project teardown against an isolated real board."""
 import json
 import http.server
+from local_http import LocalHTTPServer
 import threading
 import urllib.request
 import urllib.error
@@ -64,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='lll-cascade-cli-') as home:
             self.send_error(500)
         def log_message(self, *args):
             pass
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), BrokenPreview)
+    server = LocalHTTPServer(('127.0.0.1', 0), BrokenPreview)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

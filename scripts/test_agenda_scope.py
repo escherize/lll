@@ -2,6 +2,7 @@
 """The agenda stays in its selected team and counts every dependent page."""
 import base64
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -84,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='lll-agenda-scope-') as directory:
     home_config = root / 'config/lll/lll.toml'
     home_config.parent.mkdir(parents=True)
     repo_config = cwd / '.lll.toml'
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), API)
+    server = LocalHTTPServer(('127.0.0.1', 0), API)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     payload = base64.urlsafe_b64encode(json.dumps({'id': actor['id'], 'exp': 4102444800}).encode()).decode().rstrip('=')

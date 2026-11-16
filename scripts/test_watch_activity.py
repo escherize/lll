@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real comment/claim wake-ups, attribution, scope and measured latency."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -41,7 +42,7 @@ class Receiver(http.server.BaseHTTPRequestHandler):
         pass
 
 
-receiver = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Receiver)
+receiver = LocalHTTPServer(('127.0.0.1', 0), Receiver)
 threading.Thread(target=receiver.serve_forever, daemon=True).start()
 watchers = []
 try:

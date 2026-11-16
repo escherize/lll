@@ -2,6 +2,7 @@
 """Recovery orders a broken URL before an expired saved token."""
 import base64
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -57,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='lll-whoami-recovery-') as directory:
         assert message.index(url) < message.index('expired at'), message
         assert message.index('lll login --token -') < message.index('lll token create'), message
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Healthy)
+    server = LocalHTTPServer(('127.0.0.1', 0), Healthy)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

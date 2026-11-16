@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise discovery and safe password input against the isolated API and board."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -85,7 +86,7 @@ with tempfile.TemporaryDirectory() as directory:
         def log_message(self, *args):
             pass
 
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), DiscoveryProxy)
+    server = LocalHTTPServer(('127.0.0.1', 0), DiscoveryProxy)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     target = f'http://127.0.0.1:{server.server_port}'

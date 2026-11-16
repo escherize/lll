@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Complete collection lists, scoped pages, failures and export member names."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 from pathlib import Path
@@ -77,7 +78,7 @@ class API(http.server.BaseHTTPRequestHandler):
 
 with tempfile.TemporaryDirectory(prefix='lll-collection-pages-') as directory:
     root = Path(directory)
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), API)
+    server = LocalHTTPServer(('127.0.0.1', 0), API)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     env = {k: v for k, v in os.environ.items()

@@ -2,6 +2,7 @@
 """Exercise complete document context against the suite's isolated server."""
 import concurrent.futures
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import subprocess
@@ -92,7 +93,7 @@ class FailingPage(http.server.BaseHTTPRequestHandler):
         pass
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FailingPage)
+server = LocalHTTPServer(('127.0.0.1', 0), FailingPage)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:

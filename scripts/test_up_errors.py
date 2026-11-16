@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise startup error paths against an isolated API that refuses writes."""
 import http.server
+from local_http import LocalHTTPServer
 import json
 import os
 import socket
@@ -43,7 +44,7 @@ class API(http.server.BaseHTTPRequestHandler):
 
 binary = str(Path(sys.argv[1]).resolve())
 with tempfile.TemporaryDirectory() as directory:
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), API)
+    server = LocalHTTPServer(('127.0.0.1', 0), API)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
