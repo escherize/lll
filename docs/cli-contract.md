@@ -303,9 +303,10 @@ including forced-release notes attributed to a member and expiry notes
 with `author_kind: "system"`. These fields need no extra member lookup.
 
 `lll watch --json` prints one event per line. Its timestamps are RFC3339;
-the covered envelope has `topic`, `action` and `record`. Consumers must ignore
-unknown topics/actions and additional fields. Issue record fields follow the
-issue contract above; the activity metadata is described below.
+the covered envelope has `topic`, `action`, `record`, `key`, `cursor`, `seq`,
+`created`, `changes` and the author fields. Consumers must ignore unknown
+topics/actions and additional fields. Issue record fields follow the issue
+contract above; the event fields are described below.
 
 ## Empty lists
 
@@ -345,19 +346,55 @@ each issue's claim, so reading claims through
 
 ## Watch events
 
+### The log-backed stream
+
+`lll watch` reads the server's activity log: one event per write to an issue,
+comment or claim, in the order the writes were made. Each `--json` event has:
+
+- `cursor`: the event's position, `v1.<log>.<seq>`. Treat it as opaque and
+  pass it to `--after`.
+- `seq`: the event's number in the log. Later events have higher numbers; a
+  reader does not see every number.
+- `created`: when the write was made.
+- `topic` (`issues`, `comments` or `claims`), `action` (`create`, `update` or
+  `delete`) and `key`.
+- `author`, `author_name`, `author_kind` and `agent`: who made the write.
+- `changes`: each changed field as `{"from": ..., "to": ...}`.
+- `record`: the issue, comment or claim. For an update it is the record as it
+  is when the event is read, so on replay it is the current record, not the
+  record at the event. For a record that no longer exists it holds the fields
+  the log kept, without `expand` or timestamps.
+
+`--after CURSOR` prints every matching event after the cursor, in order, and
+then streams. Without it the stream starts at the newest event; the starting
+cursor is printed on stderr as `watch: cursor v1.<log>.<seq>`. After a lost
+connection the stream reads the log from the last event it printed. Delivery
+is at least once across restarts: store an event's cursor after handling it.
+
+A cursor is a position in the whole log and stays valid under different
+filters. A malformed cursor exits 2. A cursor from another board, ahead of the
+log, or before rows that retention deleted exits 1. None is read as "start
+now". The log is kept until an operator deletes rows.
+
+Filters are judged against the issue as it is when the event is read. Events
+on an issue that no longer exists pass a `--project` filter by the project the
+log recorded and are dropped under any other filter. `--ready` does not read
+the log: it is live-only, carries no cursor and refuses `--after`.
+
 ### Display fields on issue events
 
 Issue events from `watch --json` (including `--ready`) and `issue watch --json`
 carry `key`, `priority_name` and `creator_name` beside `topic`, `action` and
-`record`. The raw `record` keeps its fields. `creator_name` is an empty string
-when there is no creator and `"hidden member"` when the creator is inaccessible.
+`record`. `watch --json` omits the two names for an issue that no longer
+exists. `creator_name` is an empty string when there is no creator and
+`"hidden member"` when the creator is inaccessible.
 These are additive covered fields; readers should tolerate new envelope fields.
 
 ### Comment and claim activity
 
 `watch --activity --json` also emits `comments` and `claims` topics for issues matching
-its filters (`--ready` includes only ready parents). These keep the raw
-`record` and add `key`, `author` (actor member id), `author_name`, `author_kind`
+its filters (`--ready` includes only ready parents). These carry `record`,
+`key`, `author` (actor member id), `author_name`, `author_kind`
 (`person`, `bot`, `system`, `superuser`, or empty when unknown) and `agent`.
 Claim create/update/delete mean acquired/updated (including renewal)/released;
 a repeated claim with no write emits nothing. A claim's holder remains
@@ -366,8 +403,9 @@ of inaccessible actors remain hidden. Old servers lacking claim attribution
 leave the actor unknown. Webhooks use the same activity envelope, with names
 limited to the team's shared roster.
 
-This is live notification, not an audit or replay log. Reconnect does not
-replay gaps, and `issue list --since` misses comment/claim-only activity.
+`lll watch` replays from the activity log with `--after`. Webhooks and
+`watch --ready` are live notification only: they do not replay gaps, and
+`issue list --since` misses comment/claim-only activity.
 
 Activity delivery is opt-in. Plain watch and webhook registrations without
 `--activity` keep issue-only delivery. Activity webhook creation checks that

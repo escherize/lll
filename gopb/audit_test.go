@@ -158,3 +158,30 @@ func TestAuditRowsAreAppendOnly(t *testing.T) {
 		t.Fatal("audit row updated")
 	}
 }
+
+// LLL-816: the bounds a watch cursor is checked against. An empty log reports
+// 0 and 0; the log id is stable across reads and writes.
+func TestActivityLogReportsIdentityAndBounds(t *testing.T) {
+	app, issueID, alpha, _ := auditFixture(t)
+	empty, err := readActivityLog(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !empty.Supported || empty.Log == "" || empty.Floor != 0 || empty.Head != 0 {
+		t.Fatalf("empty log = %+v", empty)
+	}
+	if _, err := acquireClaim(app, issueID, alpha, "wt-a", releaser{memberID: alpha, agent: "wt-a"}); err != nil {
+		t.Fatal(err)
+	}
+	rows := auditRows(t, app)
+	if len(rows) == 0 {
+		t.Fatal("the claims wrote no audit rows")
+	}
+	got, err := readActivityLog(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Log != empty.Log || got.Floor != 1 || got.Head != rows[len(rows)-1].seq {
+		t.Fatalf("log = %+v, want id %s, floor 1, head %d", got, empty.Log, rows[len(rows)-1].seq)
+	}
+}

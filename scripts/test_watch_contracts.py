@@ -127,12 +127,13 @@ try:
     ok('issue', 'claim', held, '--renew')
     ok('issue', 'claim', held)
     ok('issue', 'update', tagged, '--title', 'Gets a label (sentinel)')
-    text = wait_for(text_out, f'{tagged} changed')
+    sentinel = f'{tagged} update title: Gets a label -> Gets a label (sentinel)'
+    text = wait_for(text_out, sentinel)
     assert held not in text, text
-    # A claim that assigns writes the issue: one update event. First sight of
-    # a record prints 'changed'; after that, field transitions.
+    # A claim that assigns writes the issue: one update event. The log names
+    # the change, so the first event for a record is a transition too.
     ok('issue', 'claim', free)
-    wait_for(text_out, f'{free} changed')
+    wait_for(text_out, f'{free} update assignee: none -> {me["name"]}')
     ok('issue', 'release', free)
     wait_for(text_out, f'{free} update assignee: {me["name"]} -> none')
     # Label-only: the CLI names the change, the watch line does not.
@@ -145,11 +146,11 @@ try:
     deadline = time.time() + 10
     while time.time() < deadline:
         lines = [l.split(' ', 1)[1] for l in open(text_out).read().splitlines()]
-        if lines.count(f'{tagged} changed') == 4:
+        if lines.count(f'{tagged} changed') == 2:
             break
         time.sleep(0.1)
-    assert lines == [f'{tagged} changed', f'{free} changed',
-                     f'{free} update assignee: {me["name"]} -> none'] + [f'{tagged} changed'] * 3, lines
+    assert lines == [sentinel, f'{free} update assignee: none -> {me["name"]}',
+                     f'{free} update assignee: {me["name"]} -> none'] + [f'{tagged} changed'] * 2, lines
     time.sleep(0.5)
     events = [json.loads(l) for l in open(json_out).read().splitlines()]
     assert {e['topic'] for e in events} == {'issues'}, events
@@ -158,7 +159,9 @@ try:
         assert event['priority_name'] == 'none', event
         assert event['creator_name'] == me['name'], event
 
-    assert [e['action'] for e in events] == ['update'] * 6, events
+    # --add-label of a label already set changes nothing: the log records
+    # no write, so the stream prints no event for it.
+    assert [e['action'] for e in events] == ['update'] * 5, events
 finally:
     for process in watchers:
         process.kill()
@@ -292,6 +295,10 @@ threading.Thread(target=stderr_lines, args=(process, lines), daemon=True).start(
 reconnected = 'realtime: reconnected to the lll server (subscriptions accepted)'
 try:
     wait_line(lines, 'watch: ready (query subscription accepted)')
+    deadline = time.time() + 15
+    while time.time() < deadline and not any(l.startswith('watch: cursor v1.') for l in lines):
+        time.sleep(0.1)
+    cursor_line = next(l for l in lines if l.startswith('watch: cursor v1.'))
     # A healthy reconnect still reconnects, and the stream still carries events.
     proxy.drop()
     wait_line(lines, reconnected)
@@ -319,7 +326,7 @@ dead_line = ("realtime: the server rejected this token (401 Unauthorized): it wa
              "revoked or has expired, so the stream would carry no events; run 'lll login', "
              "or set a fresh LLL_TOKEN ('lll bot rotate bot-NAME' or 'lll token create NAME'), "
              "then start the watch again")
-assert lines == ['watch: ready (query subscription accepted)',
+assert lines == ['watch: ready (query subscription accepted)', cursor_line,
                  'realtime: lll server stream lost; reconnecting', reconnected,
                  'realtime: lll server stream lost; reconnecting', dead_line], lines
 assert process.stdout.read() == '', 'the dead stream printed an event'
@@ -329,6 +336,15 @@ process.stdout.close()
 # twice with the same error, then accepts again. Only stderr may say so.
 stop = threading.Event()
 gets = []
+written = []  # the fake log: one row per pushed frame
+
+
+def answer(handler, body):
+    raw = json.dumps(body).encode()
+    handler.send_response(200)
+    handler.send_header('Content-Length', str(len(raw)))
+    handler.end_headers()
+    handler.wfile.write(raw)
 
 
 class Flaky(http.server.BaseHTTPRequestHandler):
@@ -339,6 +355,20 @@ class Flaky(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{}')
             return
+        # 'lll watch' reads the audit log; a pushed frame only wakes it.
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        if self.path == '/api/lll/activity':
+            return answer(self, {'supported': True, 'log': 'fake', 'floor': 0, 'head': 0})
+        if self.path.startswith('/api/collections/members/records?'):
+            return answer(self, {'items': []})
+        if self.path.startswith('/api/collections/audit_events/records?'):
+            after = int(query['filter'][0].split('seq > ')[1].split()[0])
+            return answer(self, {'items': [
+                {'seq': n, 'collection': 'issues', 'record': f'r{n}', 'action': 'update', 'issue': f'r{n}',
+                 'number': n, 'actor_kind': 'system', 'changes': {}} for n in written if n > after]})
+        if self.path.startswith('/api/collections/issues/records?'):
+            return answer(self, {'items': [{'id': f'r{n}', 'number': n} for n in written
+                                           if f"'r{n}'" in query['filter'][0]]})
         assert self.path == '/api/realtime', self.path
         gets.append(1)
         if len(gets) in (2, 3):
@@ -352,8 +382,9 @@ class Flaky(http.server.BaseHTTPRequestHandler):
         self.wfile.write(f'event: PB_CONNECT\ndata: {{"clientId":"c{n}"}}\n\n'.encode())
         self.wfile.flush()
         time.sleep(0.3)  # the subscription POST lands first
-        record = {'action': 'update', 'record': {'id': f'r{n}', 'number': n}}
-        self.wfile.write(f'event: issues\ndata: {json.dumps(record)}\n\n'.encode())
+        written.append(n)
+        record = {'action': 'create', 'record': {'id': f'a{n}', 'seq': n}}
+        self.wfile.write(f'event: audit_events\ndata: {json.dumps(record)}\n\n'.encode())
         self.wfile.flush()
         if n == 1:
             return  # closing the response is the dropped stream
@@ -388,6 +419,7 @@ assert [json.loads(l)['record']['id'] for l in stdout] == ['r1', 'r4'], stdout
 assert rest == '', rest
 assert stderr.splitlines() == [
     'watch: ready (query subscription accepted)',
+    'watch: cursor v1.fake.0',
     'realtime: lll server stream lost; reconnecting',
     'realtime: reconnect failed: GET /api/realtime: 503 Service Unavailable',
     'realtime: reconnected to the lll server (subscriptions accepted)',
@@ -411,9 +443,11 @@ finally:
 watch_help = ok('watch', '--help')
 # Every status line the fake server provoked, as printed; the failure line's
 # error text varies, so help shows a placeholder for it.
-observed = [l for l in stderr.splitlines() if not l.startswith('realtime: reconnect failed: ')]
+observed = [l for l in stderr.splitlines() if not l.startswith(('realtime: reconnect failed: ', 'watch: cursor '))]
 for text in observed + [
     'realtime: reconnect failed: <error>',
+    'watch: cursor v1.<log>.<seq>',
+    'never reads a refused cursor as "start now"',
     "With --ready it reads 'watch: ready (agenda subscription accepted)'",
     'Status lines go to stderr, never stdout',
     '10:42:11 ENG-12 changed',

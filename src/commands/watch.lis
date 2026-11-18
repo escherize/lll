@@ -21,13 +21,14 @@ import "flags"
 pub fn watch_spec() -> Slice<flags.Flag> {
   flags.with_team(filter_spec(FilterUse.Watch).append([
     flags.Flag { name: "--activity", help: "also stream comment and claim activity; default: issue events only", .. },
+    flags.Flag { name: "--after", value: true, hint: "CURSOR", help: "first print every matching event after this cursor, in\norder, then keep streaming; default: start at the newest event", .. },
     flags.Flag { name: "--search", value: true, hint: "q", help: "only issues whose title contains q", .. },
     flags.Flag {
       name: "--ready",
       help: "stream only the ready agenda: open issues whose\nblockers are all done, computed client-side against the ready set\nfetched at startup and refreshed from each event; an empty agenda\nkeeps the stream alive until something becomes ready",
       ..,
     },
-    flags.Flag { name: "--json", help: "NDJSON: one raw server event object per line, with a\n\"topic\" field added", .. },
+    flags.Flag { name: "--json", help: "NDJSON: one event object per line", .. },
   ]...))
 }
 
@@ -53,66 +54,17 @@ fn watch_stream(ctx: pb.Client, p: flags.Parsed) -> Result<(), pb.CliError> {
   let filters = filters_from(p, p.one("--search"))?
   let json_mode = p.given("--json")
   let with_activity = p.given("--activity")
-  if p.given("--ready") { return watch_ready(ctx, filters, json_mode, with_activity) }
+  if p.given("--ready") {
+    if p.given("--after") { return Err(flags.usage_error("--ready cannot resume from --after: the ready agenda is computed from the board as it is now")) }
+    return watch_ready(ctx, filters, json_mode, with_activity)
+  }
   // A configured team (LLL_TEAM or .lll.toml) scopes the stream by default,
   // same as `issue list`, and with it the label and project names.
   let scope = configured_scope(ctx)?
 
   let criteria = resolve_issue_filter(ctx, scope, filters)?
-  let topic = realtime.topic_with_options("issues", query.filter(criteria), "team,assignee,creator")?
-  let activity = if with_activity { activity_topics(criteria)? } else { [] }
-  let topics = [topic].append(activity...)
-  let ch = realtime.subscribe(ctx, topics, realtime.DeadToken.Exit)?
-  fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
-
-  // Last-seen records, keyed by record id, for rendering updates as field
-  // transitions. Seeded lazily: the first sight of a record is a plain
-  // "changed" line.
-  let mut last = Map.new<models.IssueId, Snapshot>()
-  loop {
-    let Some(arrived) = ch.receive() else {
-      return Ok(())
-    }
-    let realtime.Event.Record(ev) = arrived else { continue }
-    if let Some(activity) = activity_record(ev)? {
-      fmt.Println(activity_line(ev, activity, json_mode)?)
-      continue
-    }
-    // An inaccessible/deleted activity parent is never treated as an issue.
-    if let realtime.Change.Comment(_) = ev.change { continue }
-    if let realtime.Change.Claim(_) = ev.change { continue }
-    if json_mode {
-      fmt.Println(ndjson_line(ev))
-      continue
-    }
-    let rec = issue_change(ev)?
-    let stamp = time.Now().Format("15:04:05")
-    let key = f"{rec.expand.team.key}-{rec.number}"
-    match ev.action {
-      realtime.Action.Create => {
-        last[rec.id] = snapshot(rec)
-        fmt.Println(f"{stamp} {key} created: {rec.title}")
-      },
-      realtime.Action.Delete => {
-        last.delete(rec.id)
-        fmt.Println(f"{stamp} {key} deleted")
-      },
-      realtime.Action.Update => {
-        let cur = snapshot(rec)
-        let mut described = false
-        if let Some(prev) = last.get(rec.id) {
-          let diff = issue_diff(prev, cur)
-          if diff != "" {
-            fmt.Println(f"{stamp} {key} update {diff}")
-            described = true
-          }
-        }
-        if !described { fmt.Println(f"{stamp} {key} changed") }
-        last[rec.id] = cur
-      },
-      realtime.Action.Other(other) => fmt.Println(f"{stamp} {key} {other}"),
-    }
-  }
+  let after = if p.given("--after") { Some(p.one("--after")) } else { None }
+  watch_log(ctx, criteria, after, with_activity, json_mode)
 }
 
 /// The issue an event on an issues subscription carries. Any other payload
@@ -132,53 +84,94 @@ Usage:
   " + flags.usage("lll watch", watch_spec(), "") + "
 
 Streams create/update/delete events for issues matching the criteria
-(filtered server-side; scoped to the configured team like 'lll issue list'),
-one timestamped line per event, until interrupted:
+(scoped to the configured team like 'lll issue list'), one timestamped line
+per event, until interrupted:
 
   10:42:01 ENG-12 created: Fix login flow
   10:42:07 ENG-12 update state: todo -> in-progress
   10:42:09 ENG-12 deleted
 
-Updates are shown as field transitions (state, priority, title, assignee) by
-diffing against the last event seen for that record; a record's first update
-prints as 'changed'. Note: an update that moves a record out of the filter
-(e.g. state todo -> done under --state todo) emits nothing: the server only
-delivers events for records matching the filter after the change.
-
-An update that changes none of those four fields prints only the key:
+The stream reads the server's activity log: every write to an issue, comment
+or claim, in the order it was made. An update line names the transitions of
+state, priority, title and assignee, taken from the logged change. An update
+that changes none of those four fields prints only the key:
 
   10:42:11 ENG-12 changed
 
 That covers labels, project, description and emoji. Use --json for the record.
-JSON issue events also carry key, priority_name and creator_name beside the
-record. The record retains its fields; a hidden creator is named hidden member.
+A write that changes nothing, such as adding a label the issue already has,
+is not in the log and prints no event.
+A replayed event from an earlier day prints its date before the time.
+
+Filters (--state, --label, --assignee, --project, --search) are judged
+against the issue as it is when the event is read, not as it was when the
+event was written. An update that moves an issue out of the filter (e.g.
+state todo -> done under --state todo) emits nothing. Events on an issue that
+has since been deleted are kept when the only filter is --project, which the
+log records, and dropped under any other filter.
 
 With --activity, the stream also carries comment and claim events for matching
-issues. Without it, the issue-only default is unchanged. For example:
+issues. Without it, the stream carries issue events only. For example:
 
   lll watch --project Fleet --activity --json
 Claim acquisition, renewal (update) and release (delete) have their own events,
 even when no issue field changes. Re-claiming an existing hold without --renew
-makes no write and emits nothing. JSON topics distinguish issues, comments and
-claims; activity envelopes add key, author, author_name, author_kind and agent.
-The claim record still names its holder; author names the actor, including the
-releaser on a forced release. Older servers without claim actor metadata leave
-that actor unknown; the holder is never guessed to be the releaser.
+makes no write and emits nothing.
 
-Activity is live-only too: comments and claims do not bump issue.updated,
-so issue list --since cannot recover missed comment or claim activity. Re-read
-comments and claims on reconnect if you need a complete current snapshot.
+With --json each line is one event:
+
+  cursor       where this event sits in the log; pass it to --after
+  seq          the event's number in the log; later events have higher ones
+  created      when the write was made
+  topic        issues, comments or claims
+  action       create, update or delete
+  key          the issue's key
+  author, author_name, author_kind, agent
+               who made the write: member id, name, person/bot/system/
+               superuser, and the session label. On a forced release the
+               author is the releaser, not the holder. A member this reader
+               may not see is named 'hidden member' with an empty kind.
+  changes      each changed field as {\"from\": ..., \"to\": ...}
+  record       the issue, comment or claim. For an update this is the record
+               as it is when read, which on replay is its current state, not
+               its state at the event; changes holds what the event did. For
+               a record that no longer exists it is the fields the log kept.
+
+Issue events also carry priority_name and creator_name while the issue exists.
+
+Resuming. Every event has a cursor, and watch prints the cursor it starts
+from on stderr. To miss nothing across a restart, store the cursor of each
+event after you have handled it, and start again with:
+
+  lll watch --activity --json --after v1.4f2a9c01d3e7.3982
+
+--after first prints every matching event after that cursor, in order, then
+keeps streaming. Without --after the stream starts at the newest event.
+Delivery is at least once: a consumer that crashes after handling an event
+and before storing its cursor sees that event again, so make side effects
+idempotent. A cursor is a position in the board's whole log, so it stays
+valid when you change filters.
+
+The server keeps the log until an operator deletes rows from it; nothing
+expires on its own. watch never reads a refused cursor as \"start now\". It
+exits with the reason when the cursor is malformed (exit 2), belongs to
+another board, is ahead of this board's log, or points before rows that were
+deleted (exit 1). --ready cannot be combined with --after.
 
 Status lines go to stderr, never stdout, in text and --json mode alike:
 
   watch: ready (query subscription accepted)
+  watch: cursor v1.<log>.<seq>
   realtime: lll server stream lost; reconnecting
   realtime: reconnect failed: <error>
   realtime: reconnected to the lll server (subscriptions accepted)
 
-'watch: ready' prints once, after the server accepts the subscription.
+'watch: ready' prints once, after the server accepts the subscription, and
+'watch: cursor' follows it with the position the stream starts from.
 With --ready it reads 'watch: ready (agenda subscription accepted)'. After a
 lost stream, watch retries every second and prints each distinct failure once.
+On reconnecting it reads the log from the last event it printed, so nothing
+written during the outage is lost.
 The server sends a keepalive every 30 seconds and keeps a stream open for up
 to a day, so a quiet watch stays connected; a lost/reconnected pair means the
 server restarted, the network dropped, or the stream sent nothing for 90
@@ -194,15 +187,10 @@ At startup the same refusal is the command's error. A token that is revoked
 or expires while the stream is up makes the server close the stream within 30
 seconds, and the reconnect's check reports it.
 
-The stream is live-only: it delivers events from the moment the server
-accepts the subscription, and a reconnect resubscribes without replaying
-what changed while disconnected. A gap looks exactly like a quiet board.
-If you need every change, note the time of the last event you handled and,
-on start and after each reconnect, catch up with
-'lll issue list --since <that time>' (see its help for overlap and limits).
-
 With --ready, the stream shows only the ready agenda: open issues
-(todo or backlog) whose blockers are all done or cancelled. Readiness is
+(todo or backlog) whose blockers are all done or cancelled. The agenda is
+live-only: it does not read the log, its events carry no cursor, and a
+reconnect does not replay what changed while disconnected. Readiness is
 computed client-side against a snapshot of the team's issues taken at startup
 and refreshed from every event, so an issue becomes ready when its LAST open
 blocker is closed (an event that arrives on the blocker, not on the blocked
