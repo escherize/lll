@@ -19,6 +19,7 @@ new capability. Consumers should ignore additional fields and event topics.
 | Keyed issue creation | Client with `issue create --idempotency-key` | Authenticated `/api/lll/issues/idempotency` says supported |
 | Keyed comments | Client with `issue comment --idempotency-key` | Authenticated `/api/lll/comments/idempotency` says supported; 1.1.0 lacks this route |
 | Comment and claim events on query watch | Client with `watch --activity` | Native PocketBase topics; older servers lack reliable claim actor metadata |
+| Resumable `lll watch` (`--after`, cursors) | Client that reads the activity log | Authenticated `/api/lll/activity` names `log`, `floor` and `head`; a server with the audit log but without them streams but refuses `--after`; a server without the audit log is refused |
 | Attributed claim events and comment/claim webhooks | `webhook add --activity`; activity-aware consumer | Server with the claim-actor migration and activity webhook hooks |
 | Per-team Viewer/Editor grants | `member permissions`; `member access --team KEY --role ROLE` | `permissions.teams`; permission management version2 |
 | Explicit workspace administration | `member access --workspace-role ROLE`; Permissions on the board | `permissions.workspace`; an Admin member or explicit operator authentication |
