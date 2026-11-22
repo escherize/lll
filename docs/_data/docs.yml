@@ -12,6 +12,8 @@
       url: /verification.html
 - title: Use lll
   pages:
+    - title: Recipes
+      url: /recipes.html
     - title: Permissions and delegation
       url: /permissions.html
     - title: CLI guide
