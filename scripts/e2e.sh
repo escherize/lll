@@ -1589,6 +1589,9 @@ wait_for_line "$WATCH_JSON.err" 'reconnected to the lll server' 'query stream ac
 out=$(LLL_URL=$URL "$LIN" issue delete "$WKEY" --yes)
 assert_contains "$out" "Deleted $WKEY" "watched delete output"
 wait_for_line "$WATCH_ALL" "$WKEY deleted" "watch sees the delete"
+# Each watcher reads the log on its own, so the JSON one is waited for too
+# before the streams are reaped and its last row is checked below.
+wait_for_line "$WATCH_JSON" '"action":"delete"' 'watch --json sees the delete'
 wait_for_line "$WATCH_ISSUE" "$WKEY deleted" "issue watch sees the delete"
 wait_for_line "$WATCH_ISSUE_JSON" '"action":"delete"' 'issue JSON watch sees the delete'
 for _ in $(seq 1 50); do
