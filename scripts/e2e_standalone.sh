@@ -38,6 +38,8 @@ SUITES=(
   # the 1.0 CLI contract: exit codes, list envelope, issue JSON, time flags (LLL-645)
   "test_cli_contract.py"
   "test_watch_activity.py"
+  # lll watch --after: replay in order, handoff, reconnect catch-up, refusals (LLL-816)
+  "test_watch_resume.py"
   # member invite --team: one team over the API and the board
   "test_team_scope.py"
   "test_team_roles.py --browser"

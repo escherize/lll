@@ -1,0 +1,356 @@
+import "go:encoding/json"
+import "go:fmt"
+import "go:net/url"
+import "go:os"
+import "go:strconv"
+import "go:strings"
+import "go:time"
+
+import "display"
+import "flags"
+import "models"
+import "pb"
+import "query"
+import "realtime"
+import "records"
+
+// `lll watch` reads the audit log (LLL-816). The realtime subscription is
+// only a wake-up: on each pushed row, and after each reconnect, the stream
+// reads `seq > cursor` in order and prints that. A pushed row is never
+// printed, because pushes for two commits can arrive out of order and a
+// scoped reader's seqs are not contiguous, so a gap could not be noticed.
+
+/// What GET /api/lll/activity says about the log (gopb/activity_routes.go).
+/// A server older than LLL-816 answers `supported` alone, leaving `log` "".
+#[json]
+struct LogInfo {
+  supported: bool,
+  log: string,
+  floor: int,
+  head: int,
+}
+
+/// One line of `lll watch --json`.
+#[json]
+struct WatchEvent {
+  cursor: string,
+  seq: int,
+  created: string,
+  topic: string,
+  action: string,
+  key: string,
+  author: string,
+  author_name: string,
+  author_kind: string,
+  agent: string,
+  changes: Map<string, AuditChange>,
+  record: json.RawMessage,
+}
+
+#[json]
+struct RawPage {
+  items: Slice<json.RawMessage>,
+}
+
+/// What one watch reads and how it prints, fixed for the stream's life.
+struct LogWatch {
+  log: string,
+  team_clause: string,
+  criteria: query.IssueFilter,
+  with_activity: bool,
+  json_mode: bool,
+  keys: Map<string, string>,
+}
+
+fn log_page_size() -> int { 100 }
+
+fn cursor_text(log: string, seq: int) -> string {
+  let name = if log == "" { "0" } else { log }
+  f"v1.{name}.{seq}"
+}
+
+/// The log id and seq a cursor names; anything else is a usage error.
+fn parse_cursor(raw: string) -> Result<(string, int), pb.CliError> {
+  let bad = flags.usage_error(f"--after takes a cursor that 'lll watch' printed (v1.LOG.SEQ), not '{raw}'")
+  let parts = strings.Split(strings.TrimSpace(raw), ".")
+  if parts.length() != 3 || parts[0] != "v1" || parts[1] == "" { return Err(bad) }
+  match strconv.Atoi(parts[2]) {
+    Ok(n) if n >= 0 => Ok((parts[1], n)),
+    _ => Err(bad),
+  }
+}
+
+/// The seq to resume after, or why this log cannot honor the cursor. A
+/// refused cursor never falls back to the head: that would hide the gap.
+fn resume_point(info: LogInfo, raw: string) -> Result<int, pb.CliError> {
+  let (log, seq) = parse_cursor(raw)?
+  let restart = "start without --after and re-read the state you depend on"
+  if info.log == "" {
+    return Err(pb.failed(f"this server cannot verify a watch cursor; upgrade the server, or {restart}"))
+  }
+  if log != info.log {
+    return Err(pb.failed(f"cursor {raw} belongs to another board's activity log (this one is {info.log}); {restart}"))
+  }
+  if seq > info.head {
+    return Err(pb.failed(f"cursor {raw} is ahead of this board's activity log, which ends at {info.head}: the log was restored or reset; {restart}"))
+  }
+  if seq < info.floor - 1 {
+    return Err(pb.failed(f"cursor {raw} has expired: the oldest event this board keeps is {info.floor}, so events after the cursor were deleted; {restart}"))
+  }
+  Ok(seq)
+}
+
+fn log_info(ctx: pb.Client) -> Result<LogInfo, pb.CliError> {
+  let mut info = LogInfo { .. }
+  pb
+    .fetch(ctx, "/api/lll/activity", "the activity log", &info)
+    .map_err(|e| if e.status == 404 { pb.failed("this server has no activity log, which 'lll watch' reads; upgrade the server") } else { e })?
+  Ok(info)
+}
+
+/// Where a watch without --after starts: the newest event there is.
+fn log_head(ctx: pb.Client, info: LogInfo, team_clause: string) -> Result<int, pb.CliError> {
+  if info.log != "" { return Ok(info.head) }
+  let filter = if team_clause == "" { "" } else { f"&filter={url.QueryEscape(team_clause)}" }
+  let mut page = AuditPage { .. }
+  pb.fetch(ctx, f"/api/collections/audit_events/records?sort=-seq&perPage=1&skipTotal=1{filter}", "activity", &page)?
+  Ok(page.items.get(0).map_or(0, |e| e.seq))
+}
+
+fn roster_names(ctx: pb.Client) -> Result<Map<string, string>, pb.CliError> {
+  let mut names = Map.new<string, string>()
+  for m in records.fetch_members(ctx)? { names[m.id.string()] = m.name }
+  Ok(names)
+}
+
+/// The stream `lll watch` writes for a query: every matching event after the
+/// cursor, in order, then each new one as it is written, until interrupted.
+fn watch_log(ctx: pb.Client, criteria: query.IssueFilter, after: Option<string>, with_activity: bool, json_mode: bool) -> Result<(), pb.CliError> {
+  let info = log_info(ctx)?
+  let resumed = match after {
+    Some(raw) => Some(resume_point(info, raw)?),
+    None => None,
+  }
+  let team_clause = match criteria.scope {
+    query.TeamScope.Only(team) => f"team = {query.quote(team.string())}",
+    query.TeamScope.Every => "",
+  }
+  // Subscribed before the start is read, so a row written in between is
+  // either after the start or already pushed: the first read finds it.
+  let topic = realtime.topic_with_options("audit_events", team_clause, "")?
+  let ch = realtime.subscribe_resyncing(ctx, [topic], realtime.DeadToken.Exit)?
+  let start = match resumed {
+    Some(seq) => seq,
+    None => log_head(ctx, info, team_clause)?,
+  }
+  let watch = LogWatch { log: info.log, team_clause, criteria, with_activity, json_mode, keys: team_keys(ctx)? }
+  let mut names = roster_names(ctx)?
+  fmt.Fprintln(os.Stderr, "watch: ready (query subscription accepted)")
+  fmt.Fprintln(os.Stderr, f"watch: cursor {cursor_text(info.log, start)}")
+  let mut at = start
+  loop {
+    let (next, seen) = drain_log(ctx, watch, at, names)?
+    at = next
+    names = seen
+    let Some(_) = ch.receive() else { return Ok(()) }
+  }
+}
+
+/// Print every matching event after `at`; the seq of the last row read, and
+/// the roster as last fetched.
+fn drain_log(ctx: pb.Client, watch: LogWatch, at: int, names: Map<string, string>) -> Result<(int, Map<string, string>), pb.CliError> {
+  let mut from = at
+  let mut known = names
+  loop {
+    let mut clauses = [f"seq > {from}"]
+    if watch.team_clause != "" { clauses = clauses.append(watch.team_clause) }
+    if !watch.with_activity { clauses = clauses.append("collection = 'issues'") }
+    let filter = url.QueryEscape(strings.Join(clauses, " && "))
+    let mut page = AuditPage { .. }
+    pb.fetch(ctx, f"/api/collections/audit_events/records?filter={filter}&sort=seq&perPage={log_page_size()}&skipTotal=1", "activity", &page)?
+    let Some(last) = page.items.get(page.items.length() - 1) else { return Ok((from, known)) }
+    // A member this roster has not met: it joined since, or it is hidden.
+    if page.items.any(|e| e.actor.string() != "" && known.get(e.actor.string()).is_none()) {
+      known = roster_names(ctx)?
+    }
+    for line in log_lines(ctx, watch, page.items, known)? { fmt.Println(line) }
+    from = last.seq
+    if page.items.length() < log_page_size() { return Ok((from, known)) }
+  }
+}
+
+/// One line per event of `events` the watch's filters keep.
+fn log_lines(ctx: pb.Client, watch: LogWatch, events: Slice<AuditEvent>, names: Map<string, string>) -> Result<Slice<string>, pb.CliError> {
+  let issue_ids = distinct(events.map(|e| e.issue))
+  let issues = current_records(ctx, "issues", issue_ids, "", "team,assignee,creator")?
+  let narrowed = narrows(watch.criteria)
+  let matching = if narrowed { current_records(ctx, "issues", issue_ids, query.filter(watch.criteria), "")? } else { issues }
+  let mut others = Map.new<string, json.RawMessage>()
+  for collection in ["comments", "claims"] {
+    let ids = distinct(events.filter(|e| e.collection == collection && e.action == "update").map(|e| e.record))
+    for (id, record) in current_records(ctx, collection, ids, "", "")? { others[id] = record }
+  }
+  let mut lines: Slice<string> = []
+  for e in events {
+    if narrowed {
+      let exists = issues.get(e.issue).is_some()
+      if exists && matching.get(e.issue).is_none() { continue }
+      if !exists && !row_matches(watch.criteria, e) { continue }
+    }
+    let current = if e.collection == "issues" { issues.get(e.record) } else { others.get(e.record) }
+    lines = lines.append(log_line(watch, e, current, names)?)
+  }
+  Ok(lines)
+}
+
+/// Whether the criteria hold anything beyond the team scope.
+fn narrows(f: query.IssueFilter) -> bool {
+  !f.states.is_empty() || f.assignee.is_some() || !f.projects.is_empty() || !f.labels.is_empty() || f.search != ""
+}
+
+/// An event on an issue that no longer exists can be judged only by what its
+/// row recorded: the project. Any other criterion needs the issue.
+fn row_matches(f: query.IssueFilter, e: AuditEvent) -> bool {
+  f.states.is_empty() && f.assignee.is_none() && f.labels.is_empty() && f.search == ""
+    && (f.projects.is_empty() || f.projects.any(|p| p.string() == e.project))
+}
+
+fn distinct(values: Slice<string>) -> Slice<string> {
+  let mut out: Slice<string> = []
+  for v in values {
+    if v != "" && !out.contains(v) { out = out.append(v) }
+  }
+  out
+}
+
+/// The named records as they are now, by id, among those `extra` keeps. An
+/// id the reader cannot see, or that is gone, is absent.
+fn current_records(ctx: pb.Client, collection: string, ids: Slice<string>, extra: string, expand: string) -> Result<Map<string, json.RawMessage>, pb.CliError> {
+  let mut out = Map.new<string, json.RawMessage>()
+  if ids.is_empty() { return Ok(out) }
+  // Record ids are alphanumeric; quote() keeps that an assumption no one
+  // has to hold.
+  let any = "(" + strings.Join(ids.map(|id| f"id = {query.quote(id)}"), " || ") + ")"
+  let filter = if extra == "" { any } else { f"{any} && ({extra})" }
+  let tail = if expand == "" { "" } else { f"&expand={expand}" }
+  let mut page = RawPage { .. }
+  pb.fetch(ctx, f"/api/collections/{collection}/records?filter={url.QueryEscape(filter)}&perPage={ids.length()}&skipTotal=1{tail}", collection, &page)?
+  for raw in page.items {
+    let mut head = IdOnly { .. }
+    let decoded = json.Unmarshal(raw, &head).is_ok()
+    if decoded && head.id != "" { out[head.id] = raw }
+  }
+  Ok(out)
+}
+
+/// Who made the write, as this reader may see them: name and kind.
+fn log_actor(e: AuditEvent, names: Map<string, string>) -> (string, string) {
+  match e.actor_kind {
+    "system" => ("system", "system"),
+    "superuser" => ("administrator", "superuser"),
+    _ => {
+      if e.actor.string() == "" { return ("", "") }
+      // Naming the kind would say a hidden member is a bot (LLL-551).
+      names.get(e.actor.string()).map_or_else(|| (display.hidden_member(), ""), |name| (name, e.actor_kind))
+    },
+  }
+}
+
+fn log_key(watch: LogWatch, e: AuditEvent) -> string {
+  watch.keys.get(e.team).map_or("", |key| f"{key}-{e.number}")
+}
+
+fn log_line(watch: LogWatch, e: AuditEvent, current: Option<json.RawMessage>, names: Map<string, string>) -> Result<string, pb.CliError> {
+  let key = log_key(watch, e)
+  let (name, kind) = log_actor(e, names)
+  if watch.json_mode {
+    let record = match current {
+      Some(raw) => raw,
+      None => recorded_fields(e)?,
+    }
+    let event = WatchEvent {
+      cursor: cursor_text(watch.log, e.seq),
+      seq: e.seq,
+      created: e.created,
+      topic: e.collection,
+      action: e.action,
+      key,
+      author: e.actor.string(),
+      author_name: name,
+      author_kind: kind,
+      agent: e.agent,
+      changes: e.changes,
+      record,
+    }
+    let line = contract_json(encode_json(event, "watch event")?, 0) as string
+    // An issue that can be read keeps its display fields beside the record.
+    let mut issue = models.Issue { .. }
+    let readable = e.collection == "issues" && current.is_some() && json.Unmarshal(record, &issue).is_ok()
+    if readable { return Ok(issue_event_json(line, issue)) }
+    return Ok(line)
+  }
+  let stamp = event_stamp(e.created)
+  let line = match (e.collection, e.action) {
+    ("issues", "create") => f"{stamp} {key} created: {changed_to(e, "title")}",
+    ("issues", "delete") => f"{stamp} {key} deleted",
+    ("issues", _) => {
+      let diff = narrated_changes(e.changes, names)
+      if diff == "" { f"{stamp} {key} changed" } else { f"{stamp} {key} update {diff}" }
+    },
+    (collection, action) => {
+      let what = if collection == "comments" { "comment" } else { "claim" }
+      let did = if what == "claim" && action == "create" { "acquired" } else if what == "claim" && action == "delete" { "released" } else { action }
+      let shown = if name == "" { "unknown actor" } else { display.byline(name, e.agent) }
+      f"{stamp} {key} {what} {did} by {shown}"
+    },
+  }
+  Ok(line)
+}
+
+/// The record as the event's row describes it, for a record that cannot be
+/// read now: the values a create set, the values a delete removed, or the
+/// fields an update changed. It has no expand and no autodates.
+fn recorded_fields(e: AuditEvent) -> Result<json.RawMessage, pb.CliError> {
+  let mut fields = Map.new<string, json.RawMessage>()
+  for (name, change) in e.changes {
+    let value = if e.action == "delete" { change.from } else { change.to }
+    fields[name] = encode_json(value, name)?
+  }
+  fields["id"] = encode_json(e.record, "id")?
+  if e.collection == "issues" {
+    fields["number"] = encode_json(e.number, "number")?
+    fields["team"] = encode_json(e.team, "team")?
+  } else {
+    fields["issue"] = encode_json(e.issue, "issue")?
+  }
+  encode_json(fields, "watch record")
+}
+
+/// Transitions of the fields a text line narrates (state, priority, title,
+/// assignee), comma-joined; "" when the update changed none of them.
+fn narrated_changes(changes: Map<string, AuditChange>, names: Map<string, string>) -> string {
+  let mut parts: Slice<string> = []
+  if let Some(c) = changes.get("state") { parts = parts.append(f"state: {text_of(c.from)} -> {text_of(c.to)}") }
+  if let Some(c) = changes.get("priority") { parts = parts.append(f"priority: {priority_text(c.from)} -> {priority_text(c.to)}") }
+  if let Some(c) = changes.get("title") { parts = parts.append(f"title: {text_of(c.from)} -> {text_of(c.to)}") }
+  if let Some(c) = changes.get("assignee") { parts = parts.append(f"assignee: {assignee_text(c.from, names)} -> {assignee_text(c.to, names)}") }
+  strings.Join(parts, ", ")
+}
+
+fn priority_text(v: Unknown) -> string {
+  display.priority_name(models.Priority.from_wire(strconv.Atoi(text_of(v)).unwrap_or(0)))
+}
+
+fn assignee_text(v: Unknown, names: Map<string, string>) -> string {
+  let id = text_of(v)
+  if id == "" { return "none" }
+  names.get(id).unwrap_or_else(display.hidden_member)
+}
+
+/// When the event was written, in local time: the time alone for today's,
+/// the date too for a replayed older one.
+fn event_stamp(created: string) -> string {
+  let Ok(at) = time.Parse("2006-01-02 15:04:05.999Z", created) else { return created }
+  let local = at.Local()
+  if local.Format("2006-01-02") == time.Now().Format("2006-01-02") { local.Format("15:04:05") } else { local.Format("2006-01-02 15:04:05") }
+}

@@ -13,6 +13,26 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   an all-team grant. A name filter narrows it and a row opens that member
   (LLL-812).
 
+- `lll watch --after CURSOR` resumes a stream without losing an event. Every
+  `--json` event carries a `cursor`, and watch prints its starting cursor on
+  stderr. `--after` first prints every matching event after the cursor, in
+  order, then keeps streaming, and a reconnect now catches up on its own. A
+  cursor that is malformed, from another board, ahead of the log or older
+  than retained events is refused with the reason (LLL-816).
+
+### Changed
+
+- `lll watch` reads the server's activity log instead of relaying live record
+  events. `--json` events keep `topic`, `action`, `record` and `key` and gain
+  `cursor`, `seq`, `created` and `changes`; issue events now carry the author
+  fields too. On an update, `record` is the record as read, and `changes`
+  holds what the event did. Filters are judged against the issue as it is
+  when the event is read. Text lines name a transition on the first update of
+  a record, and issue deletions and activity on deleted issues are no longer
+  dropped. A write that changes nothing, such as adding a label the issue
+  already has, no longer prints an event. `watch --ready` is unchanged and stays live-only. A server without
+  the activity log is refused with a message to upgrade (LLL-816).
+
 ### Fixed
 
 - On the Permissions page, changing a team role for a member who holds an

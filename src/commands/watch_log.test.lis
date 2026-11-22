@@ -1,0 +1,66 @@
+import "models"
+import "pb"
+import "query"
+
+fn log_bounds(floor: int, head: int) -> LogInfo {
+  LogInfo { supported: true, log: "abc123", floor, head }
+}
+
+fn cursor_refusal(info: LogInfo, raw: string) -> string {
+  match resume_point(info, raw) {
+    Ok(seq) => f"resumed at {seq}",
+    Err(e) => e.message,
+  }
+}
+
+/// LLL-816: a cursor names a log and a position in it, and nothing else parses.
+#[test]
+fn cursor_round_trips_and_rejects_other_shapes() {
+  assert parse_cursor(cursor_text("abc123", 42)).ok() == Some(("abc123", 42))
+  for raw in ["", "42", "v1.abc123", "v1..42", "v2.abc123.42", "v1.abc123.-1", "v1.abc123.x", "v1.a.b.3"] {
+    let kind = parse_cursor(raw).err().map(|e| e.kind)
+    assert kind == Some(pb.ErrorKind.Usage)
+  }
+}
+
+/// A cursor this log cannot honor is refused with its reason; the edge of
+/// retention (the row just before the oldest kept) still resumes.
+#[test]
+fn resume_refuses_foreign_future_and_expired_cursors() {
+  let info = log_bounds(10, 50)
+  assert resume_point(info, "v1.abc123.50").ok() == Some(50)
+  assert resume_point(info, "v1.abc123.9").ok() == Some(9)
+  assert cursor_refusal(info, "v1.abc123.8").contains("has expired: the oldest event this board keeps is 10")
+  assert cursor_refusal(info, "v1.abc123.51").contains("is ahead of this board's activity log, which ends at 50")
+  assert cursor_refusal(info, "v1.other.20").contains("belongs to another board's activity log")
+  assert cursor_refusal(log_bounds(0, 0), "v1.abc123.0") == "resumed at 0"
+  assert cursor_refusal(LogInfo { supported: true, .. }, "v1.abc123.3").contains("cannot verify a watch cursor")
+}
+
+#[test]
+fn update_lines_narrate_the_logged_transitions() {
+  let mut names = Map.new<string, string>()
+  names["m1"] = "ada"
+  let mut changes = Map.new<string, AuditChange>()
+  changes["labels"] = AuditChange { from: None, to: "l1" }
+  assert narrated_changes(changes, names) == ""
+  changes["state"] = AuditChange { from: "todo", to: "done" }
+  changes["priority"] = AuditChange { from: 0, to: 2 }
+  changes["assignee"] = AuditChange { from: "", to: "m1" }
+  assert narrated_changes(changes, names) == "state: todo -> done, priority: none -> high, assignee: none -> ada"
+  changes["assignee"] = AuditChange { from: "m1", to: "m9" }
+  assert narrated_changes(changes, names).ends_with("assignee: ada -> hidden member")
+}
+
+/// An event on a deleted issue passes only a filter its row can answer.
+#[test]
+fn deleted_issue_events_pass_only_a_project_filter() {
+  let e = AuditEvent { project: "p1", .. }
+  let every = query.IssueFilter.over(query.TeamScope.Every)
+  assert row_matches(every, e)
+  assert row_matches(query.IssueFilter { projects: [models.ProjectId("p1")], ..every }, e)
+  assert !row_matches(query.IssueFilter { projects: [models.ProjectId("p2")], ..every }, e)
+  assert !row_matches(query.IssueFilter { states: [models.IssueState.Todo], ..every }, e)
+  assert !narrows(every)
+  assert narrows(query.IssueFilter { search: "x", ..every })
+}

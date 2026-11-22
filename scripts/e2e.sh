@@ -1568,13 +1568,17 @@ kill "$PB_PID"
 wait "$PB_PID" 2>/dev/null || true
 start_pb || fail "PocketBase did not restart"
 # watchers resubscribe within ~1s; keep patching (each a fresh title
-# transition) until one lands, instead of trusting a fixed sleep
+# transition) until one lands on every watcher, instead of trusting a fixed
+# sleep. 'lll watch' reads the log, so it shows a patch made before it
+# reconnected (LLL-816); 'lll issue watch' is live-only and shows only one
+# made after, so the loop waits for all three.
 for i in $(seq 1 20); do
   curl -s -X PATCH "$URL/api/collections/issues/records/$WID" -H "$AUTH_HDR" \
     -H 'Content-Type: application/json' \
     -d "{\"title\":\"Back after restart $i\"}" >/dev/null || true
   sleep 1
-  grep -qF -- "Back after restart" "$WATCH_ALL" && break
+  grep -qF -- "Back after restart" "$WATCH_ALL" && grep -qF -- "Back after restart" "$WATCH_ISSUE" \
+    && grep -qF -- "Back after restart" "$WATCH_ISSUE_JSON" && break
 done
 wait_for_line "$WATCH_ALL" "Back after restart" "watch survives a PB restart" 10
 wait_for_line "$WATCH_ISSUE" "Back after restart" "issue watch survives a PB restart" 100
@@ -1585,6 +1589,9 @@ wait_for_line "$WATCH_JSON.err" 'reconnected to the lll server' 'query stream ac
 out=$(LLL_URL=$URL "$LIN" issue delete "$WKEY" --yes)
 assert_contains "$out" "Deleted $WKEY" "watched delete output"
 wait_for_line "$WATCH_ALL" "$WKEY deleted" "watch sees the delete"
+# Each watcher reads the log on its own, so the JSON one is waited for too
+# before the streams are reaped and its last row is checked below.
+wait_for_line "$WATCH_JSON" '"action":"delete"' 'watch --json sees the delete'
 wait_for_line "$WATCH_ISSUE" "$WKEY deleted" "issue watch sees the delete"
 wait_for_line "$WATCH_ISSUE_JSON" '"action":"delete"' 'issue JSON watch sees the delete'
 for _ in $(seq 1 50); do
@@ -1642,7 +1649,7 @@ done
 # know. `lll watch --help` is generated from the watch spec; the completions
 # entry for the verb-less watch noun reads the same table.
 comp_watch=$("$LIN" completions bash | grep -F "watch,*)" | head -1 | sed "s/.*words='//;s/'.*//")
-assert_contains "$comp_watch" "--state --assignee --label --project --activity --search --ready --json" \
+assert_contains "$comp_watch" "--state --assignee --label --project --activity --after --search --ready --json" \
   "watch completions carry exactly the watch spec's flags"
 comp_doc=$("$LIN" completions bash | grep -F "doc,new" | head -1 | sed "s/.*words='//;s/'.*//")
 assert_contains "$comp_doc" "-s --slug -t --title -k --kind -b --body" \

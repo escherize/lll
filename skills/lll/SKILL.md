@@ -273,14 +273,19 @@ is a continuation, not a date. Totals can change; records added behind a
 cursor need a fresh scan. These lists are not a snapshot or change feed;
 use `activity` for ordered writes and deletions.
 
-**Watch is live-only; reconcile on start and reconnect.** Subscription readiness
-is acknowledged on stderr; JSON events go to stdout. Reconnects do not replay
-missed events. Keep the last handled event time and reconcile issue changes
-with `lll issue list --since <time>`. That list misses comment/claim-only
-activity; `lll activity --since CURSOR` does not. It reads the server's audit
-log of every issue, comment and claim write in order, with who made it, and
-prints the next cursor on stderr (with `--json`, the last item's `seq`).
-Stream silence alone is not proof that the board has not changed.
+**Resume a watch from its cursor.** `lll watch` reads the server's log of
+every issue, comment and claim write, in order. Each `--json` event carries a
+`cursor`, and watch prints its starting cursor on stderr
+(`watch: cursor v1.<log>.<seq>`). Store the cursor of each event after you
+have handled it, and after a restart run `lll watch --after CURSOR` with the
+same flags: it prints every matching event after the cursor, then keeps
+streaming. A lost connection catches up on its own. Delivery is at least once,
+so make side effects idempotent. A refused cursor (another board, ahead of the
+log, or older than retained events) exits with the reason; it is never read
+as "start now", so re-read the state you depend on before starting fresh.
+On an update, `record` is the record as read and `changes` is what the event
+did. `lll watch --ready` is the exception: it is live-only and has no cursor.
+`lll activity --since SEQ` reads the same log one page at a time.
 
 **Use covered JSON fields.** Issue view and next JSON provide
 `blocked_by_refs` (`id`, `key`, `title`, `state`) for visible expanded blockers;

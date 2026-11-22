@@ -125,7 +125,7 @@ team's issue events. `lll webhook --help` describes the payload and retries.
 
 ### Comment and claim event delivery
 
-Existing webhook registrations and `lll watch` remain issue-only. Use
+Existing webhook registrations and plain `lll watch` remain issue-only. Use
 `lll watch --activity --json` for live comment and claim events, or
 `lll webhook add URL --activity` for a receiver in the selected team/project.
 The CLI checks authenticated `GET /api/lll/activity` (`{"supported":true}`)
@@ -136,8 +136,18 @@ legacy default. Check support before relying on that field on an old server.
 Activity envelopes carry topic, action, raw record, issue key, actor member
 id/name/kind and agent label. A claim's holder is separate from its releasing
 actor. Scope rules apply to subscriptions; shared webhook names use the team's
-shared roster. Delivery is live-only, with no replay or durable outbox claim.
-See the CLI contract and `watch --help` for reconciling reconnect gaps.
+shared roster. Webhook delivery is live-only, with no replay or durable outbox.
+`lll watch` reads the audit log instead and resumes with `--after`; see the
+CLI contract.
+
+`GET /api/lll/activity` also names the log a cursor belongs to:
+`{"supported":true,"log":"<id>","floor":N,"head":M}`. `log` identifies this
+board's audit log. `floor` and `head` are the lowest and highest `seq` it
+holds, both 0 while it is empty. A scoped member cannot read these bounds
+from the collection, whose rule hides other teams' rows. A realtime
+subscription to `audit_events` delivers a create event per row under the same
+read rule; delivery order across writes is not guaranteed, so read rows in
+`seq` order rather than trusting the pushed order.
 
 ## Accepting an invite as an existing person
 
