@@ -209,6 +209,13 @@ try:
             assert {e['action'] for e in claim_deliveries} == {'create', 'update', 'delete'}, claim_deliveries
             deleted = next(e for e in claim_deliveries if e['action'] == 'delete')
             assert deleted['author'] == operator['id'] and deleted['record']['member'] == owner['id'], deleted
+            # The watch reads the log after each push, so its lines trail the
+            # write; wait for one rather than reading the file at once.
+            try:
+                wait_event(default_out, 'issues', 'update')
+            except AssertionError as error:
+                state = [(p.args, p.poll()) for p in watchers]
+                raise AssertionError((str(error), state, (root / 'default.stderr').read_text())) from error
             assert events(default_out) and all(e['topic'] == 'issues' for e in events(default_out)), events(default_out)
             assert all(e['topic'] == 'issues' for e in received if e['_receiver_path'] == '/legacy'), received
             assert sum(e['topic'] == 'comments' and e['record']['id'] == first_retry['id'] for e in events(full_out)) == 1
