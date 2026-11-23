@@ -148,9 +148,12 @@ func TestPermissionMigrationsRollbackAndRoundTrip(t *testing.T) {
 		}
 		collection("permission_events")
 	}
+	// The permission pair (team_editor_grants, workspace_authority) plus every
+	// later migration, which must revert before the pair can: owner_sees_own_bots.
+	const permissionTail = 3
 	blocked := func(message string) {
 		t.Helper()
-		if _, err := runner.Down(2); err == nil || !strings.Contains(err.Error(), message) {
+		if _, err := runner.Down(permissionTail); err == nil || !strings.Contains(err.Error(), message) {
 			t.Fatalf("expected downgrade refusal %q: %v", message, err)
 		}
 		schemaIntact()
@@ -183,11 +186,11 @@ func TestPermissionMigrationsRollbackAndRoundTrip(t *testing.T) {
 	}
 	member.Set("editor_teams", []string{})
 	save(member)
-	reverted, err := runner.Down(2)
+	reverted, err := runner.Down(permissionTail)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reverted) != 2 {
+	if len(reverted) != permissionTail {
 		t.Fatalf("downgrade reverted %v", reverted)
 	}
 	c := collection("members")
