@@ -133,7 +133,27 @@ with tempfile.TemporaryDirectory(prefix='lll-team-scope-') as directory:
         assert status(f'/api/collections/members/records/{me}', {'name': 'guest2'}, 'PATCH') == 200
         assert status('/api/collections/members/records', {'name': 'evil', 'email': 'e@example.test', 'password': 'pw12345678',
                                                            'passwordConfirm': 'pw12345678', 'kind': 'person'}) == 400
-        assert status('/api/collections/teams/records', {'key': 'ZETA', 'name': 'z'}) == 400
+        # LLL-800: team management answers with a 403 that names the reason,
+        # not the rule's bare 400 or 404, and identically for a visible team,
+        # a hidden one and an id that does not exist.
+        for path, body, method in [
+            ('/api/collections/teams/records', {'key': 'ZETA', 'name': 'z'}, None),
+            (f"/api/collections/teams/records/{alpha['id']}", {'name': 'renamed'}, 'PATCH'),
+            (f"/api/collections/teams/records/{alpha['id']}", {'archived': True}, 'PATCH'),
+            (f"/api/collections/teams/records/{beta['id']}", {'name': 'renamed'}, 'PATCH'),
+            ('/api/collections/teams/records/nosuchteam00000', {'name': 'renamed'}, 'PATCH'),
+            (f"/api/collections/teams/records/{alpha['id']}", None, 'DELETE'),
+            (f"/api/collections/teams/records/{beta['id']}", None, 'DELETE'),
+        ]:
+            refused = call(api, path, body, tok, method)
+            assert refused[0] == 403 and 'Team management refused' in refused[1]['message'] \
+                and 'workspace Admin' in refused[1]['message'], (path, method, refused[:2])
+        after = {t['key']: (t['name'], t.get('archived')) for t in call(api, '/api/collections/teams/records', token=su)[1]['items']}
+        assert after == {'ALPHA': (alpha['name'], alpha.get('archived')), 'BETA': ('Beta', beta.get('archived'))}, after
+        refused_cli = subprocess.run([binary, 'team', 'archive', 'ALPHA'], cwd=root, text=True, capture_output=True, timeout=30,
+                                     env=dict({k: v for k, v in cli.items() if not k.startswith('LLL_ADMIN')}, LLL_TOKEN=tok))
+        assert refused_cli.returncode == 4 and 'Team management refused' in refused_cli.stderr, \
+            (refused_cli.returncode, refused_cli.stderr)
         # The custom routes read through the app, past the rules; they check too.
         assert status(f"/api/lll/issues/{ib['id']}/claim", {}) == 404
         # LLL-521: an agent label is coordination, not a way past scope.

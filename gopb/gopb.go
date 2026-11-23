@@ -203,6 +203,7 @@ func Serve(dataDir, addr, adminEmail, adminPassword, version, allowedOriginsSpec
 		})
 		e.Router.BindFunc(serializeRecordUpdates(&issueUpdates))
 		e.Router.BindFunc(refuseReadOnlyWrites)
+		e.Router.BindFunc(refuseTeamManagement)
 		e.Router.BindFunc(refuseRosterProbes)
 		return e.Next()
 	})
