@@ -195,6 +195,10 @@ Usage:
   lll bot rotate bot-<name>
                           a new token for a bot; the previous one stops working
                           (see 'lll bot rotate --help')
+  lll bot disable bot-<name>
+                          revoke your bot's access and tokens; keep its identity and work
+  lll bot remove bot-<name>
+                          remove your bot's identity (see 'lll bot remove --help')
   lll team <command>      work with teams (see 'lll team --help')
   lll member <command>    work with members (see 'lll member --help')
   lll invite create --team KEY [--read-only]

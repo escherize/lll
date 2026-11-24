@@ -329,7 +329,8 @@ fn member_remove(input: flags.CommandInput) -> Result<output.Output, pb.CliError
     return Err(pb.failed(
       "removing a member needs the server's admin credentials
 " +
-      tokens.admin_hint(),
+      tokens.admin_hint() +
+      owned_bot_hint(name),
     ))
   }
   let su = superuser_auth(ctx, login)?
@@ -849,7 +850,8 @@ fn member_access_cmd(input: flags.CommandInput) -> Result<output.Output, pb.CliE
         pb.ErrorKind.Refused,
         "changing access needs administrator credentials: " +
         tokens.admin_hint() +
-        ". A member or bot token cannot change anyone's access, its own included.",
+        ". A member or bot token cannot change anyone's access, its own included." +
+        owned_bot_hint(m.name),
       ))
     }
     return Err(e)
@@ -917,3 +919,10 @@ fn owner_cap(
   Ok(out)
 }
 
+/// A bot's owner needs no administrator to stop it (LLL-775), but the generic
+/// member verbs refuse them and used to name only administrator credentials
+/// (LLL-797). Empty for a name that cannot be a bot.
+fn owned_bot_hint(name: string) -> string {
+  if !strings.HasPrefix(name, "bot-") { return "" }
+  f"\nFor a bot you own: 'lll bot disable {name}' revokes its access and tokens, 'lll bot remove {name}' removes it. Neither needs administrator credentials."
+}
