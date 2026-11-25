@@ -1437,6 +1437,50 @@ rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "--until with --timeout: expected nonzero exit"
 assert_contains "$out" "no comment containing 'never-coming'" "--timeout names what did not arrive"
+# --- issue watch --until --after: the form that can be looped (LLL-796) ---
+# Without --after the earliest match comes back every time. --after names the
+# comment just handled, so only later comments can end the wait.
+watch_id() { printf '%s' "$1" | tail -n 1 | jq -r '.record.id'; }
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --json 2>/dev/null)
+first_id=$(watch_id "$out")
+[ -n "$first_id" ] && [ "$first_id" != null ] || fail "--until --json: the match carries no record id: $out"
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --json 2>/dev/null)
+[ "$(watch_id "$out")" = "$first_id" ] || fail "--until without --after: expected the earliest match again"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --after "$first_id" --timeout 1 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "--after the only match: expected the wait to time out, got: $out"
+assert_contains "$out" "no comment containing 't9-'" "--after skips the comment it names"
+assert_not_contains "$out" "already there" "--after does not report the handled comment as existing"
+# A request written between two runs is already there for the second run.
+LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$WKEY" -b "t9-second: one more" >/dev/null
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --after "$first_id" --json --timeout 30 2>/dev/null)
+second_id=$(watch_id "$out")
+[ "$second_id" != "$first_id" ] || fail "--after returned the comment it names"
+assert_contains "$(printf '%s' "$out" | tail -n 1)" "t9-second: one more" "--after matches a later existing comment at once"
+assert_contains "$(printf '%s' "$out" | tail -n 1)" '"action":"snapshot"' "an existing match after the cursor is a snapshot"
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --after "$first_id")
+assert_contains "$out" "already there: #" "--after reports a later existing match in text too"
+assert_contains "$out" "t9-second: one more" "--after text output names the later comment"
+# And one written during the wait arrives live.
+WATCH_AFTER="$DATA_DIR/watch_after.txt"
+(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --after "$second_id" --timeout 30 > "$WATCH_AFTER" 2>&1; echo "rc=$?" >> "$WATCH_AFTER") &
+wait_for_line "$WATCH_AFTER" "Watching $WKEY until" "--after header"
+LLL_URL=$URL LLL_TOKEN="$CAROL_TOK" LLL_ME=carol "$LIN" issue comment "$WKEY" -b "t9-third: live" >/dev/null
+wait_for_line "$WATCH_AFTER" "rc=0" "--after exits 0 once a later comment arrives" 100
+assert_contains "$(cat "$WATCH_AFTER")" "comment by carol: t9-third: live" "--after printed the live comment it waited for"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --until "t9-" --after nosuchcomment0 2>&1); rc=$?
+set -e
+[ "$rc" -eq 3 ] || fail "--after an unknown comment: expected exit 3, got $rc: $out"
+assert_contains "$out" "no comment nosuchcomment0 on $WKEY" "--after names the comment it could not find"
+set +e
+out=$(LLL_URL=$URL "$LIN" issue watch "$WKEY" --after "$first_id" 2>&1); rc=$?
+set -e
+[ "$rc" -eq 2 ] || fail "--after without --until: expected a usage error (2), got $rc: $out"
+assert_contains "$out" "--after only means something with --until" "--after without --until says why"
+
 # A notice (LLL-683): stderr, so a script reading the listing gets the listing.
 out=$(LLL_URL=$URL "$LIN" issue comment "$WKEY" 2>&1 >/dev/null)
 assert_contains "$out" "lll issue watch $WKEY --until TEXT" "a comment listing points at watch --until on stderr"
