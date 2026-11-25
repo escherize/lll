@@ -8,6 +8,10 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- `lll issue watch KEY --until TEXT --after COMMENT_ID` lets only comments
+  after the named one end the wait, so a wait-act-reply loop gets the next
+  request instead of the one it just handled. The id is the `record.id` of the
+  `--json` match; an id that is not a comment on the issue exits 3 (LLL-796).
 - The Permissions page opens on an overview: every member against every team,
   with workspace Admins, bots and their owners, and the members who still hold
   an all-team grant. A name filter narrows it and a row opens that member
