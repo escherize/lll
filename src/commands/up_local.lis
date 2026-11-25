@@ -215,11 +215,14 @@ pub fn is_loopback(base_url: string) -> bool {
   name == "127.0.0.1" || name == "localhost" || name == "::1"
 }
 
-/// First free TCP port at or above `start`.
-fn free_port(start: int) -> int {
+/// First TCP port at or above `start` that is free on `host`, the address
+/// the caller will bind. A port free on loopback can be held on another
+/// interface (LLL-826). When no port binds, `host` itself is unusable:
+/// return `start` so the real listener reports that error.
+fn free_port(host: string, start: int) -> int {
   let mut p = start
-  loop {
-    match net.Listen("tcp", f"127.0.0.1:{p}") {
+  while p <= 65535 {
+    match net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(p))) {
       Ok(l) => {
         let _ = l.Close()
         return p
@@ -227,6 +230,7 @@ fn free_port(start: int) -> int {
       Err(_) => p += 1,
     }
   }
+  start
 }
 
 /// Port from "http://127.0.0.1:8090", or `fallback`.
