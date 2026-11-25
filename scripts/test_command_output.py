@@ -63,6 +63,7 @@ ALLOW: dict[tuple[str, str], str] = {
     ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): 'interactive removal confirmation must be visible before reading terminal input; stderr preserves JSON stdout',
     ('src/commands/login.lis', 'ask_email'): 'interactive email prompt',
     ('src/commands/issue_write.lis', 'pr_cmd'): 'lll issue pr: gh pr create output passes straight through',
+    ('src/commands/issue_next_wait.lis', 'next_wait_notice'): 'lll issue next --wait: says it is waiting before it blocks, for up to the whole wait',
     ('src/commands/import.lis', 'gh_issue_list'): 'lll import github: gh issue list stderr passes straight through',
     ('src/commands/import.lis', 'progress'): 'lll import github: one line per created issue as it lands, so a long import shows progress',
     ('src/secret/secret.lis', 'prompted'): 'interactive password prompt, written before the answer is read',
@@ -82,6 +83,7 @@ ALLOW: dict[tuple[str, str], str] = {
 CALLERS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ('src/commands/project_cascade.lis', 'cascade_confirm'): {('src/commands/project_cascade.lis', 'project_cascade')},
     ('src/commands/bot_lifecycle.lis', 'confirm_bot_remove'): {('src/commands/bot_lifecycle.lis', 'bot_remove_owned')},
+    ('src/commands/issue_next_wait.lis', 'next_wait_notice'): {('src/commands/issue_next_wait.lis', 'issue_next_waiting')},
     ('src/main.lis', 'render'): {('src/main.lis', 'main')},
     ('src/main.lis', 'write'): {('src/main.lis', 'render')},
     ('src/commands/watch_log.lis', 'watch_log'): {('src/commands/watch.lis', 'watch_stream')},

@@ -8,6 +8,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Added
 
+- `lll issue next --wait DURATION` waits for an issue to become ready instead
+  of exiting 5 at once. A worker can idle on `lll issue next --claim --wait 10m`
+  and receive the key of an issue that is created, unblocked or released during
+  the wait. The command exits 5 when the wait ends with nothing to offer. When
+  several workers wait with `--claim`, one new issue goes to exactly one of
+  them and the others keep waiting (LLL-820).
+
 - The Permissions page opens on an overview: every member against every team,
   with workspace Admins, bots and their owners, and the members who still hold
   an all-team grant. A name filter narrows it and a row opens that member
