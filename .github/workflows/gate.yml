@@ -1,11 +1,7 @@
-# The gate runs on macos-15 (darwin/arm64), NOT ubuntu — do not "fix" this back
-# to linux without first fixing lisette upstream: lis bindgen panics on linux
-# while generating Go typedefs for github.com/escherize/lll/gopb — "panic:
-# unexpected expr: *ast.KeyValueExpr" in golang.org/x/tools/go/ssa — so
-# `lis test` cannot run on ubuntu at all. Confirmed on 0.11.3 AND 0.12.0
-# (finding filed 2026-08-31). The identical toolchain (go 1.27.0, cold module
-# + build caches) passes on darwin/arm64. Repro: escherize/lll Actions run
-# 33320568185. Upstream issue: https://github.com/ivov/lisette/issues/1360
+# The gate compiles and tests on ubuntu-24.04 (LLL-814). It ran on macOS until
+# lis 0.12.1 fixed a bindgen panic on Linux (ivov/lisette#1360); hosted macOS
+# runners are capped at five concurrent jobs and starved runs. One macOS job
+# remains, because the released CLI is a darwin/arm64 binary.
 
 name: gate
 
@@ -28,7 +24,7 @@ jobs:
   # runs; scripts/test_ci_parts.py fails when a part is missing here.
   checks:
     name: ${{ matrix.name }}
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -38,8 +34,6 @@ jobs:
             run: "mise run build ::: test"
           - name: e2e core
             run: mise run e2e-core
-          # One share, not two: GitHub runs at most five macOS jobs at once
-          # and the deployment context is the fifth. A sixth job queues.
           - name: e2e standalone and lll up
             run: E2E_SHARD=1/1 mise run e2e-standalone && mise run e2e-up
           - name: e2e web
@@ -62,10 +56,10 @@ jobs:
         run: mise install
 
       # lis ships as a GitHub release, not a mise plugin (see mise.toml).
-      # Pinned to 0.12.0, the version mise.toml says lll is verified against.
-      - name: Install lis 0.12.0
+      # Pinned to 0.12.5, the version mise.toml says lll is verified against.
+      - name: Install lis 0.12.5
         run: |
-          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.5/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - uses: ./.github/actions/setup-browser
@@ -75,11 +69,33 @@ jobs:
           command -v playwright-cli
           ${{ matrix.run }}
 
-  # Linux cannot emit Go from Lisette (see the note at the top), so macOS
-  # prepares the source context the Linux build and the deploy both use.
+  # The released binary is darwin/arm64 (release.yml), so one job compiles and
+  # runs the unit tests there. The end-to-end suites run on Linux only.
+  macos:
+    name: macOS build and unit tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+      - name: Trust repo config
+        run: mise trust
+      - name: Install tools
+        run: mise install
+      - name: Install lis 0.12.5
+        run: |
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.5/lisette-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build and unit tests
+        run: "mise run build ::: test"
+
+  # The source context the Docker build and the deploy both use: the checked-out
+  # HEAD with Go already emitted, so neither needs a Lisette installation.
   context:
     name: deployment context
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -90,9 +106,9 @@ jobs:
         run: mise trust
       - name: Install tools
         run: mise install
-      - name: Install lis 0.12.0
+      - name: Install lis 0.12.5
         run: |
-          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.5/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Prepare portable deployment context
@@ -111,14 +127,14 @@ jobs:
   # One check named "gate" that is green only when every part is.
   gate:
     name: gate
-    needs: [checks, context]
+    needs: [checks, macos, context]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every part passed
         run: |
-          [ "${{ needs.checks.result }}" = success ] && [ "${{ needs.context.result }}" = success ]
+          [ "${{ needs.checks.result }}" = success ] && [ "${{ needs.macos.result }}" = success ] && [ "${{ needs.context.result }}" = success ]
 
   linux:
     name: Linux container and browser gate

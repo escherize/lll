@@ -1,5 +1,5 @@
-# Release binaries on tag push (v*). Runs on macos-15 for the same reason as
-# gate.yml: lis cannot bindgen on linux. darwin-arm64 is a native `lis build`;
+# Release binaries on tag push (v*). Runs on macos-15 because darwin-arm64 is
+# a native `lis build`;
 # the linux binaries are `GOOS=linux go build` over a darwin `lis emit`
 # (scripts/emit-relative.sh) — the same pipeline scripts/fly-deploy.sh proves
 # on every deploy. Pure-Go deps (modernc sqlite), so CGO_ENABLED=0 cross
@@ -66,9 +66,9 @@ jobs:
       - name: Install tools
         run: mise install
 
-      - name: Install lis 0.12.0
+      - name: Install lis 0.12.5
         run: |
-          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.0/lisette-installer.sh | sh
+          curl -LsSf https://github.com/ivov/lisette/releases/download/lisette-v0.12.5/lisette-installer.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build darwin-arm64 (native lis)

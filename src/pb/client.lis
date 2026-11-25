@@ -1054,7 +1054,6 @@ pub fn http_client(budget: Budget) -> http.Client {
       // transport. Keep-alives are off so one built per transfer leaves no
       // idle connection behind.
       let mut transport = http.Transport {
-        Proxy: Some(http.ProxyFromEnvironment),
         DialContext: Some(|ctx, network, addr| dialer.DialContext(ctx, network, addr)),
         TLSHandshakeTimeout: (DIAL_SECONDS as time.Duration) * time.Second,
         ResponseHeaderTimeout: (ANSWER_SECONDS as time.Duration) * time.Second,
@@ -1062,6 +1061,9 @@ pub fn http_client(budget: Budget) -> http.Client {
         ForceAttemptHTTP2: true,
         ..
       }
+      // Set from Go: "no proxy" is a nil URL, which a Go function passed as
+      // a Lisette value reports as an error (gopb.UseEnvironmentProxy).
+      gopb.UseEnvironmentProxy(&transport)
       http.Client {
         Transport: Some(&transport),
         CheckRedirect: Some(|_, _| Err(http.ErrUseLastResponse)),
