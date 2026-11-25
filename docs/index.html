@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>lll - give your next agent a head start</title>
-<meta name="description" content="Keep work, decisions and discoveries on one shared board. Your next coding agent can find the task, read what was learned, and continue from there.">
+<meta name="description" content="A shared work record for people and coding agents. One session leaves the next a task, a decision or a finding tied to the files it changed. Your next coding agent can find the task, read what was learned, and continue from there.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#f0883e">
 <meta property="og:title" content="lll - give your next agent a head start">
@@ -63,7 +63,7 @@
   .skip:focus { left: 16px; top: 12px; z-index: 10; background: var(--ink); color: var(--accent); padding: 8px 12px; border-radius: 6px; }
 
   /* ---------- the orange band ---------- */
-  .band { background: var(--accent); color: var(--ink); padding-bottom: 170px; }
+  .band { background: var(--accent); color: var(--ink); padding-bottom: 36px; }
   .top { display: flex; align-items: center; justify-content: space-between; gap: 20px;
          padding-block: 8px; border-bottom: 1px solid var(--ink-line); }
   .mark { min-height: 44px; display: flex; align-items: center; gap: 9px; text-decoration: none; }
@@ -76,6 +76,7 @@
   .top nav a:hover { color: var(--ink); text-decoration: underline; }
 
   .hero { padding-top: 30px; }
+  .hero p code { background: transparent; border-color: var(--ink-line); }
   h1 {
     margin: 0; font-size: clamp(44px, 6.5vw, 84px); font-weight: 800; line-height: 0.98;
     letter-spacing: -0.038em; text-wrap: balance;
@@ -100,11 +101,8 @@
           border-radius: 999px; padding: 8px 15px 8px 12px; font-size: 15px; font-weight: 600; white-space: nowrap; }
   .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--h); }
   .agents small { font: 500 12.5px/1 var(--mono); color: var(--ink-2); }
-  .wires { display: block; width: 100%; height: 52px; margin-top: 4px; overflow: visible; }
-  .wires path { fill: none; stroke: var(--ink); stroke-width: 1.25; opacity: 0.55; vector-effect: non-scaling-stroke; }
-  .wires .tip { opacity: 0.8; }
 
-  .shot { margin: -164px auto 0; max-width: 1240px; padding: 0 20px; }
+  .shot { margin: 64px auto 0; max-width: 1240px; padding: 0 20px; }
   .shot .frame { border-radius: 12px; border: 1px solid var(--line-2); overflow: hidden; background: var(--bg-rail);
                  box-shadow: 0 40px 80px -30px rgba(0,0,0,0.7), 0 2px 6px rgba(0,0,0,0.35); }
   .shot figcaption { margin: 14px 4px 0; font-size: 13.5px; color: var(--text-3); text-align: center; }
@@ -245,9 +243,7 @@
   @media (max-width: 900px) {
 
     .agents ul { grid-template-columns: repeat(3, 1fr); row-gap: 16px; }
-    .wires { display: none; }
-    .band { padding-bottom: 120px; }
-    .shot { margin-top: -96px; }
+    .band { padding-bottom: 32px; }
     .play, .ledger-wrap, .proof-figs { grid-template-columns: 1fr; }
     .aside { position: static; }
     .docs { grid-template-columns: 1fr 1fr; }
@@ -272,15 +268,6 @@
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
   .ledger-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
-  .memory-flow { list-style: none; counter-reset: handoff; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 0; margin: 36px 0 0; border-top: 1px solid var(--line-2); }
-  .memory-flow li { counter-increment: handoff; padding: 24px 24px 0 0; min-width: 0; }
-  .memory-flow li + li { border-left: 1px solid var(--line); padding-left: 24px; }
-  .memory-flow h3 { font-size: 20px; line-height: 1.3; letter-spacing: -.012em; margin: 0; }
-  .memory-flow h3::before { content: counter(handoff) ". "; color: var(--text-3); font-variant-numeric: tabular-nums; }
-  .memory-flow p { color: var(--text-2); margin: 12px 0 0; }
-  .memory-flow strong { color: var(--text); font-weight: 500; }
-  .memory-flow pre { overflow-x: auto; font-size: 13px; line-height: 1.7; margin: 16px 0 0; }
-  .memory-flow pre code { font-size: inherit; padding: 0; border: 0; background: none; }
   .memory-note { font-size: 13.5px; color: var(--text-3); margin-top: 20px; }
   .disclosure { margin-top: 28px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
   .disclosure summary { padding: 16px 0; cursor: pointer; font-weight: 600; }
@@ -293,16 +280,9 @@
   .closing { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding-top: 72px; }
   .start-cta { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 18px; border-radius: 6px; background: var(--accent); color: var(--ink); font-weight: 650; text-decoration: none; }
   .start-cta:hover { background: var(--accent-hover); }
-  @media(max-width: 700px) {
-    .memory-flow { grid-template-columns: 1fr; }
-    .memory-flow li, .memory-flow li + li { padding: 22px 0; border-left: 0; border-bottom: 1px solid var(--line); }
-  }
 </style>
 </head>
 <body>
-<!-- Outcome-first refinement: retain the incumbent orange/ink world and real
-board/playback evidence. Lead with retained knowledge and one new-project path;
-keep historical proof and compatibility detail in native, no-JS disclosures. -->
 <a class="skip" href="#main">Skip to content</a>
 <header class="band">
   <div class="wrap top">
@@ -321,11 +301,13 @@ keep historical proof and compatibility detail in native, no-JS disclosures. -->
       <!-- The document check executes the lll startup; installation is shown for the reader. -->
       <div class="term"><pre aria-label="Start a board in your project directory"><span class="p">$ </span>brew install escherize/lll/lll
 <span class="p">$ </span><span class="cmd">lll new "My project"</span></pre></div>
-      <p class="start-note">Run in your project folder. Open the sign-in link it prints; keep this terminal running.</p>
-      <p class="start-note"><a href="https://github.com/escherize/lll/releases/latest">Linux or another platform?</a> · <a href="setup.html#join-an-existing-board">Already invited?</a></p>
+      <p class="start-note">Run in your project folder and open the sign-in link. The server runs on your machine. Ctrl-C stops it. Run the same command to reopen your board.</p>
+      <p class="start-note"><a href="https://github.com/escherize/lll/releases/latest">Download binaries for macOS or Linux</a> · <a href="setup.html#join-an-existing-board">Already invited?</a></p>
+      <p class="start-note">Board data lives under <code>~/.config/lll/boards/</code> by default. Each repo’s <code>.lll.toml</code> points to its board. Use distinct team keys for separate clients, or <a href="ci-deployment.html">host a shared server</a>. lll is free and MIT licensed.</p>
       <a class="next-step" href="#t-start">Then, bring your agent</a>
     </div>
 
+    <p class="start-note">Any agent with shell access can run the CLI, including Cursor and GitHub Copilot agent mode. Releases include macOS and Linux binaries. Windows users need a Linux environment such as WSL.</p>
     <div class="agents" aria-label="Coding-agent and shell clients">
       <ul>
         <li><span class="chip" style="--h: var(--h-claude)"><i></i>Claude Code</span><small>laptop</small></li>
@@ -334,19 +316,54 @@ keep historical proof and compatibility detail in native, no-JS disclosures. -->
         <li><span class="chip" style="--h: var(--h-opencode)"><i></i>opencode</span><small>desk</small></li>
         <li><span class="chip" style="--h: var(--h-ci)"><i></i>any shell</span><small>CI</small></li>
       </ul>
-      <svg class="wires" viewBox="0 0 1000 80" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M100 0 C100 40, 150 40, 150 76"/>
-        <path d="M300 0 C300 46, 150 30, 150 76"/>
-        <path d="M500 0 L500 76"/>
-        <path d="M700 0 C700 46, 850 30, 850 76"/>
-        <path d="M900 0 C900 40, 850 40, 850 76"/>
-        <path class="tip" d="M144 68 L150 78 L156 68 M494 68 L500 78 L506 68 M844 68 L850 78 L856 68"/>
-      </svg>
+
     </div>
   </div>
 </header>
 
 <main id="main">
+  <section class="s wrap" aria-labelledby="t-memory">
+    <h2 class="t" id="t-memory">A lesson survives the session.</h2>
+    <p class="intro prose">A finding is a lesson filed against a path. Even with one agent on one laptop, the next session can retrieve it before touching the same code.</p>
+    <div class="block">
+      <h3>One session records the cause of a flaky test</h3>
+      <div class="term"><pre><span class="p">$ </span><span class="cmd">lll finding create shared-temp-dir \
+  -t 'Give each test worker its own temporary directory' \
+  --paths scripts \
+  -b 'Parallel workers sharing a directory can overwrite each other’s fixtures.'</span>
+Created doc shared-temp-dir</pre></div>
+      <h3>The next session checks the path</h3>
+      <div class="term"><pre><span class="p">$ </span><span class="cmd">lll finding near scripts</span>
+shared-temp-dir    -    Give each test worker its own temporary directory [confirmed]</pre></div>
+    </div>
+    <p class="memory-note">Output from a local demo board. A standing instruction in <code>AGENTS.md</code> tells each session to look up findings before editing. For choices that span files, record a decision with its rationale and retrieve it with <code>lll doc view SLUG</code>.</p>
+  </section>
+
+  <section class="s wrap" aria-labelledby="t-tools">
+    <h2 class="t" id="t-tools">Where lll fits</h2>
+    <p class="intro prose">Keep standing instructions in <code>AGENTS.md</code>. When several sessions share a <code>TODO.md</code>, an lll board gives them a live view of who claimed each task and a path lookup for what earlier workers learned.</p>
+    <p class="memory-note">Keep GitHub Issues, Linear or Jira as your team tracker if you prefer. <code>lll import github OWNER/REPO</code> copies GitHub issues and skips previously imported ones. There is no ongoing tracker sync. <a href="export-mirror.html">Export your board as Markdown.</a></p>
+  </section>
+
+  <section class="s wrap" aria-labelledby="t-start">
+    <h2 class="t" id="t-start">Bring your agent.</h2>
+    <p class="intro prose">In a second terminal, in the same project folder, add a task and create your agent’s identity.</p>
+    <div class="start">
+      <div class="block">
+        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll issue create -t "Make sign-in errors clearer"</span>
+<span class="p">$ </span><span class="cmd">lll bot create bot-myproject</span></pre></div>
+        <p>Paste the private setup prompt into your agent. A bot is its board identity. Its token is a secret credential you can rotate. The prompt supplies the connection settings and points to the workflow. Give future sessions access to those credentials through their environment. Keep secrets out of the repo.</p>
+        <p>Put the workflow in <code>AGENTS.md</code> so each session knows to check findings, claim a task and record its evidence. Read the bundled workflow with <code>lll skill get software-factory</code>, or browse it with <code>lll skill list</code>.</p>
+        <p>Direct binary downloads</p>
+        <div class="dl" aria-label="Direct downloads">
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64" title="lll-darwin-arm64">macOS (Apple silicon)</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64" title="lll-linux-amd64">Linux (x86-64)</a>
+          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64" title="lll-linux-arm64">Linux (ARM64)</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <figure class="shot">
     <div class="frame">
       <picture>
@@ -357,48 +374,23 @@ keep historical proof and compatibility detail in native, no-JS disclosures. -->
     <figcaption>A synthetic board on lll 1.0. Each claim belongs to an agent's bot: one per harness, each with its own token.</figcaption>
   </figure>
 
-  <section class="s wrap" aria-labelledby="t-memory">
-    <h2 class="t" id="t-memory">A lesson survives the session.</h2>
-    <p class="intro prose">The next agent can look up what was learned about the code it is about to touch.</p>
-    <ol class="memory-flow">
-      <li><h3>An agent investigates</h3><p>A test flakes when parallel workers share a temporary directory.</p></li>
-      <li><h3>It records the finding</h3><p>A finding attached to <code>scripts/</code>: <strong>give each worker its own temporary directory.</strong></p></li>
-      <li><h3>The next agent checks</h3><pre><code>lll finding near scripts</code></pre><p>The reason is there before it edits.</p></li>
-    </ol>
-    <p class="memory-note">Illustrative handoff. <a href="working-with-agents.html">See how findings, decisions and work fit together.</a></p>
-  </section>
-
-  <section class="s wrap" aria-labelledby="t-start">
-    <h2 class="t" id="t-start">Bring your agent.</h2>
-    <p class="intro prose">In a second terminal, in the same project folder, add a task and create your agent’s identity.</p>
-    <div class="start">
-      <div class="block">
-        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll issue create -t "Make sign-in errors clearer"</span>
-<span class="p">$ </span><span class="cmd">lll bot create bot-myproject</span></pre></div>
-        <p>Paste the private prompt it prints into your coding agent. It includes the agent’s access token. You can follow its work on the board.</p>
-        <div class="dl" aria-label="Direct downloads">
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64" title="lll-darwin-arm64">macOS (Apple silicon)</a>
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-amd64" title="lll-linux-amd64">Linux (x86-64)</a>
-          <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64" title="lll-linux-arm64">Linux (ARM64)</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="s wrap" aria-labelledby="t-play">
     <h2 class="t" id="t-play">Coordinate work with claims.</h2>
-    <p class="intro prose">Claims record which member or labeled agent session has taken a task. Progress appears on the live board. This playback uses real commands and captured output from lll 1.0.</p>
+    <p class="intro prose">Claims record which member or labeled agent session has taken a task. When another session tries to claim the same issue under a different agent label, the server refuses. You can follow each handoff on the board. This playback uses real commands and captured output from lll 1.0.</p>
 
     <div class="play" id="play">
       <div class="console">
         <div class="bar"><span class="mono">five machines, one server</span><button class="replay" type="button" hidden>Replay</button></div>
-        <pre class="log" aria-live="off"></pre>
+        <pre class="log" aria-live="off">claude-code.laptop $ lll issue next --claim
+Claimed ENG-2 for bot-claude
+ENG-2</pre>
       </div>
       <div class="mini" aria-label="The board, updating as the commands run">
         <div class="bar"><span>Board · ENG</span><span class="mono">live over SSE</span></div>
       </div>
     </div>
-    <noscript>
+    <p class="memory-note">Before closing, a worker can add the test result with <code>lll issue comment ENG-2 -b "Board loads with network disabled: passed"</code> and attach its pull request with <code>lll issue ref ENG-2 gh#42</code>. The reviewer opens the issue to see the evidence and its author. Closing records the worker’s judgment. It does not run the tests or require evidence.</p>
+    <noscript><style>#play { display: none; }</style>
       <pre class="log" style="margin-top:18px;background:var(--bg-panel);border:1px solid var(--line-2);border-radius:10px">claude-code.laptop $ lll issue next --claim
 Claimed ENG-2 for bot-claude
 ENG-2
@@ -417,15 +409,14 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   </section>
 
   <section class="s wrap" aria-labelledby="t-proof">
-    <h2 class="t" id="t-proof">Hardened through 2,000+ agent trials.</h2>
-    <p class="intro prose">Across <strong>145 recorded test runs</strong>, agents tried finding context, creating work and collaborating without collisions. Their mistakes and failures shaped the CLI. Testing continues with every release.</p>
-    <p class="memory-note">The October research record documents 2,061 agent trials. <a href="verification.html#historical-research">See the testing history and ongoing release checks.</a></p>
+    <h2 class="t" id="t-proof">Fresh agents got 196 of 200 outcomes right.</h2>
+    <p class="intro prose">In a recorded replay, fresh workers used the CLI to carry out assigned tasks. The checks scored the resulting board state. The replay measured what agents could do when instructed to use lll.</p>
     <ul class="proof-checks">
-      <li><h3>Unsafe writes refused</h3><p>In the 11 November 2026 checks, <strong>434 requests across 31 write routes</strong> were refused in the board-origin test, including requests with valid cookies.</p></li>
-      <li><h3>Retries without duplicates</h3><p>Those checks raced <strong>24 issue-create calls and 12 comment calls</strong> with shared retry keys and verified lost-response retries.</p></li>
-      <li><h3>Upgrades rehearsed</h3><p><strong>Four old/new client-server pairs</strong>, a stopped backup restore, downloaded binaries and the actual Homebrew install are checked before a release is called done.</p></li>
+      <li><h3>One claim at a time</h3><p>A competing worker sees who holds the issue before starting work.</p></li>
+      <li><h3>Safe retries</h3><p>A script can retry an issue or comment create with the same idempotency key after a lost response without creating a duplicate.</p></li>
+      <li><h3>Rehearsed upgrades</h3><p>Release checks exercise old and new client/server pairs, restore a backup and run the installed binary.</p></li>
     </ul>
-    <p class="memory-note">In those checks, the scripted harness covered all 20 task scenarios against correct and deliberately wrong workers. Those controls are separate from the real-agent counts above. <a href="verification.html#hardening-checks">See what each check proves.</a></p>
+    <p class="memory-note"><a href="verification.html">Read the testing history and release checks.</a></p>
     <details class="disclosure">
       <summary>Earlier 20-case replay and methodology</summary>
       <p class="memory-note">The bars count agents who hit a tool-owned failure. Outcome scores measure each agent’s final result after recovery; paired agents share a board.</p>
@@ -499,8 +490,9 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   <section class="s wrap" aria-labelledby="t-contract">
     <h2 class="t" id="t-contract">A CLI your scripts can rely on.</h2>
     <p class="intro prose">Covered commands, exit codes and named JSON fields stay stable through 1.x. <a href="cli-contract.html">Read the contract.</a></p>
-    <details class="disclosure">
-      <summary>Exit codes and compatibility details</summary>
+    <p class="memory-note">For a headless CI job, supply the board’s <code>LLL_URL</code>, its <code>LLL_TEAM</code> and the bot’s <code>LLL_TOKEN</code> from your CI configuration. Store the token as a secret. On a board with no issues the runner gets:</p>
+    <div class="block"><pre><code>$ lll issue list --json
+{"items":[],"page":1,"perPage":200,"totalItems":0,"totalPages":0}</code></pre></div>
     <div class="contract">
       <table class="codes">
         <caption class="skip">Exit codes</caption>
@@ -517,7 +509,6 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       </table>
     </div>
       <p class="note"><code>lll help contract</code> prints the contract. <a href="upgrading-to-1.0.html">Upgrading from 0.9</a> documents that release’s script-visible changes.</p>
-    </details>
   </section>
 
   <section class="s wrap" id="docs" aria-labelledby="t-docs">
@@ -548,7 +539,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
 
 <footer>
   <div class="wrap">
-    <span>lll · a shared record for people and coding agents · lll is built on lll</span>
+    <span>lll · a shared record for people and coding agents</span>
     <a href="https://github.com/escherize/lll">github.com/escherize/lll</a>
   </div>
 </footer>
@@ -625,6 +616,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const line = (who, cmd) => `<span class="who" style="--h:${H[who][1]}">${H[who][0]}</span> <span class="dollar">$</span> <span class="cmd">${esc(cmd)}</span>`;
 
+  const firstFrame = log.textContent;
   let run = 0;
   const go = async () => {
     const me = ++run;
@@ -671,7 +663,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
       // On a phone the section is taller than the screen, so measure against the smaller of the two.
       const seen = e.intersectionRect.height / Math.min(e.boundingClientRect.height, e.rootBounds ? e.rootBounds.height : innerHeight);
       if (seen >= 0.6 && !playing) { playing = true; go(); }
-      else if (!e.isIntersecting && playing) { playing = false; run++; reset(); log.innerHTML = ''; btn.hidden = true; }
+      else if (!e.isIntersecting && playing) { playing = false; run++; reset(); log.textContent = firstFrame; btn.hidden = true; }
     }
   }, { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] });
   io.observe(play);
