@@ -6,9 +6,9 @@
 # hooks are Go now, in gopb.)
 #
 # The build stage is PLAIN `go build` over Go that `lis emit` produced on the
-# deploying machine — lis never runs in the container, because lis (0.11.3 and
-# 0.12.0) cannot bindgen on linux: typedef generation fails for x/term, the
-# local path modules, and goldmark-highlighting (finding filed 2026-08-31).
+# deploying machine — lis never runs in the container. That began as a
+# workaround for a Linux bindgen panic in lis 0.11.3 and 0.12.0, fixed in
+# 0.12.1 (ivov/lisette#1360); the image still builds from emitted Go.
 # Consequence: DO NOT `fly deploy` from the checkout — the context must carry
 # a fresh `target/` emit with relative replace paths. scripts/fly-deploy.sh
 # builds that context; use it.
