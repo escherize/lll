@@ -361,24 +361,30 @@ lll issue comment KEY-12 -b "what I did"
 `--timeout` runs out. With `--json` it prints every comment event that arrives
 while it waits; the match is the last line.
 
-**Do not put `--until` in a loop.** A comment that already matches ends the
-wait at once (`action` is `snapshot`), and it is the earliest match, so the
-second pass returns the request you just handled. To keep answering, hold one
-stream open and filter it:
+**To keep answering, pass `--after` on every pass after the first.** A comment
+that already matches ends the wait at once (`action` is `snapshot`), and it is
+the earliest match, so a bare `--until` in a loop returns the request you just
+handled. `--after ID` lets only comments after that one match. Give it the
+`record.id` of the match you just handled:
 
 ```sh
-lll issue watch KEY-12 --json |
-  jq --unbuffered -r 'select(.topic == "comments" and .action == "create"
-      and (.record.body | contains("@agent"))) | .record.body' |
-  while read -r request; do
-    # ... act on "$request" ...
-    lll issue comment KEY-12 -b "what I did"
-  done
+out=$(lll issue watch KEY-12 --until @agent --json --timeout 3600) || exit
+while :; do
+  match=$(printf '%s\n' "$out" | tail -n 1)
+  # ... act on the request in "$match" (.record.body) ...
+  lll issue comment KEY-12 -b "what I did"
+  after=$(printf '%s' "$match" | jq -r .record.id)
+  out=$(lll issue watch KEY-12 --until @agent --json --timeout 3600 --after "$after") || break
+done
 ```
 
-Keep the marker out of your replies, or the stream hands them back to you as
-requests. The stream is live-only: a comment written while nothing was
-watching is not replayed, so read `lll issue view KEY-12 --raw` once on start.
+A request written while you were acting is already there on the next pass, so
+none is missed. The loop ends when `--timeout` runs out. Keep the marker out
+of your replies, or the next pass hands them back to you as requests.
+
+`--after` takes the id of any comment on that issue, so after a restart your
+own last reply works as the starting point. An id that is not a comment on
+the issue exits 3, and `--after` without `--until` is a usage error.
 
 `lll issue watch` covers one issue. For every issue in a team, filter
 `lll watch --activity --json` the same way. A hosted receiver gets comments
