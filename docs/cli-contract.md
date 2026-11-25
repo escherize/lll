@@ -35,7 +35,7 @@ code, not on the error text.
 | 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`, `LLL_TEAM`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`); no team configured for a command that needs one (fix: `--team KEY` or `lll attach`) |
 | 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams; `issue watch --after` naming a comment that is not on the issue |
 | 4 | Refused or conflict | the claim is held by someone else; release or renew without the claim; closing or deleting a claimed issue without `--force`; creating a bot that exists; a read-only member writing; an `--if-unchanged-since` mismatch; a declined delete confirmation |
-| 5 | Nothing to do | `lll issue next` with an empty agenda |
+| 5 | Nothing to do | `lll issue next` with an empty agenda; `lll issue next --wait DURATION` when the wait ends with an empty agenda |
 | 6 | Not authenticated | no token, or an expired, revoked or corrupted token |
 
 `--help` and `-h` exit 0 and print to stdout.
@@ -103,6 +103,17 @@ usage output; they cannot provide this diagnostic format.
 
 Data goes to stdout: a key, a record, a list. Notices go to stderr. Capture
 stdout only: `key=$(lll issue next --claim)`, not `2>&1`.
+
+`lll issue next --wait DURATION` waits for an issue to offer instead of exiting
+5 at once. `DURATION` is a positive Go duration with a unit, such as `30s`,
+`10m` or `1h`; anything else exits 2. The command re-reads the board when an
+issue or claim in the team changes, and at least every 30 seconds. It exits 0
+with the key on stdout as soon as it can offer an issue, and exits 5 with an
+empty stdout when `DURATION` passes first. With `--claim`, a claim that another
+worker wins during the wait does not end the wait. `--label`, `--project` and
+`--exclude-label` select the same issues as they do without `--wait`. Every
+other failure, such as an unknown label or a refused token, exits at once with
+its own code. Without `--claim`, several waiters can print the same key.
 
 With `--json`, stdout is exactly one JSON value (`lll watch --json`: one per
 line). `lll issue next --claim --json` and `lll issue start --json` print no
