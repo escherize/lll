@@ -347,6 +347,13 @@ fn issue_next_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--wait",
+      value: true,
+      hint: "DURATION",
+      help: "with nothing to offer, wait up to DURATION (30s, 10m, 1h) for an\nissue to become ready instead of exiting 5 at once; exit 5 when the\nwait ends with nothing. Several workers waiting on one queue need\n--claim: without it each prints the same key",
+      ..,
+    },
+    flags.Flag {
       name: "--agent",
       value: true,
       hint: "NAME",
@@ -371,6 +378,10 @@ stderr: notices. Exit 5 when nothing can be offered: no ready issue, or
 every ready one assigned or claimed. With --claim, a ready issue you
 already hold (same agent label, or an unlabelled hold) is printed with
 exit 0 before exit 5, and stderr says 'Resuming KEY'.
+With --wait, the command re-reads the board when an issue or claim in the
+team changes, and at least every 30 seconds, until it can offer an issue
+or DURATION has passed. A claim another worker wins during the wait is
+not a failure: the wait continues. Exit 5 after DURATION with nothing.
 Capture stdout only: key=$(lll issue next --claim)"
 }
 
@@ -380,8 +391,13 @@ Capture stdout only: key=$(lll issue next --claim)"
 /// bargain `claim` makes: the command either hands out work or says there is
 /// none. With --claim the printed key is always secured first.
 fn issue_next(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
-  let ctx = input.ctx
-  let p = input.parsed
+  if input.parsed.given("--wait") { return issue_next_waiting(input.ctx, input.parsed) }
+  issue_next_once(input.ctx, input.parsed)
+}
+
+/// One pass of `issue next`: read the board, choose, claim under --claim.
+/// `issue next --wait` (LLL-820) repeats it; every other caller runs it once.
+fn issue_next_once(ctx: pb.Client, p: flags.Parsed) -> Result<output.Output, pb.CliError> {
   let agent = if p.given("--claim") { agent_label(ctx, p)? } else { "" }
   // Only --label and --project: state and assignee are fixed by "ready,
   // unclaimed", so next does not declare them (LLL-684).

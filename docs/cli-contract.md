@@ -33,9 +33,9 @@ code, not on the error text.
 | 0 | Success | |
 | 1 | Error | server failure (5xx), server unreachable, a rejected value; a server that lacks a capability the command needs (below) |
 | 2 | Usage: the command line, or a setting that stands in for a flag (`LLL_SORT`, `LLL_AGENT`, `LLL_TEAM`) | unknown noun, verb or flag; a missing or malformed argument (`'nope' is not an issue ID`); no team configured for a command that needs one (fix: `--team KEY` or `lll attach`) |
-| 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams |
+| 3 | Not found | no such issue, doc, team, label, project, member or webhook; an issue outside your teams; `issue watch --after` naming a comment that is not on the issue |
 | 4 | Refused or conflict | the claim is held by someone else; release or renew without the claim; closing or deleting a claimed issue without `--force`; creating a bot that exists; a read-only member writing; an `--if-unchanged-since` mismatch; a declined delete confirmation |
-| 5 | Nothing to do | `lll issue next` with an empty agenda |
+| 5 | Nothing to do | `lll issue next` with an empty agenda; `lll issue next --wait DURATION` when the wait ends with an empty agenda |
 | 6 | Not authenticated | no token, or an expired, revoked or corrupted token |
 
 `--help` and `-h` exit 0 and print to stdout.
@@ -103,6 +103,17 @@ usage output; they cannot provide this diagnostic format.
 
 Data goes to stdout: a key, a record, a list. Notices go to stderr. Capture
 stdout only: `key=$(lll issue next --claim)`, not `2>&1`.
+
+`lll issue next --wait DURATION` waits for an issue to offer instead of exiting
+5 at once. `DURATION` is a positive Go duration with a unit, such as `30s`,
+`10m` or `1h`; anything else exits 2. The command re-reads the board when an
+issue or claim in the team changes, and at least every 30 seconds. It exits 0
+with the key on stdout as soon as it can offer an issue, and exits 5 with an
+empty stdout when `DURATION` passes first. With `--claim`, a claim that another
+worker wins during the wait does not end the wait. `--label`, `--project` and
+`--exclude-label` select the same issues as they do without `--wait`. Every
+other failure, such as an unknown label or a refused token, exits at once with
+its own code. Without `--claim`, several waiters can print the same key.
 
 With `--json`, stdout is exactly one JSON value (`lll watch --json`: one per
 line). `lll issue next --claim --json` and `lll issue start --json` print no
@@ -411,6 +422,26 @@ Activity delivery is opt-in. Plain watch and webhook registrations without
 `--activity` keep issue-only delivery. Activity webhook creation checks that
 the server supports it (see Server capabilities) before sending any POST;
 an unsupported server is an error, never a silent issue-only registration.
+
+### Waiting for a comment
+
+`lll issue watch KEY --until TEXT` exits 0 at the first comment whose body
+contains TEXT. A comment already on the issue ends the wait at once: text mode
+prints `already there: #N by AUTHOR: LINE`, and `--json` prints the comment
+with `action` `snapshot`. Existing comments are checked oldest first. A comment
+created or edited during the wait ends it with `action` `create` or `update`.
+With `--timeout SECONDS`, a wait that sees no match exits 1.
+
+`--after COMMENT_ID` limits the match to comments after the named one, in the
+same oldest-first order. The named comment and every earlier one cannot end
+the wait, including by a later edit. COMMENT_ID is the `record.id` of a
+comment event from `issue watch --json` or the `id` from `comment list --json`.
+A loop passes the id of the match it just handled; a comment written between
+two runs is already there for the second. An id that is not a comment on that
+issue exits 3. `--after` without `--until` is a usage error (exit 2).
+
+This `--after` takes a comment id. `lll watch --after` takes an activity
+cursor; the two values are not interchangeable.
 
 ## Server capabilities
 

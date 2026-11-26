@@ -478,6 +478,13 @@ pub fn issue_watch_spec() -> Slice<flags.Flag> {
       ..,
     },
     flags.Flag {
+      name: "--after",
+      value: true,
+      hint: "comment-id",
+      help: "with --until: only comments after this one can match, so a\nloop passes the record.id of the --json match it just handled; the\nid must be a comment on this issue (exit 3 otherwise)",
+      ..,
+    },
+    flags.Flag {
       name: "--timeout",
       value: true,
       hint: "seconds",
