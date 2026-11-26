@@ -23,7 +23,7 @@ each; the last names what is missing before the recipe can be written.
 | Attach verification evidence to the issue | Comments, `lll skill get verify-gate` | Nothing |
 | Label an issue and get a pull request back | Labels, `lll issue next --claim`, webhooks, `lll watch --after CURSOR` | A worked run with a runner that starts agents |
 | Run a software factory overnight | The six-stage loop in `lll skill get software-factory`, outcome labels | A worked run on a fresh repo |
-| Wake a coordinator and resume after a crash | `lll watch --after CURSOR`, on main after 1.8.0 | Nothing |
+| Wake a coordinator and resume after a crash | `lll watch --after CURSOR`, since 1.9.0 | Nothing |
 | Put a person at the right point in agent review | Comments, `lll issue watch --until`, the `in-review` state | A worked example |
 | Measure how often agents finish without help | `outcome:clean`, `outcome:changed` and `outcome:blocked` labels | A shipped report |
 | Give a contractor read-only access to one team | Viewer role, since 1.8.0 | Nothing |
