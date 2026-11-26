@@ -52,9 +52,9 @@ Use **issue** for the record and **card** for its visible board representation.
 Use **run owner** for the coordinator of a test run, so it is distinct from a
 bot's human owner. Keep exact CLI spellings, API fields and UI labels when
 describing an interface. See [the permissions contract](permissions.md) for
-the authority model, including the retained legacy lifecycle powers of all-team
-read-write identities. Keep those powers distinct from Admin and the narrower
-authority to invite people.
+the authority model, including the retained legacy lifecycle powers of
+independent people with all-team read-write grants. Keep those powers distinct
+from Admin.
 
 ## Separate facts, history and proposals
 

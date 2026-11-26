@@ -78,7 +78,8 @@ func permissionSnapshot(app core.App, member *core.Record) (permissionMember, er
 	if out.WorkspaceRole == "" {
 		out.WorkspaceRole = "member"
 	}
-	out.LegacyManagement = eff.all && eff.rw
+	// Management is a person's: a bot with the same grant has none (LLL-799).
+	out.LegacyManagement = independentPerson(member) && eff.all && eff.rw
 	if own.all {
 		out.DefaultRole = "viewer"
 		if own.rw {
