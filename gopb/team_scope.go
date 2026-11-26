@@ -567,31 +567,32 @@ func refuseReadOnlyWrites(re *core.RequestEvent) error {
 	return re.ForbiddenError(readOnlyRefusal(re.Auth), nil)
 }
 
+// independentPerson reports a member that is not a bot and has no owner: the
+// only kind of member that may hold legacy management authority. It tests
+// "not a bot", as mayInvite does, because a member created through the
+// records API without a kind stores "" and is a person.
+func independentPerson(m *core.Record) bool {
+	return m != nil && m.GetString("kind") != botKind && m.GetString("owner") == ""
+}
+
 // managesTeams mirrors the teams create/update/delete rules: a workspace
-// Admin, or a legacy all-team read-write grant whose owner, if any, holds
-// the same. It only decides whether refuseTeamManagement can name the
+// Admin, or an independent person holding the legacy all-team read-write
+// grant. A bot never manages teams, whatever it and its owner hold
+// (LLL-799). It only decides whether refuseTeamManagement can name the
 // reason; the rules remain the enforcement.
-func managesTeams(app core.App, auth *core.Record) bool {
+func managesTeams(auth *core.Record) bool {
 	if isWorkspaceAdmin(auth) {
 		return true
 	}
-	legacy := func(m *core.Record) bool {
-		return m.GetString("scope") == "all" && m.GetString("mode") == "rw"
-	}
-	if !legacy(auth) {
-		return false
-	}
-	owner := auth.GetString("owner")
-	if owner == "" {
-		return true
-	}
-	o, err := app.FindRecordById(auth.Collection(), owner)
-	return err == nil && legacy(o)
+	return independentPerson(auth) && auth.GetString("scope") == "all" && auth.GetString("mode") == "rw"
 }
 
 func teamManagementRefusal(auth *core.Record) string {
-	return "team management refused: creating, renaming, archiving or deleting a team needs a workspace Admin or a legacy all-team read-write grant, and " +
-		auth.GetString("name") + " has neither. 'lll whoami' shows your access; ask a workspace Admin"
+	const needs = "team management refused: creating, renaming, archiving or deleting a team needs a workspace Admin or a person holding the legacy all-team read-write grant, and "
+	if !independentPerson(auth) {
+		return needs + auth.GetString("name") + " is a bot or an owned identity, which cannot manage teams. Ask a workspace Admin"
+	}
+	return needs + auth.GetString("name") + " has neither. 'lll whoami' shows your access; ask a workspace Admin"
 }
 
 // refuseTeamManagement answers a member's team write that the teams rules
@@ -613,7 +614,7 @@ func refuseTeamManagement(re *core.RequestEvent) error {
 	if c, err := re.App.FindCachedCollectionByNameOrId(name); err == nil {
 		name = c.Name
 	}
-	if name != "teams" || managesTeams(re.App, re.Auth) {
+	if name != "teams" || managesTeams(re.Auth) {
 		return re.Next()
 	}
 	return re.ForbiddenError(teamManagementRefusal(re.Auth), nil)

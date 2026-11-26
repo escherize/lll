@@ -109,7 +109,14 @@ with tempfile.TemporaryDirectory(prefix='lll-team-lifecycle-') as directory:
         scoped_token = token(scoped)
         scoped_bot_token = bot_for(scoped_token, 'bot-scoped')
 
-        allowed = {'legacy all-team person': person_token, 'workspace Admin': admin_token}
+        # A member created through the records API without a kind stores ""
+        # and is a person: the e2e suite's own identity is one.
+        kindless = expect(200, members, {'name': 'kindless', 'email': 'kindless@local.invalid', 'scope': 'all', 'mode': 'rw',
+                                         'password': 'isolated-member-password',
+                                         'passwordConfirm': 'isolated-member-password'}, su)
+        assert kindless['kind'] != 'bot' and not kindless['owner'], kindless
+        allowed = {'legacy all-team person': person_token, 'workspace Admin': admin_token,
+                   'legacy all-team person stored without a kind': token(kindless)}
         refused = {'bot under a legacy all-team person': bot_token, 'worker created by that bot': worker_token,
                    'unowned all-team bot': unowned_token, 'team-scoped person': scoped_token,
                    'bot under a team-scoped person': scoped_bot_token}
@@ -154,10 +161,15 @@ with tempfile.TemporaryDirectory(prefix='lll-team-lifecycle-') as directory:
 
         # The rules carry the bound themselves; the 403 above only names it.
         rules = expect(200, '/api/collections/teams', token=su)
-        person_only = '@request.auth.kind != "bot" && @request.auth.owner = ""'
+        person_only = '(@request.auth.kind != "bot" && @request.auth.owner = "")'
         for rule in ('createRule', 'updateRule', 'deleteRule'):
             assert person_only in rules[rule], (rule, rules[rule])
-        print('team lifecycle authority: 5 refused identities x 5 actions (CLI and API), 2 allowed identities x 5 actions')
+        # The permissions API reports management authority for people only.
+        for name, managing in [('fleet-worker', True), ('bot-a', False), ('bot-w', False), ('bot-unowned', False)]:
+            row = next(m for m in expect(200, members + '?perPage=200', token=su)['items'] if m['name'] == name)
+            snapshot = expect(200, '/api/lll/permissions/' + row['id'], token=admin_token)
+            assert snapshot['legacy_management'] is managing, (name, snapshot)
+        print('team lifecycle authority: 5 refused identities x 5 actions (CLI and API), 3 allowed identities x 5 actions')
     finally:
         child.terminate()
         try:

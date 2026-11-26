@@ -32,6 +32,15 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   dropped. A write that changes nothing, such as adding a label the issue
   already has, no longer prints an event. `watch --ready` is unchanged and stays live-only. A server without
   the activity log is refused with a message to upgrade (LLL-816).
+- Team lifecycle is limited to people. Only a workspace Admin or an
+  independent person with the legacy all-team read-write grant can create,
+  rename, archive, unarchive or delete a team, or change its accent or emoji.
+  In 1.8.0 a bot under an all-team owner, a worker that bot created and an
+  unowned all-team bot could too. After upgrading, existing all-team bot
+  tokens and their workers lose team lifecycle and are refused with the
+  reason (exit 4); their access to team content is unchanged. Move automation
+  that manages teams to a person's credential first. The permissions API
+  reports `legacy_management` as false for bots (LLL-799).
 
 ### Fixed
 

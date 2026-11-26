@@ -43,6 +43,8 @@ SUITES=(
   # member invite --team: one team over the API and the board
   "test_team_scope.py"
   "test_team_roles.py --browser"
+  # team lifecycle belongs to people: bots and their workers are refused (LLL-799)
+  "test_team_lifecycle_authority.py"
   # who made or owns a record is the server's word, not a member's (LLL-681)
   "test_identity_fields.py"
   "test_board_head.py"

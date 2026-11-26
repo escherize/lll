@@ -55,8 +55,10 @@ func withWritableRecordRequest(e *core.RecordRequestEvent, write func(writableRe
 			}
 		case "teams":
 			acc := effectiveAccess(tx, actor)
-			if !actor.IsSuperuser() && !isWorkspaceAdmin(actor) && !(acc.all && acc.rw) {
-				return router.NewForbiddenError("workspace Admin or legacy all-team management authority is required", nil)
+			// The legacy grant manages teams only for an independent
+			// person (LLL-799); a bot's own or inherited grant does not.
+			if !actor.IsSuperuser() && !isWorkspaceAdmin(actor) && !(independentPerson(actor) && acc.all && acc.rw) {
+				return router.NewForbiddenError("workspace Admin or a person's legacy all-team management authority is required", nil)
 			}
 		default:
 			teams := []string{recordTeam(tx, e.Record)}

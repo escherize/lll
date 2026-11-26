@@ -3,8 +3,7 @@
 Creating invitations requires a workspace Admin, an infrastructure operator,
 or an independent person with a retained legacy all-team read-write grant.
 Editor access to a team alone does not authorize invitations. Bots cannot
-invite people, even when a retained legacy grant lets them manage team
-lifecycle. See
+invite people or manage team lifecycle, whatever grant they hold. See
 [permissions for people and agent workers](permissions.md) for the role boundaries.
 
 Create a separate link for each person and print one message you can paste

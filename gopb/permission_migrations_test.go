@@ -149,8 +149,9 @@ func TestPermissionMigrationsRollbackAndRoundTrip(t *testing.T) {
 		collection("permission_events")
 	}
 	// The permission pair (team_editor_grants, workspace_authority) plus every
-	// later migration, which must revert before the pair can: owner_sees_own_bots.
-	const permissionTail = 3
+	// later migration, which must revert before the pair can: owner_sees_own_bots
+	// and team_lifecycle_people.
+	const permissionTail = 4
 	blocked := func(message string) {
 		t.Helper()
 		if _, err := runner.Down(permissionTail); err == nil || !strings.Contains(err.Error(), message) {
