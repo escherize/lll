@@ -171,6 +171,13 @@ own. The command prints a prompt containing the server, identity and token
 for your agent. Treat that prompt as a credential. Creating a bot with an
 existing name is refused; `lll bot rotate NAME` replaces a token.
 
+`lll bot create` and `lll bot rotate` use your configured token. An
+`LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` pair in the environment is read only
+when no token is configured. Beside a token the pair is ignored, and the
+command prints a notice on stderr that says so; `--env` and `--json` print
+no notices. To act as the administrator
+while a token is configured, pass `--admin-email` and `--admin-password`.
+
 An agent can read the working conventions with `lll skill get lll`. They
 cover claiming an issue before work, leaving findings and decisions, and
 closing with evidence. The [CLI contract](cli-contract.md) describes the

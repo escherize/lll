@@ -1,3 +1,4 @@
+import "config"
 import "pb"
 
 import "go:fmt"
@@ -287,4 +288,30 @@ fn member_refusals_point_an_owner_at_the_bot_verbs() {
   assert hint.contains("'lll bot disable bot-helper'")
   assert hint.contains("'lll bot remove bot-helper'")
   assert owned_bot_hint("alice") == ""
+}
+
+// ------------------------------------------------- ignored admin env (LLL-554)
+
+fn some_admin() -> config.AdminCreds {
+  config.AdminCreds { email: "a@x", password: "pw" }
+}
+
+#[test]
+fn admin_env_is_ignored_only_beside_a_token() {
+  assert ignores_admin_env(AdminLogin.Env(some_admin()), "member-token")
+  assert !ignores_admin_env(AdminLogin.Env(some_admin()), "")
+}
+
+#[test]
+fn explicit_admin_flags_and_no_admin_are_never_ignored() {
+  assert !ignores_admin_env(AdminLogin.Explicit(some_admin()), "member-token")
+  assert !ignores_admin_env(AdminLogin.Absent, "member-token")
+}
+
+#[test]
+fn the_ignored_notice_names_variables_and_flags_not_values() {
+  let n = admin_env_ignored_notice()
+  assert n.contains("LLL_ADMIN_EMAIL")
+  assert n.contains("--admin-email")
+  assert !n.contains("a@x")
 }

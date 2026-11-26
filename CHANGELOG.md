@@ -22,6 +22,13 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ### Changed
 
+- `lll bot create` and `lll bot rotate` print a stderr notice when
+  `LLL_ADMIN_EMAIL`/`LLL_ADMIN_PASSWORD` are set beside a configured token.
+  The token has outranked that pair since 0.9.0; the notice names the ignored
+  variables and no values, and `--env` and `--json` stay silent. Operators who
+  want the administrator while a token is configured pass `--admin-email` and
+  `--admin-password` (LLL-554).
+
 - `lll watch` reads the server's activity log instead of relaying live record
   events. `--json` events keep `topic`, `action`, `record` and `key` and gain
   `cursor`, `seq`, `created` and `changes`; issue events now carry the author
