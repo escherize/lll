@@ -137,7 +137,12 @@ for line in exports.stdout.splitlines():
     parsed[key] = value
 assert set(parsed) == {'LLL_URL', 'LLL_TOKEN'}
 assert call('/api/collections/members/auth-refresh', {}, parsed['LLL_TOKEN'])[0] == 200
-prompt = cli('bot', 'create', 'bot-json-prompt-control', '--team', 'JSONBOT')
+# The prompt format's only notice is the ignored admin environment (LLL-554),
+# so the control runs without that pair.
+no_admin = {k: v for k, v in env.items() if k not in ('LLL_ADMIN_EMAIL', 'LLL_ADMIN_PASSWORD')}
+prompt = subprocess.run([binary, 'bot', 'create', 'bot-json-prompt-control', '--team', 'JSONBOT'],
+                        env=no_admin, capture_output=True, text=True, timeout=30)
+assert prompt.returncode == 0
 assert 'paste this into the agent:' in prompt.stdout and 'lll attach --key JSONBOT' in prompt.stdout
 assert not prompt.stderr
 

@@ -426,7 +426,9 @@ fn bot_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   require_bot_prefix("lll bot create", name)?
   let format = choose_bot_format(p)?
   let ctx = point_at_url(ctx, p.one("--url"))?
-  let (tok, caller) = bot_caller(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
+  let login = given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?
+  let heads_up = admin_env_heads_up(ctx, login)?
+  let (tok, caller) = bot_caller(ctx, login)?
   let duration = parse_token_duration(p.one("--duration"))?
   // Resolved before anything is created or minted, so a refusal leaves the
   // bot and its current token as they were.
@@ -474,7 +476,7 @@ fn bot_create(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
     } else { e.after(made) }
   })?
   let lost = f"bot {created.name} was created, but its one-time token was not written anywhere; '{bot_rotation_hint(name, format)}' mints a new one"
-  Ok(made.then(bot_credential(name, minted, url, team, duration, format)?).if_lost(lost))
+  Ok(heads_up.then(made).then(bot_credential(name, minted, url, team, duration, format)?).if_lost(lost))
 }
 
 /// `lll bot rotate bot-NAME [--duration s]`: re-mint the bot's token and strand
@@ -492,14 +494,16 @@ fn bot_rotate(input: flags.CommandInput) -> Result<output.Output, pb.CliError> {
   require_bot_prefix("lll bot rotate", name)?
   let format = choose_bot_format(p)?
   let ctx = point_at_url(ctx, p.one("--url"))?
-  let (tok, _) = bot_caller(ctx, given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?)?
+  let login = given_admin_login(ctx.settings, p, bufio.NewReader(os.Stdin))?
+  let heads_up = admin_env_heads_up(ctx, login)?
+  let (tok, _) = bot_caller(ctx, login)?
   let duration = parse_token_duration(p.one("--duration"))?
   let team = prompt_team(ctx, tok, format, p.one("--team"))?
   let url = ctx.settings.config().map_err(pb.failed)?.url
   tokens.check_prompt_values(url, team, name)?
   let minted = tokens.bot_mint(ctx, tok, name, duration)?
   let lost = f"the previous token for {name} has stopped working, and the new one was not written anywhere; '{bot_rotation_hint(name, format)}' mints another"
-  Ok(bot_credential(name, minted, url, team, duration, format)?.if_lost(lost))
+  Ok(heads_up.then(bot_credential(name, minted, url, team, duration, format)?).if_lost(lost))
 }
 
 /// Token flags plus the handoff context and output format.
@@ -612,7 +616,7 @@ fn bot_page(rotating: bool) -> string {
   let description = if rotating {
     "Rotate a bot's token; the previous token stops working. Requires the bot's owner or administrator credentials."
   } else {
-    "Create a bot member and print its token once. An existing bot is refused; 'lll bot rotate' re-mints its token. Uses your configured token; administrator credentials only through --admin-email and --admin-password. 'lll bot bot-NAME' is the same command."
+    "Create a bot member and print its token once. An existing bot is refused; 'lll bot rotate' re-mints its token. Uses your configured token; administrator credentials only through --admin-email and --admin-password. LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are read only when no token is configured; beside a token they are ignored and a notice on stderr says so (--env and --json print no notices). 'lll bot bot-NAME' is the same command."
   }
   let see_rotate = if rotating {
     "
@@ -694,6 +698,35 @@ fn bot_caller(ctx: pb.Client, login: AdminLogin) -> Result<(string, Option<model
   }
   let me = token_member(ctx, cfg.token)?
   Ok((cfg.token, me))
+}
+
+/// Whether LLL_ADMIN_* is set and goes unused because a token is configured
+/// (LLL-554). Explicit --admin-* flags are never ignored.
+pub fn ignores_admin_env(login: AdminLogin, token: string) -> bool {
+  match login {
+    AdminLogin.Env(_) => token != "",
+    AdminLogin.Explicit(_) => false,
+    AdminLogin.Absent => false,
+  }
+}
+
+/// The stderr notice for an ignored LLL_ADMIN_* pair. It names the variables
+/// and the flags, never a value.
+pub fn admin_env_ignored_notice() -> string {
+  "LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are set but were not used: your configured token outranks them
+to act as the administrator instead, pass --admin-email and --admin-password"
+}
+
+/// That notice when this command ignores the environment's admin pair, else
+/// nothing. The renderer drops notices under --env and --json, which the CLI
+/// contract keeps to their data on both streams.
+fn admin_env_heads_up(ctx: pb.Client, login: AdminLogin) -> Result<output.Output, pb.CliError> {
+  let cfg = ctx.settings.config().map_err(pb.failed)?
+  if ignores_admin_env(login, cfg.token) {
+    Ok(output.notice(admin_env_ignored_notice()))
+  } else {
+    Ok(output.none())
+  }
 }
 
 /// The member a token names, or None when it names nobody: a superuser
