@@ -3210,7 +3210,41 @@ assert_contains "$out" "reserved" "the server refuses a person member with the b
 # token, which used to make this bot ownerless.
 bot_out=$(env LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 LLL_TOKEN="$BRYAN_TOK" \
   HOME="$E2E_HOME" LLL_URL=$URL \
-  "$LIN" bot create bot-owned --env --duration 3600) || fail "member-token lll bot exited nonzero: $bot_out"
+  "$LIN" bot create bot-owned --env --duration 3600 2> "$DATA_DIR/bot-owned.err") || fail "member-token lll bot exited nonzero: $bot_out"
+# --env prints the two export lines and nothing else on either stream (the
+# CLI contract), so the LLL-554 notice stays out of it.
+[ ! -s "$DATA_DIR/bot-owned.err" ] || fail "bot create --env wrote to stderr: $(cat "$DATA_DIR/bot-owned.err")"
+[ "$(printf '%s\n' "$bot_out" | grep -c '^export ')" = 2 ] || fail "bot create --env stdout is not the two export lines: $bot_out"
+# Fleet case 09 (LLL-554): an admin pair inherited from another server is
+# wrong here. The member token still creates an owned bot, nothing tries the
+# superuser login, and the prompt format names the ignored pair on stderr
+# without its values.
+out=$(env LLL_ADMIN_EMAIL=stray@elsewhere.invalid LLL_ADMIN_PASSWORD=not-this-server LLL_TOKEN="$BRYAN_TOK" \
+  HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" bot create bot-stray-env --team ENG --duration 3600 2> "$DATA_DIR/bot-stray.err") \
+  || fail "bot create failed beside a stray admin environment: $(cat "$DATA_DIR/bot-stray.err")"
+ignored=$(cat "$DATA_DIR/bot-stray.err")
+assert_not_contains "$ignored" "authenticating as the superuser" "a stray admin environment is never sent"
+assert_contains "$ignored" "LLL_ADMIN_EMAIL/LLL_ADMIN_PASSWORD are set but were not used" "bot create says the admin environment was ignored"
+assert_contains "$ignored" "--admin-email and --admin-password" "and names the flags that use it deliberately"
+assert_not_contains "$ignored" "not-this-server" "the notice prints no admin password"
+assert_not_contains "$ignored" "stray@elsewhere.invalid" "the notice prints no admin email"
+assert_not_contains "$out" "were not used" "the notice stays off stdout"
+assert_contains "$out" "owned by bryan" "the stray admin environment leaves the member as owner"
+# Explicit flags are the one way to act as the administrator over a
+# configured member token: the bot is ownerless and no notice prints.
+out=$(env LLL_ADMIN_EMAIL=stray@elsewhere.invalid LLL_ADMIN_PASSWORD=not-this-server LLL_TOKEN="$BRYAN_TOK" \
+  HOME="$E2E_HOME" LLL_URL=$URL \
+  "$LIN" bot create bot-flag-admin --team ENG --admin-email admin@local.dev --admin-password admin-local-123 --duration 3600 2>&1) \
+  || fail "bot create with explicit admin flags failed beside a member token: $out"
+assert_contains "$out" "no owner (administrator credentials created it)" "explicit admin flags outrank the member token"
+assert_not_contains "$out" "were not used" "explicit admin flags print no ignored-environment notice"
+# The admin pair alone, with no token configured, still acts as the
+# administrator, without the notice.
+out=$(env -u LLL_TOKEN HOME="$DATA_DIR/no-token-home" LLL_URL=$URL LLL_ADMIN_EMAIL=admin@local.dev LLL_ADMIN_PASSWORD=admin-local-123 \
+  "$LIN" bot create bot-env-admin --team ENG --duration 3600 2>&1) || fail "bot create with only the admin environment failed: $out"
+assert_contains "$out" "no owner (administrator credentials created it)" "the admin environment acts when no token is configured"
+assert_not_contains "$out" "were not used" "an admin environment that was used prints no notice"
 
 # A bot member cannot authenticate interactively, whatever password is typed.
 out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
@@ -3230,6 +3264,10 @@ OWNED=$(curl -s -G -H "Authorization: Bearer $(printf '%s' "$SU_AUTH" | jq -r '.
   --data-urlencode "filter=name='bot-owned'")
 assert_contains "$OWNED" '"kind":"bot"' "the created record is bot kind"
 assert_contains "$OWNED" "\"owner\":\"$BRYAN_ID\"" "the owner relation points at the creating member"
+STRAY=$(curl -s -G -H "Authorization: Bearer $(printf '%s' "$SU_AUTH" | jq -r '.token')" \
+  "$URL/api/collections/members/records" \
+  --data-urlencode "filter=name='bot-stray-env'")
+assert_contains "$STRAY" "\"owner\":\"$BRYAN_ID\"" "a stray admin environment leaves the bot owned by the member"
 
 # Rotation re-mints and strands the old token at its next request.
 bot_out=$(env -u LLL_TOKEN HOME="$E2E_HOME" LLL_URL=$URL \
