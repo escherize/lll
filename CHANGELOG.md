@@ -6,6 +6,8 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-25
+
 ### Added
 
 - `lll issue next --wait DURATION` waits for an issue to become ready instead
@@ -71,6 +73,19 @@ minors. Issue keys are on the project's own board (`lll issue view KEY`).
   and a form to sign in as a member, which replaces the browser's current
   login. An unknown member answers 404 with the member picker. A stale change
   says so in plain words and keeps the edited team open (LLL-811).
+- A member without team-management authority who tries to create, rename,
+  archive or delete a team is refused with the cause and who can do it
+  (exit 4). Before, the CLI printed a bare record error and exited 1 or 3
+  (LLL-800).
+- An owner whose access is limited to some teams can see a bot they own after
+  disabling it. Before, the disabled bot left `lll member list` and
+  `lll member access` answered that no such member existed (LLL-798).
+- `lll bot --help` and the top-level help list `bot disable` and
+  `bot remove`. The administrator-only member commands name those two when
+  the target is a bot (LLL-797).
+- `lll up --bind ADDR` checks that its ports are free on ADDR. Before, it
+  checked loopback, so a port held on another interface failed the start with
+  "address already in use" (LLL-826).
 
 ## [1.8.0] - 2026-11-14
 
