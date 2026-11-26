@@ -20,9 +20,9 @@ if bind == 'lan':
         bind = route.getsockname()[0]
     assert not bind.startswith('127.'), 'LAN fixture needs a non-loopback interface'
 http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-def port():
+def port(host='127.0.0.1'):
     with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
+        s.bind((host, 0))
         return s.getsockname()[1]
 
 with tempfile.TemporaryDirectory(prefix='lll-507-') as directory:
@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='lll-507-') as directory:
                LLL_BIND=bind, USER='prompt-owner', LLL_ADMIN_EMAIL='prompt@example.invalid',
                LLL_ADMIN_PASSWORD='local-prompt-password', LLL_BOARD_TOKEN='local-prompt-board')
     log = root/'up.log'
-    web_port = port()
+    web_port = port(bind)  # the address the board binds, not loopback (LLL-826)
     with log.open('w') as output:
         child = subprocess.Popen([binary,'up','--no-open','--pb-dir',str(root/'data'),'--port',str(web_port),'--bind',bind],
                                  cwd=root,env=env,stdout=output,stderr=subprocess.STDOUT)
