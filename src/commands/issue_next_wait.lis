@@ -1,0 +1,127 @@
+import "go:fmt"
+import "go:os"
+import "go:time"
+
+import "flags"
+import "output"
+import "pb"
+import "query"
+import "realtime"
+
+/// How long `issue next --wait` goes between reads of the board when no
+/// event arrives. Events cover issue and claim writes in the team. This
+/// covers what sends none: a blocker in another team finishing, a team
+/// being archived or restored, and a stream that reconnected.
+const NEXT_WAIT_RECHECK_SECONDS = 30
+
+/// `--wait`'s value: a positive Go duration with a unit.
+fn next_wait_duration(given: string) -> Result<time.Duration, pb.CliError> {
+  let Ok(wait) = time.ParseDuration(given) else {
+    return Err(flags.usage_error(
+      f"--wait takes a duration with a unit, e.g. 30s, 10m or 1h; got '{given}'",
+    ))
+  }
+  if wait <= 0 {
+    return Err(flags.usage_error(
+      f"--wait must be longer than zero; got '{given}'",
+    ))
+  }
+  Ok(wait)
+}
+
+/// True for the two outcomes a wait outlasts: nothing to offer, and a claim
+/// another worker won between this pass's read and its acquire.
+fn next_wait_retries(e: pb.CliError) -> bool {
+  e.kind == pb.ErrorKind.NothingToDo || e.has_code(pb.ServerCode.ClaimHeld)
+}
+
+/// Says the command is waiting, once, before it blocks: a notice returned in
+/// the Output would only appear after the wait it explains.
+fn next_wait_notice(given: string) {
+  fmt.Fprintln(
+    os.Stderr,
+    f"Nothing to offer yet; waiting up to {given} for a ready issue",
+  )
+}
+
+/// `lll issue next --wait DURATION` (LLL-820): issue_next_once, repeated
+/// until it offers an issue or DURATION passes.
+///
+/// The subscription is opened BEFORE the first pass, so a change that lands
+/// between a pass's read and the wait for the next event is not lost. An
+/// event only wakes the loop: the pass re-reads the board, so readiness,
+/// ranking, filters and the claim race are decided by the same code as a
+/// plain `issue next`. Events are coalesced into one pending wake, so a
+/// burst of writes costs one pass, not one each.
+fn issue_next_waiting(
+  ctx: pb.Client,
+  p: flags.Parsed,
+) -> Result<output.Output, pb.CliError> {
+  let given = p.one("--wait")
+  let wait = next_wait_duration(given)?
+  let deadline = time.Now().Add(wait)
+  // The team's issues and claims, not the --label/--project subset: a
+  // blocker outside the filter finishing makes a filtered issue ready.
+  let scope = configured_scope(ctx)?
+  let team = resolve_issue_filter(ctx, scope, query.Filters { .. }.parse()?)?
+  let events = realtime.subscribe_resyncing(
+    ctx,
+    [
+      realtime.topic_with_options("issues", query.filter(team), "")?,
+      realtime.topic_with_options("claims", query.filter_at(team, "issue."), "")?,
+    ],
+    realtime.DeadToken.Exit,
+  )?
+  let wake = Channel.buffered<bool>(1)
+  task {
+    loop {
+      let Some(_) = events.receive() else {
+        break
+      }
+      select {
+        wake.send(true) => (),
+        _ => continue,
+      }
+    }
+  }
+  let mut waiting_said = false
+  loop {
+    let idle = match issue_next_once(ctx, p) {
+      Ok(out) => return Ok(out),
+      Err(e) => {
+        if !next_wait_retries(e) { return Err(e) }
+        e
+      },
+    }
+    let remaining = time.Until(deadline)
+    if remaining <= 0 {
+      let why = if idle.kind == pb.ErrorKind.NothingToDo {
+        idle.message
+      } else {
+        "no unclaimed ready issues: another worker claimed the last one offered"
+      }
+      return Err(pb.fail(pb.ErrorKind.NothingToDo, f"{why} (waited {given})"))
+    }
+    // --json prints no notice at all (docs/cli-contract.md, Output streams).
+    if !waiting_said && !p.given("--json") { next_wait_notice(given) }
+    waiting_said = true
+    let recheck = time.Duration(NEXT_WAIT_RECHECK_SECONDS as int64) *
+    time.Second
+    let nap = if remaining < recheck { remaining } else { recheck }
+    let timer = Channel.buffered<bool>(1)
+    task {
+      time.Sleep(nap)
+      let _ = timer.send(true)
+    }
+    select {
+      match wake.receive() {
+        Some(_) => (),
+        None => (),
+      },
+      match timer.receive() {
+        Some(_) => (),
+        None => (),
+      },
+    }
+  }
+}

@@ -155,7 +155,7 @@ fn up_run(input: flags.CommandInput, named: Option<NamedBoard>) -> Result<output
   } else if named.is_some() {
     // LLL-722: a named board owns its data directory, so it starts its own
     // API rather than adopting whatever answers at the configured url.
-    f"http://127.0.0.1:{free_port(port_of(cfg.url, 8090))}"
+    f"http://127.0.0.1:{free_port("127.0.0.1", port_of(cfg.url, 8090))}"
   } else {
     cfg.url
   }
@@ -227,7 +227,7 @@ check what is configured with 'lll config list'"),
   let mut admin_ok = false
 
   if starting {
-    let db_port = free_port(port_of(db_url, 8090))
+    let db_port = free_port(ctx.settings.bind(), port_of(db_url, 8090))
     db_url = f"http://{ctx.settings.bind()}:{db_port}"
 
     task {
@@ -391,7 +391,7 @@ password in its own data directory's .lll-admin.json."),
     let token_in_file = token_from_file || ctx.settings.withheld().is_some()
     seed_demo(ctx, team, member.name, db_url, token_in_file)?
   }
-  let chosen = free_port(web_port)
+  let chosen = free_port(ctx.settings.bind(), web_port)
   if chosen != web_port {
     fmt.Println(f"port {web_port} taken; board moving to {chosen}")
   }

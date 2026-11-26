@@ -76,6 +76,22 @@ fn until_matches_existing_created_and_edited_comments_but_not_deletions() {
 }
 
 #[test]
+fn after_rules_out_the_named_comment_and_every_earlier_one() {
+  let ids = ["c1", "c2", "c3"]
+  assert settled_before(ids, "").map(|s| s.length()) == Some(0)
+  let settled = settled_before(ids, "c2").unwrap_or([])
+  assert settled.length() == 2
+  assert settled.contains("c1") && settled.contains("c2") && !settled.contains("c3")
+  assert settled_before(ids, "c3").map(|s| s.length()) == Some(3)
+}
+
+#[test]
+fn after_naming_no_comment_on_the_issue_is_none() {
+  assert settled_before(["c1", "c2"], "elsewhere").is_none()
+  assert settled_before([], "c1").is_none()
+}
+
+#[test]
 fn issue_event_names_are_outside_the_unchanged_record() {
   let issue = models.Issue {
     number: 7, priority_wire: 2, creator: "hidden",

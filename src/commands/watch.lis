@@ -211,11 +211,12 @@ with action 'ready' and the full issue record.
 /// and its comments. Runs until interrupted or the issue is deleted.
 pub fn issue_watch(input: flags.CommandInput) -> Result<(), pb.CliError> {
   let ctx = input.ctx
-  let usage = "lll issue watch [KEY-123] [--until text] [--timeout seconds] [--json]"
+  let usage = "lll issue watch [KEY-123] [--until text] [--after comment-id] [--timeout seconds] [--json]"
   let p = input.parsed
   let id = p.first()
   let json_mode = p.given("--json")
   let until = p.one("--until")
+  let after = p.one("--after")
   let mut timeout = 0
   if p.given("--timeout") {
     let Ok(t) = strconv.Atoi(p.one("--timeout")) else {
@@ -229,14 +230,18 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), pb.CliError> {
   if timeout > 0 && until == "" {
     return Err(flags.usage_error("--timeout only means something with --until"))
   }
-  if timeout == 0 { return run_issue_watch(ctx, id, json_mode, until, usage) }
+  if p.given("--after") && after == "" { return Err(flags.usage_error("--after requires a comment id")) }
+  if after != "" && until == "" {
+    return Err(flags.usage_error("--after only means something with --until"))
+  }
+  if timeout == 0 { return run_issue_watch(ctx, id, json_mode, until, after, usage) }
 
   // The CLI owns this worker's lifetime. A deadline covers reads and the
   // subscription handshake too, not just the final receive loop. Returning
   // ends the one-command process, closing its stream and pending requests.
   let completed = Channel.new<Result<(), pb.CliError>>()
   let deadline = Channel.new<bool>()
-  task { let _ = completed.send(run_issue_watch(ctx, id, json_mode, until, usage)) }
+  task { let _ = completed.send(run_issue_watch(ctx, id, json_mode, until, after, usage)) }
   task {
     time.Sleep(time.Duration(timeout as int64) * time.Second)
     let _ = deadline.send(true)
@@ -256,7 +261,14 @@ pub fn issue_watch(input: flags.CommandInput) -> Result<(), pb.CliError> {
   outcome
 }
 
-fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, usage: string) -> Result<(), pb.CliError> {
+fn run_issue_watch(
+  ctx: pb.Client,
+  id: string,
+  json_mode: bool,
+  until: string,
+  after: string,
+  usage: string,
+) -> Result<(), pb.CliError> {
   let resolved = resolve_id(ctx, id, usage)?
   let issue = records.fetch_issue(ctx, resolved)?
   let key = f"{issue.expand.team.key}-{issue.number}"
@@ -278,11 +290,20 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
   let ch = realtime.subscribe(ctx, [issue_topic, comments_topic], realtime.DeadToken.Exit)?
   // Subscribe before reading the initial snapshot: comments created during
   // setup are either in this snapshot or queued on the accepted stream.
+  // With --after, the named comment and every earlier one are settled: they
+  // cannot end the wait, here or as a live edit, so a caller that passes the
+  // id it just handled gets the next request instead of the same one (LLL-796).
+  let mut settled: Slice<string> = []
   if until != "" {
     let existing = records.fetch_comments(ctx, issue.id)?
+    let Some(ruled_out) = settled_before(existing.map(|c| c.id), after) else {
+      return Err(pb.fail(pb.ErrorKind.NotFound, f"no comment {after} on {key}"))
+    }
+    settled = ruled_out
     let mut n = 0
     for c in existing {
       n += 1
+      if settled.contains(c.id) { continue }
       if comment_matches_until(until, "snapshot", c.body) {
         if json_mode {
           let data = match json.Marshal(realtime.CommentEvent { action: "snapshot", record: c }) {
@@ -313,7 +334,7 @@ fn run_issue_watch(ctx: pb.Client, id: string, json_mode: bool, until: string, u
     let realtime.Event.Record(ev) = arrived else { continue }
     let stamp = time.Now().Format("15:04:05")
     if let realtime.Change.Comment(comment) = ev.change {
-      let matched = comment_matches_until(until, ev.action.wire(), comment.body)
+      let matched = !settled.contains(comment.id) && comment_matches_until(until, ev.action.wire(), comment.body)
       if json_mode {
         fmt.Println(ndjson_line(ev))
       } else if ev.action == realtime.Action.Create || matched {
@@ -441,6 +462,20 @@ fn first_line(body: string) -> string {
 /// One completion policy for initial snapshots, text streams and JSON streams.
 fn comment_matches_until(text: string, action: string, body: string) -> bool {
   text != "" && ["snapshot", "create", "update"].contains(action) && strings.Contains(body, text)
+}
+
+/// The comment ids `--after` rules out, given the issue's comment ids in
+/// snapshot order: the named comment and every one before it. Empty without
+/// `--after`. None when the id is not among this issue's comments, which
+/// covers a mistyped id, a deleted comment and a comment on another issue.
+fn settled_before(ids: Slice<string>, after: string) -> Option<Slice<string>> {
+  if after == "" { return Some([]) }
+  let mut settled: Slice<string> = []
+  for id in ids {
+    settled = settled.append(id)
+    if id == after { return Some(settled) }
+  }
+  None
 }
 
 /// `lll watch --ready` (LLL-395): stream the ready agenda. The readiness

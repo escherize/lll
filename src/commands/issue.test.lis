@@ -1,4 +1,6 @@
 import "go:encoding/json"
+import "pb"
+import "go:time"
 import "flags"
 import "query"
 import "models"
@@ -695,6 +697,32 @@ fn issue_next_help_states_the_stream_contract() {
   let assert Some(ready) = issue_next_spec().find(|f| f.name == "--ready")
   assert ready.hidden
   assert !issue_next_page().contains("--ready")
+}
+
+/// `issue next --wait` takes a positive duration with a unit, and waits out
+/// exactly two failures: an empty agenda and a lost claim race (LLL-820).
+#[test]
+fn issue_next_wait_takes_a_duration_and_outlasts_idle_and_lost_races() {
+  assert next_wait_duration("30s") == Ok(30 * time.Second)
+  assert next_wait_duration("10m") == Ok(10 * time.Minute)
+  assert next_wait_duration("1h30m") == Ok(90 * time.Minute)
+  for bad in ["30", "", "0s", "-5s", "soon"] {
+    let Err(e) = next_wait_duration(bad) else {
+      assert false
+      continue
+    }
+    assert e.kind == pb.ErrorKind.Usage
+    assert e.message.contains("--wait")
+  }
+  assert next_wait_retries(pb.fail(pb.ErrorKind.NothingToDo, "empty"))
+  assert next_wait_retries(pb.CliError { kind: pb.ErrorKind.Refused, status: 409, code: Some(pb.ServerCode.ClaimHeld), message: "held", .. })
+  assert !next_wait_retries(pb.fail(pb.ErrorKind.Auth, "no token"))
+  assert !next_wait_retries(pb.fail(pb.ErrorKind.Network, "down"))
+  assert !next_wait_retries(pb.failed("claiming needs a member token"))
+  assert !next_wait_retries(flags.usage_error("no label named 'nope'"))
+  let page = issue_next_page()
+  assert page.contains("--wait DURATION")
+  assert page.contains("Exit 5 after DURATION with nothing.")
 }
 
 /// --assignee '' is none (three 1.0 fleet agents typed it).
