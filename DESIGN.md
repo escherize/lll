@@ -652,9 +652,12 @@ ink type, and the product's near-black ground below it.
   no new hues.
 - **Scrollbar** uses **Landing Scrollbar** on the ground color.
 
-**The Two Grounds Rule.** Orange is a ground only in the band. Below the
-band, the Ember Budget applies as it does in the product: orange marks focus,
-the playback cursor, the card that just moved, and a docs link on hover. Data
+**The Two Grounds Rule.** Orange is a ground only in the band and in the
+closing band that echoes it above the footer. Between them, the Ember Budget
+applies as it does in the product: orange marks focus, the playback cursor,
+the card that just moved, a docs link on hover, and the retrieved finding in
+the handoff (its slug, the wash behind the returned line and the dot that
+carries it across). Data
 below the band, such as the exit codes in the 1.0 table, stays in the gray
 text voices.
 
@@ -686,24 +689,33 @@ typography roles.
 
 - Container 1120px with 28px gutters (20px under 560px); sections open with
   136px of top space (104px under 900px).
-- **The band and the board straddle.** The band carries 170px of bottom
-  padding and the board screenshot pulls up 164px into it, so the real board
-  raster sits across the band's lower edge (120px / -96px under 900px). The
-  frame widens to 1240px, past the text column.
-- **One starter path.** A command block, max 720px, leads with installation
-  and `lll new`, followed by the keep-running instruction, an existing-board
-  link and the next agent step. Hosting choices live in the setup guide.
-- **Retained-knowledge handoff.** A three-step ordered sequence follows the
-  board screenshot: investigate, record against a path, retrieve before editing.
-  A shared hairline and light vertical dividers connect the desktop steps;
-  below 700px they stack with horizontal separators. No card containers.
+- **The band and the board straddle.** The board screenshot is the first
+  thing after the header. Its figure paints orange behind its top 168px (96px
+  under 900px), so the real board raster sits across the band's lower edge and
+  shows in the first screen. The frame widens to 1240px, past the text column.
+- **One starter path.** The hero is a two-column grid under the lede: the
+  command block with the keep-running instruction and the next agent step on
+  the left, and the download, data-location and compatibility notes on the
+  right. It stacks under 900px. Hosting choices live in the setup guide.
+- **Retained-knowledge handoff.** Two terminal panels side by side (1.35fr,
+  a 72px gap, 1fr): one session records a finding, the next retrieves it. A
+  hairline crosses the gap. The finding's slug is orange in both panels and
+  the returned line sits on an Ember Dim wash. Under 900px the panels stack
+  and the hairline turns vertical.
+- **Outcome tally.** Beside the proof headline, a 20 by 10 grid of squares in
+  the done hue, with the misses hollow and last. It states the headline's own
+  count and carries no other data.
+- **Closing band.** An orange band above the footer holds the start link in
+  the door-command type role with a drawn arrow, and the guides link in
+  Landing Ink Voice.
 - **Native disclosures.** Historical fleet charts/ledger and the exit-code
   table and secondary documentation references are closed by default, with a visible summary and their existing
   section anchors. They remain usable with keyboard navigation and without JS.
 - **Harness row.** Five chips in a five-column grid, each with its machine
-  name below, wired into the board by an SVG of curved ink strokes (1.25px,
-  0.55 opacity, non-scaling) that converge on three arrow tips. The wires are
-  hidden under 900px; the chips go to three columns, then two.
+  name below, wired into the board by a straight ink drop line (1.25px, 0.55
+  opacity, 46px) that ends on the frame's top edge. An ink dot travels down
+  each line on a 3s loop, staggered 0.55s per chip. The wires are hidden under
+  900px; the chips go to three columns, then two.
 - Playback is a 0.9fr / 1.1fr grid (terminal, board); the proof ledger is a
   table beside a 300px sticky aside. Both stack under 900px.
 - Breakpoints: 900px and 560px.
@@ -751,6 +763,13 @@ also adds **12px** (landing-frame) for the board screenshot frame alone.
   the run ends. Under `prefers-reduced-motion` the whole script renders at once
   in its final state, with no typing and no movement; without JavaScript a
   `<noscript>` transcript stands in.
+- **Reveal once.** The handoff and the outcome tally each play one time, when
+  55% of the element is in view. In the handoff the orange dot crosses the
+  gap over 0.9s, then the returned line takes its wash. The tally wipes in
+  left to right in 20 steps over 1.5s. Both use
+  `cubic-bezier(0.16, 1, 0.3, 1)` except the stepped wipe. Without JavaScript
+  or under `prefers-reduced-motion` both show their final state. No other
+  section animates on entry.
 - **Verification hierarchy.** The landing leads with the documented research
   scale and concise unboxed origin, retry and upgrade checks. Small release
   cohorts live on the evidence page, with dates, source and retained misses.

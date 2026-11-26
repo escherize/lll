@@ -63,7 +63,7 @@
   .skip:focus { left: 16px; top: 12px; z-index: 10; background: var(--ink); color: var(--accent); padding: 8px 12px; border-radius: 6px; }
 
   /* ---------- the orange band ---------- */
-  .band { background: var(--accent); color: var(--ink); padding-bottom: 36px; }
+  .band { background: var(--accent); color: var(--ink); }
   .top { display: flex; align-items: center; justify-content: space-between; gap: 20px;
          padding-block: 8px; border-bottom: 1px solid var(--ink-line); }
   .mark { min-height: 44px; display: flex; align-items: center; gap: 9px; text-decoration: none; }
@@ -85,7 +85,10 @@
           max-width: 46ch; }
   .lede strong { color: var(--ink); font-weight: 650; }
 
-  .start-path { max-width: 720px; margin-top: 26px; }
+  .hero-grid { margin-top: 26px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+               gap: 16px 56px; align-items: start; }
+  .start-facts .start-note:first-child { margin-top: 2px; }
+  .start-path { min-width: 0; }
   .start-path pre { margin: 0; padding: 16px 20px; background: var(--ink); color: #f3e3d3;
     border-radius: 8px; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere;
     box-shadow: 0 12px 28px -14px rgba(26,15,6,0.55); }
@@ -94,18 +97,29 @@
   .start-note a { font-weight: 600; }
   .start-path .next-step { display: inline-flex; align-items: center; min-height: 44px; margin-top: 6px; font-weight: 650; }
 
-  .agents { margin-top: 20px; position: relative; }
+  .agents { margin-top: 22px; }
   .agents ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-  .agents li { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .agents li { display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; padding-bottom: 58px; }
+  /* Each harness is wired into the board below: an ink drop line, and a
+     signal that travels down it. */
+  .agents li::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 1.25px; height: 46px;
+                      margin-left: -0.6px; background: var(--ink); opacity: 0.55; }
+  .agents li::before { content: ""; position: absolute; left: 50%; bottom: 40px; width: 7px; height: 7px;
+                       margin-left: -3.5px; border-radius: 50%; background: var(--ink); z-index: 1;
+                       animation: drop 3s var(--ease) infinite; animation-delay: calc(var(--i) * 0.55s); }
+  @keyframes drop { 0% { transform: translateY(0); opacity: 0; } 12% { opacity: 1; }
+                    60% { transform: translateY(40px); opacity: 1; } 78%, 100% { transform: translateY(40px); opacity: 0; } }
   .chip { display: inline-flex; align-items: center; gap: 8px; background: var(--ink); color: #f3e3d3;
           border-radius: 999px; padding: 8px 15px 8px 12px; font-size: 15px; font-weight: 600; white-space: nowrap; }
   .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--h); }
   .agents small { font: 500 12.5px/1 var(--mono); color: var(--ink-2); }
 
-  .shot { margin: 64px auto 0; max-width: 1240px; padding: 0 20px; }
+  /* The band and the board straddle: orange runs on behind the top of the frame. */
+  .shot { margin: 0; padding: 0 20px 0; background: linear-gradient(var(--accent) 0 168px, transparent 168px); }
+  .shot .frame, .shot figcaption { max-width: 1240px; margin-inline: auto; }
   .shot .frame { border-radius: 12px; border: 1px solid var(--line-2); overflow: hidden; background: var(--bg-rail);
                  box-shadow: 0 40px 80px -30px rgba(0,0,0,0.7), 0 2px 6px rgba(0,0,0,0.35); }
-  .shot figcaption { margin: 14px 4px 0; font-size: 13.5px; color: var(--text-3); text-align: center; }
+  .shot figcaption { margin-top: 14px; font-size: 13.5px; color: var(--text-3); text-align: center; }
 
   /* ---------- sections ---------- */
   section.s { padding-top: 136px; }
@@ -205,7 +219,7 @@
   .pair .dot { margin-right: 3px; }
 
   /* ---------- 1.0 ---------- */
-  .contract { margin-top: 40px; max-width: 520px; }
+  .contract { min-width: 0; }
   table.codes { width: 100%; border-collapse: collapse; background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; }
   .codes td { padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
   .codes tr:last-child td { border-bottom: 0; }
@@ -213,7 +227,12 @@
   .codes td:last-child { color: var(--text-2); }
 
   /* ---------- start ---------- */
-  .start { margin-top: 36px; max-width: 720px; }
+  .start { margin-top: 36px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px 48px; align-items: start; }
+  .start .block pre { font-size: 14px; padding: 20px; }
+  .start .block > p { padding: 4px 20px 10px; font-size: 13px; color: var(--text-3); }
+  .start .dl { padding: 0 20px 20px; }
+  .start-prose p { margin: 0 0 16px; color: var(--text-2); max-width: 58ch; }
+  .start-prose p:last-child { margin-bottom: 0; }
   .block { background: var(--bg-panel); border: 1px solid var(--line-2); border-radius: 10px; min-width: 0; }
   .block > p { margin: 0; padding: 0 16px 16px; color: var(--text-2); max-width: 65ch; }
   .block h3 { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--text-2); }
@@ -234,16 +253,67 @@
   .docs b::after { content: " \2192"; color: var(--text-3); font-weight: 500; }
   .docs span { display: block; margin-top: 5px; font-size: 14px; color: var(--text-2); max-width: 32ch; }
 
-  footer { margin-top: 136px; border-top: 1px solid var(--line); }
+  footer { margin-top: 0; }
   footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding-block: 28px 40px;
                  font-size: 13.5px; color: var(--text-3); }
   footer a { color: var(--text-2); }
+
+  /* ---------- handoff: one session writes, the next one reads ---------- */
+  .handoff { margin-top: 40px; display: grid; grid-template-columns: minmax(0, 1.35fr) 72px minmax(0, 1fr); align-items: center; }
+  .handoff .block pre { font-size: 13px; padding: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .slug { color: var(--accent); font-weight: inherit; }
+  .hit { display: block; margin: 6px -18px -6px; padding: 8px 18px; background: var(--accent-dim); color: var(--text); font-weight: 400; }
+  .carry { position: relative; align-self: stretch; }
+  .carry::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); }
+  .carry i { position: absolute; left: 0; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%;
+             background: var(--accent); transform: translateX(72px); }
+  .handoff.anim .carry i { transform: translateX(0); opacity: 0; }
+  .handoff.anim .hit { background: transparent; }
+  .handoff.anim .slug-b { color: inherit; }
+  .handoff.anim.seen .carry i { transform: translateX(72px); opacity: 1;
+                                transition: transform 0.9s var(--ease) 0.25s, opacity 0.2s linear 0.25s; }
+  .handoff.anim.seen .hit { background: var(--accent-dim); transition: background 0.7s var(--ease) 1.05s; }
+  .handoff.anim.seen .slug-b { color: var(--accent); transition: color 0.5s var(--ease) 1.05s; }
+
+  /* ---------- tally: 200 outcomes, 196 right ---------- */
+  .proof-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 28px 64px; align-items: end; }
+  .tally { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 5px; padding-bottom: 6px; }
+  .tally i { display: block; aspect-ratio: 1; border-radius: 1px; background: var(--st-done); }
+  .tally i.m { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+  .tally.anim { clip-path: inset(0 100% 0 0); }
+  .tally.anim.seen { clip-path: inset(0 0 0 0); transition: clip-path 1.5s steps(20, end) 0.15s; }
+
+  .contract-grid { margin-top: 28px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px 48px; align-items: start; }
+  .contract-grid .memory-note { margin-top: 0; margin-bottom: 16px; }
+
+  /* ---------- the closing band ---------- */
+  .closing { margin-top: 136px; background: var(--accent); color: var(--ink); padding: 76px 0 80px; }
+  .closing .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 40px; }
+  .closing ::selection { background: var(--ink); color: var(--accent); }
+  .closing :focus-visible { outline-color: var(--ink); }
+  .door { display: inline-flex; align-items: center; gap: 0.32em; min-height: 44px; text-decoration: none;
+          font-size: clamp(34px, 4.2vw, 54px); font-weight: 800; line-height: 1; letter-spacing: -0.035em; }
+  .door svg { width: 0.72em; height: 0.72em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.6;
+              stroke-linecap: round; stroke-linejoin: round; transition: transform 0.3s var(--ease); }
+  .door:hover svg { transform: translateX(0.18em); }
+  .door-2 { display: inline-flex; align-items: center; min-height: 44px; font-size: 17px; font-weight: 650; color: var(--ink-2); }
+  .door-2:hover { color: var(--ink); }
 
   /* ---------- responsive ---------- */
   @media (max-width: 900px) {
 
     .agents ul { grid-template-columns: repeat(3, 1fr); row-gap: 16px; }
-    .band { padding-bottom: 32px; }
+    .agents { padding-bottom: 36px; }
+    .agents li { padding-bottom: 0; }
+    .agents li::before, .agents li::after { display: none; }
+    .shot { background: linear-gradient(var(--accent) 0 96px, transparent 96px); }
+    .hero-grid, .start, .proof-head, .contract-grid { grid-template-columns: 1fr; }
+    .handoff { grid-template-columns: 1fr; }
+    .carry { height: 36px; }
+    .carry::before { left: 50%; right: auto; top: 0; bottom: 0; width: 1px; height: auto; }
+    .carry i { display: none; }
+    .tally { max-width: 440px; }
+    .closing { margin-top: 104px; padding: 56px 0 60px; }
     .play, .ledger-wrap, .proof-figs { grid-template-columns: 1fr; }
     .aside { position: static; }
     .docs { grid-template-columns: 1fr 1fr; }
@@ -277,9 +347,6 @@
   .proof-checks h3 { margin: 0; font-size: 18px; line-height: 1.35; }
   .proof-checks p { margin: 10px 0 0; color: var(--text-2); }
   @media(max-width: 700px) { .proof-checks { grid-template-columns: 1fr; gap: 24px; } }
-  .closing { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding-top: 72px; }
-  .start-cta { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 18px; border-radius: 6px; background: var(--accent); color: var(--ink); font-weight: 650; text-decoration: none; }
-  .start-cta:hover { background: var(--accent-hover); }
 </style>
 </head>
 <body>
@@ -297,45 +364,62 @@
     <h1>Your next agent shouldn’t start from scratch.</h1>
     <p class="lede">Keep work, decisions and discoveries on one shared board. <strong>Your agents use the CLI. You follow along in a browser.</strong></p>
 
+    <div class="hero-grid">
     <div class="start-path" id="start">
       <!-- The document check executes the lll startup; installation is shown for the reader. -->
       <div class="term"><pre aria-label="Start a board in your project directory"><span class="p">$ </span>brew install escherize/lll/lll
 <span class="p">$ </span><span class="cmd">lll new "My project"</span></pre></div>
       <p class="start-note">Run in your project folder and open the sign-in link. The server runs on your machine. Ctrl-C stops it. Run the same command to reopen your board.</p>
-      <p class="start-note"><a href="https://github.com/escherize/lll/releases/latest">Download binaries for macOS or Linux</a> · <a href="setup.html#join-an-existing-board">Already invited?</a></p>
-      <p class="start-note">Board data lives under <code>~/.config/lll/boards/</code> by default. Each repo’s <code>.lll.toml</code> points to its board. Use distinct team keys for separate clients, or <a href="ci-deployment.html">host a shared server</a>. lll is free and MIT licensed.</p>
       <a class="next-step" href="#t-start">Then, bring your agent</a>
     </div>
-
-    <p class="start-note">Any agent with shell access can run the CLI, including Cursor and GitHub Copilot agent mode. Releases include macOS and Linux binaries. Windows users need a Linux environment such as WSL.</p>
+    <div class="start-facts">
+      <p class="start-note"><a href="https://github.com/escherize/lll/releases/latest">Download binaries for macOS or Linux</a> · <a href="setup.html#join-an-existing-board">Already invited?</a></p>
+      <p class="start-note">Board data lives under <code>~/.config/lll/boards/</code> by default. Each repo’s <code>.lll.toml</code> points to its board. Use distinct team keys for separate clients, or <a href="ci-deployment.html">host a shared server</a>. lll is free and MIT licensed.</p>
+      <p class="start-note">Any agent with shell access can run the CLI, including Cursor and GitHub Copilot agent mode. Releases include macOS and Linux binaries. Windows users need a Linux environment such as WSL.</p>
+    </div>
+    </div>
     <div class="agents" aria-label="Coding-agent and shell clients">
       <ul>
-        <li><span class="chip" style="--h: var(--h-claude)"><i></i>Claude Code</span><small>laptop</small></li>
-        <li><span class="chip" style="--h: var(--h-codex)"><i></i>Codex</span><small>ci-runner</small></li>
-        <li><span class="chip" style="--h: var(--h-pi)"><i></i>pi</span><small>homelab</small></li>
-        <li><span class="chip" style="--h: var(--h-opencode)"><i></i>opencode</span><small>desk</small></li>
-        <li><span class="chip" style="--h: var(--h-ci)"><i></i>any shell</span><small>CI</small></li>
+        <li style="--i: 0"><span class="chip" style="--h: var(--h-claude)"><i></i>Claude Code</span><small>laptop</small></li>
+        <li style="--i: 1"><span class="chip" style="--h: var(--h-codex)"><i></i>Codex</span><small>ci-runner</small></li>
+        <li style="--i: 2"><span class="chip" style="--h: var(--h-pi)"><i></i>pi</span><small>homelab</small></li>
+        <li style="--i: 3"><span class="chip" style="--h: var(--h-opencode)"><i></i>opencode</span><small>desk</small></li>
+        <li style="--i: 4"><span class="chip" style="--h: var(--h-ci)"><i></i>any shell</span><small>CI</small></li>
       </ul>
-
     </div>
   </div>
 </header>
 
 <main id="main">
+  <figure class="shot">
+    <div class="frame">
+      <picture>
+        <source media="(max-width: 560px)" srcset="board-claims.webp" width="920" height="1090">
+        <img src="board-agents.webp" width="3200" height="1720" alt="A synthetic lll board for team ENG (Platform), with Docs, Ops and Web board teams in the sidebar. In progress holds issues claimed by bot-codex, bot-pi and bot-claude; In review holds issues claimed by bot-opencode, bot-claude and bot-pi; Done holds the long tail.">
+      </picture>
+    </div>
+    <figcaption>A synthetic board on lll 1.0. Each claim belongs to an agent's bot: one per harness, each with its own token.</figcaption>
+  </figure>
+
   <section class="s wrap" aria-labelledby="t-memory">
     <h2 class="t" id="t-memory">A lesson survives the session.</h2>
     <p class="intro prose">Search what earlier sessions wrote, or look up what they learned about the files you’re about to change.</p>
     <p class="memory-note">Try <code>lll search "temporary directory"</code> to find matching passages in issues, comments and docs. BM25 gives rarer words more weight. lll also favors matches in titles and boosts the exact phrase. If you know the path, <code>lll finding near scripts</code> retrieves the lessons filed against it.</p>
-    <div class="block">
-      <h3>One session records the cause of a flaky test</h3>
-      <div class="term"><pre><span class="p">$ </span><span class="cmd">lll finding create shared-temp-dir \
+    <div class="handoff" data-reveal>
+      <div class="block">
+        <h3>One session records the cause of a flaky test</h3>
+        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll finding create <b class="slug">shared-temp-dir</b> \
   -t 'Give each test worker its own temporary directory' \
   --paths scripts \
   -b 'Parallel workers sharing a directory can overwrite each other’s fixtures.'</span>
-Created doc shared-temp-dir</pre></div>
-      <h3>The next session checks the path</h3>
-      <div class="term"><pre><span class="p">$ </span><span class="cmd">lll finding near scripts</span>
-shared-temp-dir    -    Give each test worker its own temporary directory [confirmed]</pre></div>
+Created doc <b class="slug">shared-temp-dir</b></pre></div>
+      </div>
+      <div class="carry" aria-hidden="true"><i></i></div>
+      <div class="block">
+        <h3>The next session checks the path</h3>
+        <div class="term"><pre><span class="p">$ </span><span class="cmd">lll finding near scripts</span>
+<b class="hit"><b class="slug slug-b">shared-temp-dir</b>    -    Give each test worker its own temporary directory [confirmed]</b></pre></div>
+      </div>
     </div>
     <p class="memory-note">Output from a local demo board. A standing instruction in <code>AGENTS.md</code> tells each session to look up findings before editing. For choices that span files, record a decision with its rationale and retrieve it with <code>lll doc view SLUG</code>.</p>
   </section>
@@ -353,8 +437,6 @@ shared-temp-dir    -    Give each test worker its own temporary directory [confi
       <div class="block">
         <div class="term"><pre><span class="p">$ </span><span class="cmd">lll issue create -t "Make sign-in errors clearer"</span>
 <span class="p">$ </span><span class="cmd">lll bot create bot-myproject</span></pre></div>
-        <p>Paste the private setup prompt into your agent. A bot is its board identity. Its token is a secret credential you can rotate. The prompt supplies the connection settings and points to the workflow. Give future sessions access to those credentials through their environment. Keep secrets out of the repo.</p>
-        <p>Put the workflow in <code>AGENTS.md</code> so each session knows to check findings, claim a task and record its evidence. Read the bundled workflow with <code>lll skill get software-factory</code>, or browse it with <code>lll skill list</code>.</p>
         <p>Direct binary downloads</p>
         <div class="dl" aria-label="Direct downloads">
           <a href="https://github.com/escherize/lll/releases/latest/download/lll-darwin-arm64" title="lll-darwin-arm64">macOS (Apple silicon)</a>
@@ -362,18 +444,12 @@ shared-temp-dir    -    Give each test worker its own temporary directory [confi
           <a href="https://github.com/escherize/lll/releases/latest/download/lll-linux-arm64" title="lll-linux-arm64">Linux (ARM64)</a>
         </div>
       </div>
+      <div class="start-prose">
+        <p>Paste the private setup prompt into your agent. A bot is its board identity. Its token is a secret credential you can rotate. The prompt supplies the connection settings and points to the workflow. Give future sessions access to those credentials through their environment. Keep secrets out of the repo.</p>
+        <p>Put the workflow in <code>AGENTS.md</code> so each session knows to check findings, claim a task and record its evidence. Read the bundled workflow with <code>lll skill get software-factory</code>, or browse it with <code>lll skill list</code>.</p>
+      </div>
     </div>
   </section>
-
-  <figure class="shot">
-    <div class="frame">
-      <picture>
-        <source media="(max-width: 560px)" srcset="board-claims.webp" width="920" height="1090">
-        <img src="board-agents.webp" width="3200" height="1720" alt="A synthetic lll board for team ENG (Platform), with Docs, Ops and Web board teams in the sidebar. In progress holds issues claimed by bot-codex, bot-pi and bot-claude; In review holds issues claimed by bot-opencode, bot-claude and bot-pi; Done holds the long tail.">
-      </picture>
-    </div>
-    <figcaption>A synthetic board on lll 1.0. Each claim belongs to an agent's bot: one per harness, each with its own token.</figcaption>
-  </figure>
 
   <section class="s wrap" aria-labelledby="t-play">
     <h2 class="t" id="t-play">Coordinate work with claims.</h2>
@@ -410,8 +486,13 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   </section>
 
   <section class="s wrap" aria-labelledby="t-proof">
-    <h2 class="t" id="t-proof">Fresh agents got 196 of 200 outcomes right.</h2>
-    <p class="intro prose">In a recorded replay, fresh workers used the CLI to carry out assigned tasks. The checks scored the resulting board state. The replay measured what agents could do when instructed to use lll.</p>
+    <div class="proof-head">
+      <div>
+        <h2 class="t" id="t-proof">Fresh agents got 196 of 200 outcomes right.</h2>
+        <p class="intro prose">In a recorded replay, fresh workers used the CLI to carry out assigned tasks. The checks scored the resulting board state. The replay measured what agents could do when instructed to use lll.</p>
+      </div>
+      <div class="tally" data-reveal role="img" aria-label="200 squares, 196 filled and 4 empty"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i></div>
+    </div>
     <ul class="proof-checks">
       <li><h3>One claim at a time</h3><p>A competing worker sees who holds the issue before starting work.</p></li>
       <li><h3>Safe retries</h3><p>A script can retry an issue or comment create with the same idempotency key after a lost response without creating a duplicate.</p></li>
@@ -491,9 +572,12 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
   <section class="s wrap" aria-labelledby="t-contract">
     <h2 class="t" id="t-contract">A CLI your scripts can rely on.</h2>
     <p class="intro prose">Covered commands, exit codes and named JSON fields stay stable through 1.x. <a href="cli-contract.html">Read the contract.</a></p>
+    <div class="contract-grid">
+    <div>
     <p class="memory-note">For a headless CI job, supply the board’s <code>LLL_URL</code>, its <code>LLL_TEAM</code> and the bot’s <code>LLL_TOKEN</code> from your CI configuration. Store the token as a secret. On a board with no issues the runner gets:</p>
     <div class="block"><pre><code>$ lll issue list --json
 {"items":[],"page":1,"perPage":200,"totalItems":0,"totalPages":0}</code></pre></div>
+    </div>
     <div class="contract">
       <table class="codes">
         <caption class="skip">Exit codes</caption>
@@ -508,6 +592,7 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
           <tr><td>130</td><td>interrupted</td></tr>
         </tbody>
       </table>
+    </div>
     </div>
       <p class="note"><code>lll help contract</code> prints the contract. <a href="upgrading-to-1.0.html">Upgrading from 0.9</a> documents that release’s script-visible changes.</p>
   </section>
@@ -535,8 +620,11 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
     </nav>
     </details>
   </section>
-  <div class="wrap closing"><a class="start-cta" href="#start">Start your board</a><a href="docs/">Read the guides</a></div>
 </main>
+
+<div class="closing">
+  <div class="wrap"><a class="door" href="#start">Start your board<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 5.5l6.5 6.5-6.5 6.5"/></svg></a><a class="door-2" href="docs/">Read the guides</a></div>
+</div>
 
 <footer>
   <div class="wrap">
@@ -546,6 +634,15 @@ Released bot-claude (agent claude-code.laptop)'s claim; assignee unchanged.</pre
 </footer>
 
 <script>
+(() => {
+  // The handoff and the tally play once, when most of each is on screen.
+  // Without this script, or with reduced motion, both show their final state.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver(es => {
+    for (const e of es) if (e.isIntersecting) { e.target.classList.add('seen'); io.unobserve(e.target); }
+  }, { threshold: 0.55 });
+  for (const el of document.querySelectorAll('[data-reveal]')) { el.classList.add('anim'); io.observe(el); }
+})();
 (() => {
   const play = document.getElementById('play');
   if (!play) return;
